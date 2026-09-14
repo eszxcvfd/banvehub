@@ -22,8 +22,9 @@ runtime, `web/` holds the frontend.
 | Health | `GET /ping`, `GET /ready` | 200 (`pong`) |
 | Statistics / OpenAPI / JS model | `/statistics`, `/api/openapi`, `/api/js_model` | served by daptin |
 
-Authorization behavior on a business table created from
-`daptin/schema/schema_products.yaml`:
+Authorization behavior, measured on a business table declared in `schema/` (the
+original observation was made on the demonstration `products` table, which the
+catalog slice retired when it took that table name):
 
 | Caller | Operation | Observed |
 |---|---|---|
@@ -35,6 +36,21 @@ Anonymous access is denied at the table gate for that table. A table declared
 without `AccessGroups` falls back to daptin's permissive default and **is**
 writable by anonymous callers — see
 `decisions/0002-business-table-authorization-pattern.md`.
+
+The catalog slice (`schema/schema_catalog.yaml`, 2026-09-14) was verified by a
+clean boot and by reading the result back out of the database: `categories`,
+`software_types`, `tags`, `products`, `product_files`, and `product_previews`
+exist with exactly the declared table-gate permissions (3, 3, 3, 3, 1, 3); the
+`belongs_to` foreign keys `products.category_id`, `products.software_id`,
+`categories.parent_id`, `product_files.product_id`, and
+`product_previews.product_id` are `NOT NULL`; and `products` ↔ `tags` uses
+daptin's generated join table `products_products_id_has_tags_tags_id` rather than
+a hand-written `product_tags`. Anonymous and signed-in non-administrator
+`POST /api/products` and `POST /api/product_files` return 403.
+
+Not yet proven: row-level visibility of a draft versus a published product. The
+publish flow that would grant guests read on a published row does not exist yet,
+so today no product row is readable by a guest at all.
 
 ## Product Contract In Force
 
@@ -63,8 +79,13 @@ writable by anonymous callers — see
 
 ## Open Questions (authority missing — do not invent)
 
-1. What product domain and entities will replace the `products` demonstration
-   table, and who may write them (administrators only, or any signed-in user)?
+1. Stated by the repository owner on 2026-09-14 in `PLAN.md`: the product is
+   KienTaoHub, a marketplace for CAD/design files, with the entities listed in
+   its §17 and the roles and write permissions in its §5 and §22. Not yet
+   implemented in this repository — the P0 scope, the financial state machine,
+   and the payment provider are still open Phase 0 items, tracked in
+   `docs/plans/active/kientaohub-phase-0.md`; the architecture that will build it
+   is `docs/decisions/0005-kientaohub-builds-on-daptin.md`.
 2. Resolved 2026-09-14: the console calls the API through the dev proxy and holds
    the JWT in `localStorage` for now — see
    `decisions/0004-web-session-and-api-access.md` for the limits before any
@@ -76,6 +97,6 @@ writable by anonymous callers — see
 ## Evidence
 
 - `docs/RUNBOOK.md` (commands used for every row above)
-- `daptin/schema/schema_products.yaml`
+- `schema/schema_catalog.yaml`
 - `daptin/docker-compose.override.yml`
 - Session verification recorded in `docs/plans/completed/` if a plan was used

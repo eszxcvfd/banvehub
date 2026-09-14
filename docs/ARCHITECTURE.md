@@ -10,6 +10,15 @@ A self-hosted **daptin** application server (Go, LGPL-3.0) plus its
 PostgreSQL database, running locally through Docker Compose, as the backend for
 an operator frontend in `web/`.
 
+The product this repository serves is **KienTaoHub** (`PLAN.md`): a Vietnamese
+marketplace for CAD/design files and technical documents.
+`decisions/0005-kientaohub-builds-on-daptin.md` fixes its shape — daptin is the
+backend and API of record, a **Next.js storefront** (not built yet) owns the
+SEO-critical public surface, and the console in `web/` is the operator and admin
+surface. Money-moving tables are read-only through the generic JSON:API, with
+every mutation going through a custom action; that rule was verified in the
+money-path spike recorded in `docs/plans/active/kientaohub-phase-0.md`.
+
 Runtime topology (verified 2026-09-14):
 
 | Component | Image | Published | State |
@@ -36,6 +45,10 @@ documented in `web/README.md` and
 - `web/` — the operator frontend (Vue 3 + Vite + TypeScript). Own source tree
   with its own `package.json`, lint, and test setup; it talks to the backend only
   over HTTP.
+- `schema/` — the product's data model, as daptin schema files. Version-controlled
+  here and mounted read-only into the container by
+  `daptin/docker-compose.override.yml`; it deliberately lives outside `daptin/`,
+  which git ignores.
 
 Local patches in `daptin/` (13 files, +55/−20 lines vs upstream commit `8e2f6a9`):
 
@@ -61,7 +74,8 @@ Local-only files inside `daptin/` that upstream does not contain:
 
 ## State Ownership
 
-- **Data model and authorization** — `daptin/schema/schema_*.yaml`, loaded at
+- **Data model and authorization** — `schema/schema_*.yaml` (this repository,
+  mounted read-only into the container), loaded at
   startup through `DAPTIN_SCHEMA_FOLDER` and then persisted by daptin into
   `world.world_schema_json`. The database copy is merged with code/schema config
   on every boot, so the database is not the only config source.
@@ -78,7 +92,7 @@ Local-only files inside `daptin/` that upstream does not contain:
 | Change | Command |
 |---|---|
 | Go code in `daptin/` | `daptin/build-local-image.sh` then `docker compose up -d --wait` |
-| `daptin/schema/*.yaml` | `docker compose restart daptin` (hard restart required) |
+| `schema/*.yaml` | `docker compose restart daptin` (hard restart required) |
 | `.env` / compose override | `docker compose up -d --wait` |
 | `web/` source | `npm run dev` in `web/`; `npm run test`, `npm run type-check`, `npm run build` for proof |
 | Harness core | `scripts/bin/harness update` |
@@ -101,7 +115,7 @@ session handling are recorded in
 ## Evidence
 
 - `daptin/docker-compose.yml`, `daptin/docker-compose.override.yml`, `daptin/.env`
-- `daptin/docker-compose.override.yml` mount of `./schema` into `/var/lib/daptin/schema`
+- `daptin/docker-compose.override.yml` mounts `../schema` into `/var/lib/daptin/schema` (a mount change needs `docker compose up -d`, not `restart`)
 - `docker compose ps` (both services `healthy`, image `daptin-local:v0.13.9-patched`)
 - `docker volume ls` (`daptin_postgres-data`, `daptin_daptin-data`)
 - `daptin/server/config.go` (`LoadConfigFiles`, `DAPTIN_SCHEMA_FOLDER`)

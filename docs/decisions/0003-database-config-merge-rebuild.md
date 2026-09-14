@@ -29,7 +29,8 @@ also disable configuration that only lives in the database.
 
 Treat the database as a **merge target**, not as the source of truth:
 
-- Configuration changes belong in `daptin/schema/schema_*.yaml` (or code), then
+- Configuration changes belong in `schema/schema_*.yaml` of this repository
+  (mounted into `daptin/` by `daptin/docker-compose.override.yml`) or in code, then
   a hard restart applies them.
 - When persisted configuration has drifted from the intended configuration, the
   database is **rebuilt** (`docker compose down`,
@@ -76,7 +77,7 @@ Tradeoffs:
 
 ## Follow-Up
 
-- Capture intended configuration in `daptin/schema/` whenever it is changed
+- Capture intended configuration in `schema/` whenever it is changed
   through the UI or API.
 - Reconsider `DAPTIN_SKIP_CONFIG_FROM_DATABASE` only after testing its effect on
   runtime-created tables and permission rows.

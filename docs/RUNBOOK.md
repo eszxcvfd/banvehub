@@ -136,7 +136,7 @@ A mail-independent confirmation flag is available on the same resource
 | Schema upload (runtime) | action `upload_system_schema` / `install_integration` |
 | Config store | `GET|POST /_config/backend/<key>` e.g. `cors.allowed_origins` |
 
-Business tables are declared in `daptin/schema/schema_*.yaml` and require a hard
+Business tables are declared in `schema/schema_*.yaml` at the repository root and require a hard
 restart to take effect:
 
 ```sh
