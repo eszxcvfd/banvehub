@@ -22,7 +22,9 @@ Tables:
     # DefaultPermission 9472 (no Peek/Execute) fails the subject load with 403.
     AccessGroups:
       - Name: users
-        Permission: 16384     # GroupPeek only — balances are not group-readable
+        Permission: 16384     # GroupPeek only — balances are not group-readable.
+          # World-row group gate only (daptin syncDefaultUsergroupRelationsForObject
+          # on the world row, dbfunctions_update.go); NO row-level group effect.
     Columns:
       - Name: currency
         ColumnType: label
@@ -44,7 +46,9 @@ Tables:
     DefaultPermission: 384    # new rows: owner Peek+Read (128+256) — GET is Peek-gated; never a subject, so no Execute
     AccessGroups:
       - Name: users
-        Permission: 16384     # GroupPeek only
+        Permission: 16384     # GroupPeek only.
+          # World-row group gate only (daptin syncDefaultUsergroupRelationsForObject
+          # on the world row, dbfunctions_update.go); NO row-level group effect.
     Columns:
       - Name: type
         ColumnType: label
@@ -99,7 +103,7 @@ Actions:
     Label: Create a wallet for the signed-in user
     OnType: wallets
     InstanceOptional: true
-    Permission: 32
+    Permission: 2097152  # AuthenticatedExecute (auth.go:60 = 1<<21) — signed-in only; denies anonymous mint
     InFields:
       - Name: currency
         ColumnType: label
@@ -117,7 +121,7 @@ Actions:
     Label: Conditionally debit a wallet and append a ledger entry
     OnType: wallets
     InstanceOptional: false              # subject = the wallet row; caller sends wallets_id
-    Permission: 32
+    Permission: 2097152  # AuthenticatedExecute (auth.go:60 = 1<<21) — signed-in only; denies anonymous mint
     InFields:
       - Name: amount
         ColumnType: measurement
@@ -147,7 +151,7 @@ Actions:
     Label: Credit a wallet and append a ledger entry
     OnType: wallets
     InstanceOptional: false
-    Permission: 32
+    Permission: 2097152  # AuthenticatedExecute (auth.go:60 = 1<<21) — signed-in only; denies anonymous mint
     InFields:
       - Name: amount
         ColumnType: measurement
@@ -179,7 +183,7 @@ Actions:
     Label: Proof action - debit then force a failure
     OnType: wallets
     InstanceOptional: false
-    Permission: 32
+    Permission: 2097152  # AuthenticatedExecute (auth.go:60 = 1<<21) — signed-in only; denies anonymous mint
     InFields:
       - Name: amount
         ColumnType: measurement
