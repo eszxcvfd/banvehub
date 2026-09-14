@@ -63,7 +63,7 @@ writes nothing; malformed amounts are refused with HTTP 400; direct
 anonymous and signed-in non-administrators (the administrator case could not be
 measured — no administrator credential is available); ledger `UPDATE`/`DELETE`
 and wallet `DELETE` are refused at the database level for every role. Full
-evidence: `docs/plans/active/kientaohub-phase-0.md`.
+evidence: `docs/plans/completed/kientaohub-phase-0.md`.
 
 ## Product Contract In Force
 
@@ -94,11 +94,15 @@ evidence: `docs/plans/active/kientaohub-phase-0.md`.
 
 1. Stated by the repository owner on 2026-09-14 in `PLAN.md`: the product is
    KienTaoHub, a marketplace for CAD/design files, with the entities listed in
-   its §17 and the roles and write permissions in its §5 and §22. Not yet
-   implemented in this repository — the P0 scope, the financial state machine,
-   and the payment provider are still open Phase 0 items, tracked in
-   `docs/plans/active/kientaohub-phase-0.md`; the architecture that will build it
-   is `docs/decisions/0005-kientaohub-builds-on-daptin.md`.
+   its §17 and the roles and write permissions in its §5 and §22. Phase 0
+   closed 2026-09-14: P0 scope locked (decision 0007), financial state
+   machine approved (decision 0009), SePay selected as the P0 top-up rail —
+   paper selection only, no provider integration built (decision 0008);
+   `schema/schema_payment.yaml` declares `payment_intents`,
+   `payment_transactions`, `payment_webhook_events` under the 0006
+   extension rule. No behavior claims change: the money path, the publish
+   gap (no product row guest-readable), and the standing residuals are as
+   §Money path above.
 2. Resolved 2026-09-14: the console calls the API through the dev proxy and holds
    the JWT in `localStorage` for now — see
    `decisions/0004-web-session-and-api-access.md` for the limits before any

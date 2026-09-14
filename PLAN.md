@@ -2305,6 +2305,8 @@ system_settings
 
 # 18. API sơ bộ
 
+> Phase 0 note (2026-09-14, decisions 0005 + `docs/api-conventions.md`): the `/api/v1/...` paths below are superseded as the internal API surface — the wire contract of record is daptin's `/api/<table>` + `/action/...` + `/asset/...`; these paths become the Next.js storefront's public route contract.
+
 Public:
 
 ```text
@@ -3435,6 +3437,7 @@ storage:
 search:
   mvp: PostgreSQL FTS
   scale: Meilisearch/Typesense/OpenSearch
+  # Phase 0 note (2026-09-14, decision 0011): MVP search is daptin JSON:API filtering; the PostgreSQL FTS row is deferred to P1.
 
 async:
   type: Queue + Go workers

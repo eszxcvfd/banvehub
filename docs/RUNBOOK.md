@@ -239,7 +239,7 @@ Wallets and the ledger are written only through the `$wallet` action
 performer; the generic API refuses direct writes for every principal
 including administrators, and the ledger is append-only at the database
 level. Observed contract (proven live 2026-09-14, evidence in
-`docs/plans/active/kientaohub-phase-0.md`):
+`docs/plans/completed/kientaohub-phase-0.md`):
 
 | Call | Result |
 |---|---|

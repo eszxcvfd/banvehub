@@ -8,7 +8,7 @@ Accepted
 
 ## Context
 
-The money-path spike (recorded in `docs/plans/active/kientaohub-phase-0.md`,
+The money-path spike (recorded in `docs/plans/completed/kientaohub-phase-0.md`,
 Validation rows 1–13) measured two gaps that disqualify the schema-only path
 for money, plus one platform rule that disqualifies permission bits:
 

@@ -22,7 +22,7 @@ a distinct HTTP 409 (`insufficient_funds`), direct writes are denied for every
 principal including administrators, and the ledger is append-only at the
 database level. That write layer was implemented and proven in
 `decisions/0006-kientaohub-money-write-layer.md`, with the observed evidence in
-`docs/plans/active/kientaohub-phase-0.md` (the earlier money-path spike is the
+`docs/plans/completed/kientaohub-phase-0.md` (the earlier money-path spike is the
 same file's prior section).
 
 Runtime topology (verified 2026-09-14):

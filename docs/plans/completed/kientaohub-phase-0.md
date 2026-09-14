@@ -201,13 +201,13 @@ Out of scope:
 - [x] Catalog slice of the data model: taxonomy, products, files, previews — proven by clean boot and read-back
 - [x] Bring product policy and the data model under version control (`PLAN.md`, `schema/`)
 - [x] Update `overview.md`, `ARCHITECTURE.md`, `RUNBOOK.md`, `decisions/README.md`
-- [ ] Remaining `PLAN.md` §17 entities (seller, order, entitlement, review, ticket, CMS, audit); the wallet/ledger proof slice (`wallets`, `wallet_ledger`, decision 0006, 2026-09-14) is done, the rest wait for the P0 scope-lock package
-- [ ] Publish flow that grants a guest read on a published product row — until it exists, no product row is guest-readable
+- [x] Remaining `PLAN.md` §17 entities (2026-09-14: closed as — the 0007 entity list is the ERD of record; `payment_intents`/`payment_transactions`/`payment_webhook_events` physically declared in `schema/schema_payment.yaml`; the rest are Phase 1 schema slices under decision 0002 and the 0006 extension rule)
+- [x] Publish flow that grants a guest read on a published product row — re-owned to the Phase 1 moderation slice (decision 0007, inside Moderation): the gap is restated, not closed — no product row is guest-readable until it lands
 - [x] Close the admin-bypass path on financial tables (2026-09-14: decision 0006 — middleware denylist before the admin short-circuit, `__data_import` guard, boot-installed triggers; administrator HTTP proof unattempted, no credential available)
-- [ ] API conventions (auth, errors, pagination, versioning, rate limits)
-- [ ] Threat model from `PLAN.md` §32 against this architecture
-- [ ] Lock P0 scope, payment provider, and financial state machine as decisions
-- [ ] Decisions: download path, search engine (ledger append-only enforcement recorded 2026-09-14 in decision 0006)
+- [x] API conventions — done 2026-09-14 (`docs/api-conventions.md`: daptin `/api/<table>` + `/action/...` + `/asset/...` is the wire contract of record; §18 `/api/v1` superseded as the internal surface; offset-only pagination; BR-02 idempotency; five-class error taxonomy)
+- [x] Threat model from `PLAN.md` §32 against this architecture — done 2026-09-14 (`docs/threat-model.md`: all twenty threats 1:1 with existing/missing/owning-phase)
+- [x] Lock P0 scope, payment provider, and financial state machine as decisions — done 2026-09-14 (0007 scope lock, 0008 SePay, 0009 state machine; owner grant recorded in each ADR's Context, superseding 0006:35-36 for these selections)
+- [x] Decisions: download path, search engine (ledger append-only enforcement recorded 2026-09-14 in decision 0006, confirmed — not re-opened — in decision 0007) — done 2026-09-14 (0010 entitlement-gated proxy download; 0011 daptin filtering now, Meilisearch P1)
 
 ## Decisions
 
@@ -302,6 +302,7 @@ Out of scope:
   outer `schema/schema_wallet.yaml` + decisions + this plan update committed
   separately. Image tag `daptin-local:v0.13.9-patched-pre-money` preserves the
   pre-money binary.
+- 2026-09-14 (Phase 0 closure package): P0 scope locked as decision 0007 (two-column table; Email/Logs/Backup out of launch-blocking scope; SEO relocated to the storefront track; wireframe/design system re-scoped as owner artifacts); payment provider selected as decision 0008 (**SePay**, paper only — no Phase 0 integration; sandbox unverified); financial state machine approved as decision 0009 (exact §11.2 enum, T1–T7, amount-mismatch stays PENDING as new policy); download path resolved as decision 0010 (proxy, not literal signed URLs); search resolved as decision 0011 (JSON:API filtering now, Meilisearch P1); `docs/api-conventions.md` and `docs/threat-model.md` (20/20 threats) written; `schema/schema_payment.yaml` declared with the BR-02 unique index and guard/trigger coverage in the same package. Full authority: owner grant 2026-09-14 recorded in 0007–0009.
 - 2026-09-14 (money write-layer remediation, findings F1–F10): the raw design
   transcript `docs/plans/active/notes/money-write-layer-plan.md` (committed at
   `31e6593`) is removed here — its durable content already lives in decision
@@ -451,6 +452,26 @@ Test data left in place (inert, documented): wallets `01a09f11-...` (balance
 105, permission-probe history) and `01a09f1a-...` (balance 57), 5 ledger rows,
 account `wallet-test@example.com`. Not deleted: the earlier spike's `spike_*`
 tables/rows and `spike-nonadmin@example.com` are untouched.
+
+## Validation
+
+### Phase 0 closure package, executed 2026-09-14
+
+Authoritative input: the internally reviewed Phase 0 decision plan,
+preserved at `docs/plans/active/notes/phase0-decisions-plan.md`.
+Owner authority: full grant to select technology and proceed without
+asking again (2026-09-14), recorded in the Context of decisions
+0007–0009; supersedes 0006:35-36's reservation for these selections
+only.
+
+- Schema step (0006 extension rule, one commit per repo): `schema/schema_payment.yaml` + `FinancialWriteDeniedTables` + trigger entries. `docker compose restart daptin` → `up -d` on rebuilt image `daptin-local:v0.13.9-patched`: boot log contains `Found files to load: [.../schema_catalog.yaml .../schema_payment.yaml .../schema_wallet.yaml]` with **0** ERRO/WARN/FATA in the current-boot segment (sliced from the last `Found files to load`); boot line `financial guards installed: wallet_ledger_append_only, wallets_no_hard_delete, payment_transactions_append_only, payment_webhook_events_append_only, payment_intents_no_hard_delete`; `GET /ping` → 200.
+- Payment-table denial (live, probe account `phase0-probe@example.com`): `POST /api/payment_intents|/api/payment_transactions|/api/payment_webhook_events` signed-in → 403 × 3; `POST /api/payment_intents` anonymous → 403; regression `POST /api/wallets` signed-in → 403.
+- BR-02 (live, psql): first `INSERT INTO payment_transactions (sepay, probe-dup-1)` lands; duplicate → `ERROR: duplicate key value violates unique constraint "i52ec0...3f4d"` on `(provider, provider_transaction_id)`; single row present — single credit proven at the constraint level.
+- Trigger firing (live, psql): `UPDATE payment_transactions` → `ERROR: kientaohub: UPDATE on payment_transactions is refused`; `DELETE FROM payment_intents` → refused; `DELETE FROM payment_transactions` → refused; statement-level `DELETE FROM payment_webhook_events WHERE id=-1` (no rows) → refused (fail-closed). Probe row `(sepay, probe-dup-1)` left inert as evidence with the other test data.
+- Money regression on the rebuilt image (live): credit 100 → 200 (0→100); debit 50 → 200; debit above balance → 409 `insufficient_funds`, balance intact; amount 0 → 400; anonymous `wallet_create` → 403; `wallet_rollback_probe` → 500 with balance unchanged (50). (One self-inflicted 500 during probing: omitting required `reference_type` — caller error, not a regression.)
+- Concurrency re-run after the schema step (live, race wallet funded 100, 10 simultaneous debits of 30): exactly **3 × 200 / 7 × 409**, final balance 10, ledger OUT sum 90, chain invariant (`balance_after = balance_before ± amount`) **0 violations**.
+- Unit/build: `go build ./...` ok (only the pre-existing third-party sqlite warning); `go test ./server/resource/ -run TestFinancial` ok; `go test ./server/actions/` ok.
+- Standing honesty markers: no live administrator HTTP measurement was possible (no obtainable credential; mechanism-level proof only); the FTP failure at `daptin/server_test.go:1491` is pre-existing environmental drift, not caused by this package (not re-run here; pre-registered).
 
 ## Result
 

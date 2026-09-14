@@ -29,7 +29,7 @@ The repository owner decided on 2026-09-14 to build KienTaoHub **on** daptin
 rather than replace it. Capability research against the checked-out source
 (`daptin/server/**`, `daptin/wiki/**`, 2026-09-14) established what daptin
 already covers and what it does not; those findings are recorded in
-`docs/plans/active/kientaohub-phase-0.md` with file-and-line evidence rather than
+`docs/plans/completed/kientaohub-phase-0.md` with file-and-line evidence rather than
 repeated here.
 
 ## Decision
@@ -98,7 +98,7 @@ Tradeoffs:
   with the administrator group appended, and an administrator bypasses table
   permission by platform rule (`wiki/Permissions.md:242`,
   `server/resource/middleware_tableaccess_permission.go:88-90`). Measured on
-  2026-09-14 (`docs/plans/active/kientaohub-phase-0.md` → Validation): direct
+  2026-09-14 (`docs/plans/completed/kientaohub-phase-0.md` → Validation): direct
   `POST/PATCH/DELETE` on a money table returns 403 for anonymous and for
   signed-in non-administrators, an action rolls both writes back when one
   outcome fails, and a conditional debit held its guard — but an administrator
