@@ -64,7 +64,21 @@ you the first boot ever, not the current one.
   table fight over its permission, and a `NOT NULL` foreign key cannot be added
   to a table that already holds rows.
 - **Money-moving tables declare no Create, Update, or Delete** for any group;
-  writes go through a custom action. Actions run with the administrator group
-  appended, so table bits alone cannot stop an administrator — see
-  `docs/decisions/0005-...` and the money-path spike in
+  writes go through the `$wallet` action performer only
+  (`POST /action/wallets/wallet_create|wallet_debit|wallet_credit`). Direct
+  writes are refused for every principal including administrators by the
+  `FinancialWriteDeniedTables` denylist, and the ledger is append-only at the
+  database level (boot-installed triggers) — see
+  `docs/decisions/0006-kientaohub-money-write-layer.md` and the proof in
   `docs/plans/active/kientaohub-phase-0.md`.
+- **Never declare a business column named `reference_id`.** Daptin reserves it
+  as the system bytea row identity: standard columns win silently and the
+  declared column is dropped (measured 2026-09-14 — the ledger's business
+  correlation id is `reference_code` for this reason).
+- **Owner rows on action subjects need `Peek` and `Execute`, not just
+  Read/Update.** The subject load of an `InstanceOptional: false` action is a
+  GET gated by `CanPeek`, and `HandleActionRequest` gates the subject by
+  `CanExecute` (measured 2026-09-14: `DefaultPermission: 9472` fails the
+  subject load with 403; wallets use `13696` =
+  UserPeek+UserRead+UserUpdate+UserExecute+UserRefer, ledger uses `384` =
+  UserPeek+UserRead).

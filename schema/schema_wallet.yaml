@@ -1,0 +1,205 @@
+# KienTaoHub money-path proof slice — wallets + wallet_ledger (decisions a/b/c).
+# Authority: PLAN.md §11.1, §17, FR-11, BR-01, BR-03, §33, §42.2/3/6/7;
+#   docs/decisions/0002 (AccessGroups + non-zero Permission; never 0);
+#   docs/decisions/0005 (money tables read-only via generic API; writes via $wallet);
+#   docs/decisions/0006 (this decision).
+# Bitmask (schema/README.md, daptin/server/auth/auth.go:36-61):
+#   Peek=1 Read=2 Create=4 Update=8 Delete=16 Execute=32 Refer=64.
+# Row policy is PROOF scope: owner-scoped rows (no world bits) so an anonymous
+#   GET list exposes nothing (spike row 6 semantics). Owner/entitlement shaping
+#   of rows is product policy deferred to the P0 scope-lock package — this file
+#   is marked removable at that decision.
+Tables:
+  - TableName: wallets
+    IsTopLevel: true
+    TableDescription: "Wallet (PLAN.md FR-11). Writes only via the $wallet performer."
+    Permission: 33            # table gate: Guest Peek + Execute (actions need Execute; handle_action.go:296-302)
+    DefaultPermission: 13696 # new rows: owner Peek+Read+Update+Execute+Refer (128+256+1024+4096+8192) — no world bits.
+    # Peek AND Execute are load-bearing, not just Read/Update (measured
+    # 2026-09-14): the subject load of an InstanceOptional:false action is a
+    # GET gated by CanPeek (owner needs UserPeek), and HandleActionRequest
+    # gates the subject by CanExecute (owner needs UserExecute).
+    # DefaultPermission 9472 (no Peek/Execute) fails the subject load with 403.
+    AccessGroups:
+      - Name: users
+        Permission: 16384     # GroupPeek only — balances are not group-readable
+    Columns:
+      - Name: currency
+        ColumnType: label
+        DataType: varchar(10)
+        IsNullable: false
+      - Name: balance
+        ColumnType: measurement
+        DataType: bigint      # integer money (PLAN.md §33, §42.2); bigint cannot overflow int32
+        IsNullable: false
+      - Name: status
+        ColumnType: label
+        DataType: varchar(50) # set by the performer; never a quoted-string DefaultValue (schema/README.md rule)
+    IsAuditEnabled: true      # secondary evidence only (before-image on UPDATE); not enforcement
+
+  - TableName: wallet_ledger
+    IsTopLevel: true
+    TableDescription: "Append-only ledger (PLAN.md §11.1, BR-03). INSERT via $wallet only."
+    Permission: 1             # Guest Peek only at the table gate
+    DefaultPermission: 384    # new rows: owner Peek+Read (128+256) — GET is Peek-gated; never a subject, so no Execute
+    AccessGroups:
+      - Name: users
+        Permission: 16384     # GroupPeek only
+    Columns:
+      - Name: type
+        ColumnType: label
+        DataType: varchar(50)
+        IsNullable: false
+      - Name: amount
+        ColumnType: measurement
+        DataType: bigint
+        IsNullable: false
+      - Name: direction
+        ColumnType: label
+        DataType: varchar(10)   # IN | OUT (PLAN.md §11.1)
+        IsNullable: false
+      - Name: reference_type
+        ColumnType: label
+        DataType: varchar(100)
+        IsNullable: true     # BR-02 idempotency hook; constrained by the next package, not here
+      - Name: reference_code
+        # Named reference_code (not reference_id): daptin reserves reference_id
+        # as the system bytea row identity and silently drops a declared column
+        # with that name, so a business correlation id cannot use it. The action
+        # InField keeps the name reference_id; the performer maps it here.
+        ColumnType: label
+        DataType: varchar(100)
+        IsNullable: true
+      - Name: reason
+        ColumnType: label
+        DataType: varchar(500)
+        IsNullable: true
+      - Name: balance_before
+        ColumnType: measurement
+        DataType: bigint
+        IsNullable: false
+      - Name: balance_after
+        ColumnType: measurement
+        DataType: bigint
+        IsNullable: false
+      - Name: entry_at
+        ColumnType: datetime
+        DataType: timestamp     # UTC (PLAN.md §33)
+
+Relations:
+  - Subject: wallet_ledger
+    Object: wallets
+    Relation: belongs_to
+    ObjectName: wallet_id     # the FK is named by ObjectName (schema/README.md)
+# No cascade: the ledger must not die with a wallet (PLAN.md §42.7); the FK
+# defaults to NO ACTION and the trigger below makes deletion impossible anyway.
+
+Actions:
+  - Name: wallet_create
+    Label: Create a wallet for the signed-in user
+    OnType: wallets
+    InstanceOptional: true
+    Permission: 32
+    InFields:
+      - Name: currency
+        ColumnType: label
+        DataType: varchar(10)
+        IsNullable: false
+    OutFields:
+      - Type: $wallet
+        Method: EXECUTE
+        Reference: wallet_create
+        Attributes:
+          operation: create_wallet
+          currency: "~currency"          # whole-attribute ~ substitution against validated InFields
+
+  - Name: wallet_debit
+    Label: Conditionally debit a wallet and append a ledger entry
+    OnType: wallets
+    InstanceOptional: false              # subject = the wallet row; caller sends wallets_id
+    Permission: 32
+    InFields:
+      - Name: amount
+        ColumnType: measurement
+        DataType: bigint
+        IsNullable: false
+      - Name: reference_type
+        ColumnType: label
+        DataType: varchar(100)
+      - Name: reference_id
+        ColumnType: label
+        DataType: varchar(100)
+    Validations:
+      - ColumnName: amount
+        Tags: "required,gt=0"            # server-side reject before any SQL
+    OutFields:
+      - Type: $wallet
+        Method: EXECUTE
+        Reference: debit
+        Attributes:
+          operation: debit
+          amount: "~amount"
+          wallet_reference_id: "$.reference_id"   # $. resolves against the SUBJECT (the wallet row)
+          reference_type: "~reference_type"
+          reference_id: "~reference_id"
+
+  - Name: wallet_credit                  # symmetric to wallet_debit (operation: credit)
+    Label: Credit a wallet and append a ledger entry
+    OnType: wallets
+    InstanceOptional: false
+    Permission: 32
+    InFields:
+      - Name: amount
+        ColumnType: measurement
+        DataType: bigint
+        IsNullable: false
+      - Name: reference_type
+        ColumnType: label
+        DataType: varchar(100)
+      - Name: reference_id
+        ColumnType: label
+        DataType: varchar(100)
+    Validations:
+      - ColumnName: amount
+        Tags: "required,gt=0"
+    OutFields:
+      - Type: $wallet
+        Method: EXECUTE
+        Reference: credit
+        Attributes:
+          operation: credit
+          amount: "~amount"
+          wallet_reference_id: "$.reference_id"
+          reference_type: "~reference_type"
+          reference_id: "~reference_id"
+
+  # PROOF-ONLY, REMOVABLE after validation §4 step 5: forces a mid-action failure
+  # after a successful debit, proving the whole action transaction rolls back.
+  - Name: wallet_rollback_probe
+    Label: Proof action - debit then force a failure
+    OnType: wallets
+    InstanceOptional: false
+    Permission: 32
+    InFields:
+      - Name: amount
+        ColumnType: measurement
+        DataType: bigint
+        IsNullable: false
+    Validations:
+      - ColumnName: amount
+        Tags: "required,gt=0"
+    OutFields:
+      - Type: $wallet
+        Method: EXECUTE
+        Reference: debit
+        Attributes:
+          operation: debit
+          amount: "~amount"
+          wallet_reference_id: "$.reference_id"
+      - Type: $transaction
+        Method: EXECUTE
+        Attributes:
+          action: query
+          typeName: probe
+          query: "SELECT 1 FROM wallet_probe_table_that_does_not_exist"
+          arguments: []

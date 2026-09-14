@@ -234,6 +234,31 @@ curl -sS -o /dev/null -w 'anonymous write %{http_code}\n' -X POST $BASE/api/prod
 Full end-to-end evidence for the authorization and cascade rows: see
 `decisions/0001-...` and `0002-...`.
 
+### Money-path write layer (decision 0006)
+
+Wallets and the ledger are written only through the `$wallet` action
+performer; the generic API refuses direct writes for every principal
+including administrators, and the ledger is append-only at the database
+level. Observed contract (proven live 2026-09-14, evidence in
+`docs/plans/active/kientaohub-phase-0.md`):
+
+| Call | Result |
+|---|---|
+| `POST /action/wallets/wallet_create` `{"currency":"VND"}` | 200 `wallet.created`, balance 0, owner-scoped row (`permission` 13696) |
+| `POST /action/wallets/wallet_credit\|wallet_debit` with `wallets_id`, positive `amount` | 200 `wallet.mutation` with `balance_before`/`balance_after` and a ledger row |
+| debit above the balance | HTTP 409 `insufficient_funds`, nothing written |
+| malformed `amount` (e.g. `50' OR '1'='1`) | HTTP 400, nothing written; all values are bound parameters |
+| `POST`/`PATCH`/`DELETE /api/wallets\|/api/wallet_ledger` (anonymous or signed-in) | 403 from `TableAccessPermissionChecker` |
+| `UPDATE`/`DELETE` on `wallet_ledger`, `DELETE` on `wallets` in psql | `ERROR: kientaohub: ... is refused (append-only, docs/decisions/0006)` |
+
+Verify the guards after any rebuild: triggers
+`wallet_ledger_append_only` / `wallets_no_hard_delete` in
+`SELECT tgname FROM pg_trigger ...`, and a clean boot (zero `ERRO`/`WARN`
+after the last `Found files to load`, same slicing as above). Rolling the Go
+change back without git surgery: set
+`DAPTIN_IMAGE=daptin-local:v0.13.9-patched-pre-money` in `daptin/.env` and
+`docker compose up -d --wait`.
+
 ## Unknowns
 
 - Where the administrator password is stored (outside this repository, by

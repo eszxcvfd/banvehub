@@ -16,8 +16,14 @@ marketplace for CAD/design files and technical documents.
 backend and API of record, a **Next.js storefront** (not built yet) owns the
 SEO-critical public surface, and the console in `web/` is the operator and admin
 surface. Money-moving tables are read-only through the generic JSON:API, with
-every mutation going through a custom action; that rule was verified in the
-money-path spike recorded in `docs/plans/active/kientaohub-phase-0.md`.
+every mutation going through the `$wallet` action performer
+(`POST /action/wallets/wallet_create|wallet_debit|wallet_credit`); refusal is
+a distinct HTTP 409 (`insufficient_funds`), direct writes are denied for every
+principal including administrators, and the ledger is append-only at the
+database level. That write layer was implemented and proven in
+`decisions/0006-kientaohub-money-write-layer.md`, with the observed evidence in
+`docs/plans/active/kientaohub-phase-0.md` (the earlier money-path spike is the
+same file's prior section).
 
 Runtime topology (verified 2026-09-14):
 
@@ -50,7 +56,7 @@ documented in `web/README.md` and
   `daptin/docker-compose.override.yml`; it deliberately lives outside `daptin/`,
   which git ignores.
 
-Local patches in `daptin/` (13 files, +55/−20 lines vs upstream commit `8e2f6a9`):
+Local patches in `daptin/` (9 local commits, 22 files, +523/−20 lines vs upstream commit `8e2f6a9`):
 
 | File | Purpose |
 |---|---|
@@ -67,6 +73,12 @@ Local patches in `daptin/` (13 files, +55/−20 lines vs upstream commit `8e2f6a
 | `server/actions/action_generate_password_reset_flow.go` | same |
 | `server/actions/action_generate_password_reset_verify_flow.go` | same |
 | `server/actions/action_otp_login_verify.go` | same |
+| `server/actions/action_wallet.go` | `$wallet` action performer: the only money write path (decision 0006) |
+| `server/resource/financial_guard.go` (+`financial_guard_test.go`) | financial-write denylist + boot-installed append-only triggers (decision 0006) |
+| `server/action_provider/action_provider.go` | register the `$wallet` performer |
+| `server/resource/middleware_tableaccess_permission.go` | enforce the financial denylist before the administrator early-return |
+| `server/endpoint_init.go` | install the financial guards at boot, fatal on failure |
+| `server/actions/action_import_data.go` | refuse financial tables in `__data_import` |
 
 Local-only files inside `daptin/` that upstream does not contain:
 `docker-compose.override.yml`, `schema/`, `build-local-image.sh`, `.env`,
@@ -96,7 +108,7 @@ Local-only files inside `daptin/` that upstream does not contain:
 | `.env` / compose override | `docker compose up -d --wait` |
 | `web/` source | `npm run dev` in `web/`; `npm run test`, `npm run type-check`, `npm run build` for proof |
 | Harness core | `scripts/bin/harness update` |
-| Upstream daptin release | fetch, rebase the 13 local patches, rebuild the image |
+| Upstream daptin release | fetch, rebase the 9 local commits, rebuild the image |
 
 Upstream upgrades are not attempted by the Harness updater: `daptin/` is a
 consumer clone, not a Harness-managed surface.
@@ -110,7 +122,8 @@ authorization defaults are recorded in
 handling is recorded in
 `decisions/0003-database-config-merge-rebuild.md`. The frontend stack and its
 session handling are recorded in
-`decisions/0004-web-session-and-api-access.md`.
+`decisions/0004-web-session-and-api-access.md`. The money-path write layer is
+recorded in `decisions/0006-kientaohub-money-write-layer.md`.
 
 ## Evidence
 

@@ -178,9 +178,12 @@ Out of scope:
   alternative 3 is promoted to its own decision instead of being improvised
   later.
 - **Patch accumulation.** Any missing capability becomes another local patch on
-  thirteen already-patched files and raises upstream rebase cost (decision
-  0001). Mitigation: prefer schema plus custom actions over Go patches, and
-  require a recorded decision before the fourteenth patch.
+  already-patched files and raises upstream rebase cost (decision
+  0001 — seven local commits at the time, nine after the money-path change).
+  Mitigation: prefer schema plus custom actions over Go patches, and
+  require a recorded decision before the next patch. (2026-09-14 correction:
+  the "thirteen patches" wording this risk inherited from decision 0001 was
+  stale; the true count is `git log --oneline origin/master..HEAD`.)
 - **Phase 0 is document-heavy and can be declared done without proof.**
   Mitigation: the spike is the completion gate; without its observed output the
   plan does not move to `completed/`.
@@ -198,13 +201,13 @@ Out of scope:
 - [x] Catalog slice of the data model: taxonomy, products, files, previews — proven by clean boot and read-back
 - [x] Bring product policy and the data model under version control (`PLAN.md`, `schema/`)
 - [x] Update `overview.md`, `ARCHITECTURE.md`, `RUNBOOK.md`, `decisions/README.md`
-- [ ] Remaining `PLAN.md` §17 entities (seller, wallet, order, entitlement, review, ticket, CMS, audit); the money ones wait for the two decisions below
+- [ ] Remaining `PLAN.md` §17 entities (seller, order, entitlement, review, ticket, CMS, audit); the wallet/ledger proof slice (`wallets`, `wallet_ledger`, decision 0006, 2026-09-14) is done, the rest wait for the P0 scope-lock package
 - [ ] Publish flow that grants a guest read on a published product row — until it exists, no product row is guest-readable
-- [ ] Close the admin-bypass path on financial tables (design decision, see Decisions)
+- [x] Close the admin-bypass path on financial tables (2026-09-14: decision 0006 — middleware denylist before the admin short-circuit, `__data_import` guard, boot-installed triggers; administrator HTTP proof unattempted, no credential available)
 - [ ] API conventions (auth, errors, pagination, versioning, rate limits)
 - [ ] Threat model from `PLAN.md` §32 against this architecture
 - [ ] Lock P0 scope, payment provider, and financial state machine as decisions
-- [ ] Decisions: download path, search engine, ledger append-only enforcement
+- [ ] Decisions: download path, search engine (ledger append-only enforcement recorded 2026-09-14 in decision 0006)
 
 ## Decisions
 
@@ -276,6 +279,29 @@ Out of scope:
   service account for actions, or a local patch), and the per-table audit is only
   a partial compensating control because the audit row carries no actor column
   and CREATE is not audited at all.
+- 2026-09-14 (money write layer): **decisions (a)/(b)/(c) implemented as
+  `docs/decisions/0006-kientaohub-money-write-layer.md`** — (a) Go `$wallet`
+  performer (bound parameters, typed responses, HTTP 409 refusal); (b)
+  financial-write denylist before the administrator early-return plus the
+  `__data_import` guard; (c) boot-installed, fatal-on-failure append-only
+  triggers. Three corrections to the design draft were forced by measurement
+  during execution, each kept minimal: (1) the ledger's business correlation
+  column is `reference_code`, not `reference_id` — daptin reserves
+  `reference_id` as the system bytea identity and silently drops a declared
+  column with that name (the action-level `reference_id` input name is
+  unchanged); (2) owner row permission is `13696`
+  (UserPeek+UserRead+UserUpdate+UserExecute+UserRefer) on wallets and `384`
+  (UserPeek+UserRead) on the ledger, not `9472`/`256` — the subject load of an
+  `InstanceOptional: false` action is a GET gated by `CanPeek` and the subject
+  is gated by `CanExecute`, so Peek and Execute bits are load-bearing
+  (measured: `9472` fails the subject load with 403); as a side effect,
+  non-owners can no longer invoke wallet actions on others' wallets — stricter
+  than the draft's coarse-gate residual; (3) malformed performer inputs return
+  HTTP 400 (`invalid_amount` etc., per the §7 taxonomy), not 500.
+  `daptin/` commit `2926a062` (9 local commits ahead of upstream `8e2f6a9`);
+  outer `schema/schema_wallet.yaml` + decisions + this plan update committed
+  separately. Image tag `daptin-local:v0.13.9-patched-pre-money` preserves the
+  pre-money binary.
 
 ## Validation
 
@@ -351,6 +377,57 @@ publish flow.
 - Repository-required checks: none configured. This repository has no CI and no
   schema lint; the Follow-Up in decision 0002 proposes one once more than one
   business table exists, which this plan will reach.
+
+### Money write layer, implemented and proven 2026-09-14
+
+Decision `docs/decisions/0006-kientaohub-money-write-layer.md`, executed by its
+plan (`docs/plans/active/notes/money-write-layer-plan.md`). `daptin/` commit
+`2926a062` (one commit: `server/actions/action_wallet.go`,
+`server/resource/financial_guard.go`, `server/resource/financial_guard_test.go`,
+`server/action_provider/action_provider.go`,
+`server/resource/middleware_tableaccess_permission.go`,
+`server/endpoint_init.go`, `server/actions/action_import_data.go`).
+Image `daptin-local:v0.13.9-patched` rebuilt three times (final build carries
+the 400-mapping fix); pre-money binary preserved as
+`daptin-local:v0.13.9-patched-pre-money`. Test principal: signed-in
+`wallet-test@example.com` (created for this run); anonymous; administrator
+proofs UNATTEMPTED — the admin account `eszxcvfd@gmail.com` exists with an
+unknown password outside the repo, and the `administrators` group is non-empty
+so `become_an_administrator` is closed.
+
+| # | Call | Observed |
+|---|---|---|
+| 1 | Boot gate | `Found files to load: [.../schema_catalog.yaml .../schema_wallet.yaml]`; zero `ERRO`/`WARN` in the boot segment; triggers `wallet_ledger_append_only` + `wallets_no_hard_delete` present; `GET /ping` → `pong` |
+| 2 | `POST /action/wallets/wallet_create` `{"currency":"VND"}` (signed-in) | 200 `wallet.created`, uuid ref; row: `balance=0`, `user_account_id=4`, `permission=13696` |
+| 3 | `POST /action/wallets/wallet_credit` 100 then `wallet_debit` 50 | 200 `wallet.mutation` `0→100`, `100→50`; ledger rows `(credit,100,IN,0,100)`, `(debit,50,OUT,100,50)` with `permission=384`; `reference_type`/`reference_code` stored verbatim |
+| 4 | `wallet_debit` 999999 on balance 50 | **HTTP 409** `insufficient_funds`/`insufficient funds`; balance 50, ledger count unchanged |
+| 5 | `wallet_rollback_probe` amount 10 (debit then query on nonexistent table) | HTTP 500 `pq: relation "wallet_probe_table_that_does_not_exist" does not exist`; balance and ledger count unchanged — the debit rolled back |
+| 6 | `wallet_debit` amount 0 | HTTP 400 (action `required,gt=0` validation) |
+| 7 | `POST /api/wallets`, `POST /api/wallet_ledger` with valid JSON:API body, anonymous | 403 `TableAccessPermissionChecker` on both |
+| 8 | Same `POST`s as signed-in non-administrator | 403 / 403 |
+| 9 | `PATCH`/`DELETE /api/wallets/<ref>`, `/api/wallet_ledger/<ref>`, anonymous and signed-in | 403 × 8 (every line) |
+| 10 | `POST /api/wallets/<ref>/relationships/user_account_id`, anonymous and signed-in | 403 / 403 |
+| 11 | Bare `PATCH`/`DELETE /api/wallets` (no id) | 200 serving the dashboard SPA shell (static fallback, no API effect — balances/counts unchanged). The draft's bare-request matrix rows are uninformative as written; rows 9–10 are the real denial proof |
+| 12 | `UPDATE wallet_ledger ...`, `DELETE FROM wallet_ledger`, `DELETE FROM wallets` in psql | `ERROR: kientaohub: UPDATE|DELETE on ... is refused (append-only, docs/decisions/0006)` × 3; counts unchanged |
+| 13 | `TRUNCATE wallet_ledger`, `TRUNCATE wallets` in psql | refused by FK ordering (`cannot truncate a table referenced in a foreign key constraint`) before reaching the trigger; trigger TRUNCATE coverage verified in code + `TestFinancialGuardStatementsCoverTruncate`, not live-fired |
+| 14 | `POST /action/world/import_data` targeting the wallets world row, signed-in | 403 at the world-row subject gate (`not allowed action on this object: import_data`) — the action is admin-gated, so the new `__data_import` denylist is code-verified but not live-executed (same credential reason as the admin matrix) |
+| 15 | `wallet_debit` amount `"50' OR '1'='1"` and `"1; DROP TABLE wallet_ledger"` | HTTP 400 × 2 (`invalid_amount`); ledger count and balance unchanged; `wallet_ledger` still listed — no partial effect |
+| 16 | `wallet_credit` with `reference_type: "x'--"` | 200; stored verbatim — text fields are bound parameters, never concatenated |
+| 17 | Regression | `GET /ping` 200; `GET /api/products` 200; signin 200; both containers healthy; `GET /api/wallets` anonymous 200 with empty data; `GET /api/wallet_ledger` signed-in owner 200 |
+| 18 | Unit | `go test ./server/resource/ -run TestFinancial` ok; `go vet` clean (third-party sqlite warning only); `go build ./...` ok |
+
+NOT measured (same credential reason): the 6 administrator direct-write rows
+(POST/PATCH/DELETE × 2 tables), admin `PATCH`/`DELETE` on a ledger row, the
+admin relationships row, admin `GET /api/wallet_ledger`, and a live
+`__data_import` refusal. The middleware ordering (denylist before the
+`IsAdminWithTransaction` early-return) is verified in the committed diff, and
+the triggers refuse every role at the database level (rows 12–13) independent
+of principals.
+
+Test data left in place (inert, documented): wallets `01a09f11-...` (balance
+105, permission-probe history) and `01a09f1a-...` (balance 57), 5 ledger rows,
+account `wallet-test@example.com`. Not deleted: the earlier spike's `spike_*`
+tables/rows and `spike-nonadmin@example.com` are untouched.
 
 ## Result
 

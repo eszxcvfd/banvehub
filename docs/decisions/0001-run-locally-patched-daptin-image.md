@@ -36,8 +36,9 @@ plain `go build` of the same source serves an empty dashboard.
 
 ## Decision
 
-Maintain a local source clone at `daptin/` (upstream `8e2f6a9`) carrying thirteen
-patches, and run a locally built image `daptin-local:v0.13.9-patched` from
+Maintain a local source clone at `daptin/` (upstream `8e2f6a9`) carrying seven
+local commits (`1cb9e326…0ae6d95b`, eight with the money-path change), and run
+a locally built image `daptin-local:v0.13.9-patched` from
 `daptin/docker-compose.override.yml`, produced by `daptin/build-local-image.sh`.
 
 The script reproduces the upstream release pipeline: dashboard assets from
@@ -68,7 +69,8 @@ Positive:
 
 Tradeoffs:
 
-- `daptin/` diverges from upstream; upgrades need the thirteen patches rebased.
+- `daptin/` diverges from upstream; upgrades need the seven local commits rebased
+  (eight with the money-path change).
 - The image must be rebuilt locally after any Go change
   (`daptin/build-local-image.sh`), and `pull_policy: missing` is required
   because the tag does not exist in a registry.
@@ -77,7 +79,7 @@ Tradeoffs:
 
 ## Follow-Up
 
-- Offer the thirteen patches upstream; drop them locally if accepted.
+- Offer the seven local commits upstream (eight with the money-path change); drop them locally if accepted.
 - Re-check each patch on the next upstream release before upgrading.
 - Consider pinning the dashboard asset release instead of `latest`.
 - The three cache patches (`[2099]`, `[334]`, `[234]`) are safety corrections
