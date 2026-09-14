@@ -1,0 +1,121 @@
+@import 'tailwindcss';
+
+/* Design tokens: a record registry on cool paper.
+   Ink is blue-black ledger ink, rules are hairlines, and crimson is used only
+   where the backend itself is signaling state (active entity, denied access). */
+@theme {
+  --color-paper: #f0f2f4;
+  --color-surface: #fafbfc;
+  --color-ink: #14213d;
+  --color-slate: #5b6673;
+  --color-rule: #d3d9df;
+  --color-ruling: #c1121f;
+  --color-allowed: #17745a;
+  --color-caution: #a15c00;
+
+  --font-display: 'IBM Plex Serif', Georgia, 'Times New Roman', serif;
+  --font-sans: 'IBM Plex Sans Variable', 'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
+
+  --radius-tight: 2px;
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+
+  body {
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 0.9375rem;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  /* Keyboard focus stays visible everywhere; Ark UI moves focus for us. */
+  :focus-visible {
+    outline: 2px solid var(--color-ink);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  /* Numbers line up column-wise because every data cell is monospaced. */
+  .cell-data {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ledger-row {
+    border-bottom: 1px solid var(--color-rule);
+    transition: background-color 120ms ease-out;
+  }
+
+  .ledger-row:hover,
+  .ledger-row[data-selected='true'] {
+    background-color: color-mix(in oklab, var(--color-ink) 4%, transparent);
+  }
+
+  .field-input {
+    width: 100%;
+    border: 1px solid var(--color-rule);
+    border-radius: var(--radius-tight);
+    background-color: var(--color-surface);
+    padding: 0.4rem 0.55rem;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-ink);
+  }
+
+  .field-input[data-invalid] {
+    border-color: var(--color-ruling);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    border: 1px solid var(--color-ink);
+    border-radius: var(--radius-tight);
+    padding: 0.4rem 0.75rem;
+    font-size: 0.875rem;
+    line-height: 1.2;
+    cursor: pointer;
+  }
+
+  .btn-primary {
+    background-color: var(--color-ink);
+    color: var(--color-paper);
+  }
+
+  .btn-quiet {
+    border-color: var(--color-rule);
+    background-color: transparent;
+    color: var(--color-ink);
+  }
+
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
