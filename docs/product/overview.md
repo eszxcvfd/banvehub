@@ -52,6 +52,19 @@ Not yet proven: row-level visibility of a draft versus a published product. The
 publish flow that would grant guests read on a published row does not exist yet,
 so today no product row is readable by a guest at all.
 
+Money path (implemented and proven live 2026-09-14, decision 0006):
+`schema/schema_wallet.yaml` declares owner-scoped `wallets` and append-only
+`wallet_ledger`; the only write surface is the `$wallet` action performer
+(`wallet_create`, `wallet_credit`, `wallet_debit`). Observed: credit/debit move
+the balance with a chained ledger row (`balance_before`/`balance_after`); a
+debit above the balance is refused with HTTP 409 `insufficient_funds` and
+writes nothing; malformed amounts are refused with HTTP 400; direct
+`POST`/`PATCH`/`DELETE /api/wallets|/api/wallet_ledger` return 403 for
+anonymous and signed-in non-administrators (the administrator case could not be
+measured — no administrator credential is available); ledger `UPDATE`/`DELETE`
+and wallet `DELETE` are refused at the database level for every role. Full
+evidence: `docs/plans/active/kientaohub-phase-0.md`.
+
 ## Product Contract In Force
 
 - Every business table declares `AccessGroups` explicitly.
