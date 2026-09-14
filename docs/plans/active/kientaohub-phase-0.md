@@ -302,6 +302,29 @@ Out of scope:
   outer `schema/schema_wallet.yaml` + decisions + this plan update committed
   separately. Image tag `daptin-local:v0.13.9-patched-pre-money` preserves the
   pre-money binary.
+- 2026-09-14 (money write-layer remediation, findings F1–F10): the raw design
+  transcript `docs/plans/active/notes/money-write-layer-plan.md` (committed at
+  `31e6593`) is removed here — its durable content already lives in decision
+  0006 and in this log; the authoritative remediation plan is preserved at
+  `docs/plans/active/notes/money-write-layer-remediation-plan.md`. What the
+  remediation changed: (1) anonymous mint closed — all four wallet actions
+  `Permission: 2097152` (`AuthenticatedExecute`) plus a 403 backstop in
+  `createWallet`; the orphan row (wallets id=6, NULL owner) is preserved as
+  evidence. (2) Guard installer dialect/existence-safe (sqlite3 and fresh-DB
+  boots skip with a warning instead of dying), post-install trigger-count
+  verification, and a positive `financial guards installed: ...` boot line;
+  genuine postgres install failures stay fatal. (3) Bypass surfaces closed at
+  the app layer: `$transaction` lexical 403, `world.delete`/column DDL guards,
+  cloud-store import guard, and 403 for write-method action outcomes on money
+  tables (fixes the DELETE-outcome 500-vs-403). (4) Ledger `user_account_id`
+  is now the WALLET's owner (actor fallback only for the legacy orphan row).
+  (5) `docs/product/` restored as canonical; decision 0002 records the
+  verified fallback constants (`561441`/`2097151`); decision 0006 carries the
+  bypass-closure amendment. Honesty residuals: no live administrator session
+  was measurable (deny proven at mechanism level by test); `INSERT`
+  mint/forgery and `wallets` UPDATE remain triggerless by design; the
+  `$transaction` refusal is lexical. Full evidence: decision 0006 amendment +
+  the Result section below.
 
 ## Validation
 
@@ -431,5 +454,66 @@ tables/rows and `spike-nonadmin@example.com` are untouched.
 
 ## Result
 
-Complete after implementation. Record the verified outcome, limitations, and
-follow-up before moving the plan to `docs/plans/completed/`.
+Remediation executed and measured 2026-09-14 on the live instance
+(`daptin-daptin-1` image `daptin-local:v0.13.9-patched`, `daptin/` commit
+`003a4968`, outer schema commit `87bde2b`). Rollback image
+`daptin-local:v0.13.9-patched-pre-remediation` tagged before rebuild.
+
+- **F1 closed.** Anonymous `POST /action/wallets/wallet_create` → 403 (was
+  measured 200); NULL-owner wallet count 1→1 (only the preserved evidence
+  row id=6). Same call signed-in → 200 `wallet.created`, owner-scoped row.
+  Stored action permissions live: all four wallet actions `=2097152`.
+- **F1/F2 regression intact.** Signed-in create→credit 100→debit 50 all 200;
+  debit above balance → 409 writing nothing; `"50' OR '1'='1"` → 400;
+  `wallet_rollback_probe` → 500 with balance unchanged (probe query names no
+  money table, so the new lexical guard lets it through by design).
+- **Concurrency re-run on the remediated build** (the fix touched the
+  lock-select): balance 100 + 10 simultaneous debits of 30 → exactly
+  3 × 200 / 7 × 409, final balance 10, ledger OUT sum 90, chain invariant
+  (`balance_after = balance_before ± amount`) 0 violations.
+- **Boot gate (replaces the old `ERRO|WARN` filter).** Boot log contains
+  `financial guards installed: wallet_ledger_append_only,
+  wallets_no_hard_delete`; presence query prints exactly the two trigger
+  lines; both triggers fire with the exact `kientaohub:` message. The old
+  gate is retired because logrus truncates levels to 4 chars
+  (`DisableLevelTruncation: false`), so a fatal install failure prints
+  `FATA` — invisible to an `ERRO|WARN` filter. The new gate asserts
+  presence, firing, and the positive line instead.
+- **F2 sqlite path.** `go test . -run TestServerApis` (repo root, corrected
+  from the plan's `./server/` path): pristine tree dies mid-boot (FAIL,
+  7.4s, no assertions); remediated tree boots and serves through the full
+  HTTP matrix to the FTP stage (FAIL at `server_test.go:1491`, FTP `CD`
+  `/site.daptin.com/` — code untouched by this diff, reported as observed).
+- **New tests, all executed.** `server/resource`: SQL-refusal cases,
+  sqlite dialect gate, `TestFinancialDenylistBindsAdministrator` (synthetic
+  admin recognised, then 403 — mechanism-level proof); env-gated postgres
+  contract (`DAPTIN_TEST_POSTGRES_DSN`, scratch DB, since dropped):
+  trigger presence + refusals, documented residuals (ledger INSERT lands,
+  wallets UPDATE lands), owner attribution incl. NULL-orphan fallback,
+  post-sync permission `=2097152`. `server/actions`: anonymous-create,
+  `$transaction`, cloud-import, `__data_import` refusals (all 403/denied,
+  nil-tx). `server`: write-surface tripwire. Full suites
+  (`resource`, `actions`, `server`) green; `go vet` clean.
+- **F6/F4/F5 honesty.** No schema action carries a DELETE outcome and none
+  exposes caller-controlled `$transaction` text, so the 403s for those paths
+  are proven by executed unit tests + the tripwire, NOT live over HTTP
+  (marked code-verified in decision 0006). Live admin-gated DDL performers
+  refuse a non-admin token at the action gate (observed 403s).
+- **F7.** Live ledger rows carry `user_account_id` = wallet owner (9=9);
+  stranger-debit attribution proven in the pg test.
+- **F3.** `docs/product/` canonical; `docs/plans/product/` gone;
+  `docs/product/README.md` sha256 matches `.harness-core/manifest.json`;
+  all seven `docs/product` references resolve; overview diff vs `31e6593`
+  is exactly the +13-line money section.
+- **Evidence preserved, not mutated:** wallets ids 1–6 (all `permission`
+  13696, incl. id=3 and the NULL-owner id=6), spike tables/rows, test
+  accounts, `wallets_audit` table. Added by this validation (expected): probe
+  account + wallets, race wallet + 4 ledger rows.
+- **Stays unproven (F10 honesty):** no live administrator HTTP session was
+  measurable (no credential obtainable); `$transaction` refusal is lexical;
+  money path remains postgres-only; `wallets` UPDATE and both tables' INSERT
+  have no database barrier by design (decision 0006 amendment).
+
+Phase 1 may build wallet/order/entitlement on this layer within the stated
+residuals. Follow-up lives in decision 0006 and `docs/RUNBOOK.md`
+(wallet-503 recovery, boot gate).

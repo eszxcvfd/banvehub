@@ -92,6 +92,66 @@ on `wallet_ledger` in proof scope (attribution is in server logs); no
 idempotency constraint yet (double-debit with the same reference is not
 prevented; the unique constraint lands on `payment_transactions` later).
 
+## Amendment — bypass closure (remediation 2026-09-14)
+
+The raw-SQL/DDL performer class described below existed and is closed at the
+app layer. Reason for app-layer ownership: daptin runs every performer on a
+single database role, so no database rule can distinguish the `$wallet`
+performer's legitimate statements from any other same-connection query (the
+same reason decision (c) leaves `wallets` UPDATE triggerless — a session GUC
+was considered and rejected because a `$transaction` `SET LOCAL` defeats it);
+the schema layer has no lever over Go performers. The triggers REMAIN the
+backstop for out-of-process connections and for UPDATE/DELETE/TRUNCATE
+invariants.
+
+Closed sites (one commit, `daptin-local` rebuild):
+
+- `$transaction query` (`server/actions/action_transaction.go`): refused with
+  403 when `resource.FinancialSQLRefuses(query)` matches — lexical regexp
+  `(?i)\b(wallets|wallet_ledger)\b`, deliberately fail-closed (a quoted
+  literal naming a money table is refused too). Reads are refused as well: a
+  `SELECT` on wallets would bypass row permission.
+- `world.delete` (`server/actions/action_delete_table.go`): money table
+  refused up front; the three sibling DDL sites (relation-column drops,
+  join-table drop) guard the table they touch.
+- `world.column.delete` / `world.column.rename`: money table refused before
+  the `ALTER TABLE`.
+- `cloud_store.files.import` (`server/actions/action_import_cloudstore_files.go`):
+  same `FinancialWriteDenied` guard as `__data_import`, before `DirectInsert`.
+- Action outcomes (`server/resource/handle_action.go`, before the
+  `switch outcome.Method`): write-method outcomes (`POST`/`PATCH`/`DELETE`)
+  on a money table are refused with 403 `financial_write_denied`. This fixes
+  the DELETE-outcome 500-vs-403: `DeleteWithoutFilters` bypasses the
+  middleware, so the trigger was the only barrier and surfaced as 500. The
+  widening is latent — no schema action carries a DELETE outcome today.
+- Schema layer (`schema/schema_wallet.yaml`): all four wallet actions now
+  `Permission: 2097152` (`AuthenticatedExecute`) — anonymous `wallet_create`
+  is refused at the action gate (was measured 200). Backstop in
+  `createWallet`: 403 when there is no signed-in owner.
+- Attribution (`action_wallet.go`): the lock-select carries
+  `user_account_id`; the ledger row records the WALLET's owner, falling back
+  to the actor only for the preserved legacy NULL-owner orphan row.
+
+What the trigger backstop does NOT cover (unchanged, now explicit):
+
+- `INSERT` on `wallets` (mint) and `INSERT` on `wallet_ledger` (forgery) —
+  `financial_guard.go` covers UPDATE/DELETE/TRUNCATE only.
+- `UPDATE` on `wallets` — no database barrier by design.
+- The `$transaction` refusal is lexical, not parsed: a query that avoids the
+  literal table names defeats it.
+
+Extension rule upgraded: any performer executing caller-controlled SQL or a
+`DirectInsert`/`TruncateTable` on a new table must add a denylist check —
+review-blocking. Machine-checked by
+`daptin/server/financial_write_surface_test.go` (direct-write inventory +
+guard-presence assertions).
+
+Corrections to the residuals recorded above: the Execute gate is no longer
+anonymous-coarse (action `Permission: 2097152` since this amendment; any
+signed-in user can still debit a known wallet — ownership/entitlement shaping
+stays product policy, out of scope); `wallet_ledger` now carries
+`user_account_id` = wallet owner (server logs remain secondary evidence).
+
 ## Alternatives Considered
 
 1. **Schema-only `$transaction query` action with `{{ }}`-concatenated SQL** —

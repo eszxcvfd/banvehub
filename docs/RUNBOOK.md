@@ -213,10 +213,10 @@ daemon and other projects are not owned by this runbook.
 ```sh
 BASE=http://127.0.0.1:6336
 curl -fsS -o /dev/null -w 'ping %{http_code}\n' $BASE/ping
-curl -sS -o /dev/null -w 'anonymous read %{http_code}\n' $BASE/api/products
-curl -sS -o /dev/null -w 'anonymous write %{http_code}\n' -X POST $BASE/api/products \
+# anonymous mint must be refused (403) and must not write a row
+curl -sS -o /dev/null -w 'anonymous wallet_create %{http_code}\n' -X POST $BASE/action/wallets/wallet_create \
   -H 'Content-Type: application/vnd.api+json' \
-  -d '{"data":{"type":"products","attributes":{"name":"probe","price":1}}}'
+  -d '{"attributes":{"currency":"VND"}}'
 ```
 
 | Check | Expected |
@@ -224,12 +224,11 @@ curl -sS -o /dev/null -w 'anonymous write %{http_code}\n' -X POST $BASE/api/prod
 | `GET /ping` | 200, body `pong` |
 | `GET /` | 200 containing `Daptin Admin` |
 | Sign in with the administrator credential | 200 and a JWT |
-| `GET /api/products` without a token | 403 |
-| `POST /api/products` without a token | 403 |
-| Authenticated `POST` then `DELETE /api/products/<id>` | 201 then 200; its `products_..._has_usergroup_...` join row is removed with it |
+| `POST /action/wallets/wallet_create` without a token | 403; `wallets` row count with `user_account_id IS NULL` unchanged |
+| Authenticated `POST /action/wallets/wallet_create` | 200 `wallet.created`, owner-scoped row |
 | `GET /api/products/<unknown-id>` | 404 |
 | `GET /api/llm_file/<unknown-id>/relationships/input_file_id` | 404 |
-| Boot log on a populated database | no `ERRO`/`WARN` |
+| Boot log on a populated database | positive guard line (see Money-path boot gate); no other `ERRO`/`WARN` |
 
 Full end-to-end evidence for the authorization and cascade rows: see
 `decisions/0001-...` and `0002-...`.
@@ -244,20 +243,72 @@ level. Observed contract (proven live 2026-09-14, evidence in
 
 | Call | Result |
 |---|---|
-| `POST /action/wallets/wallet_create` `{"currency":"VND"}` | 200 `wallet.created`, balance 0, owner-scoped row (`permission` 13696) |
+| `POST /action/wallets/wallet_create` `{"currency":"VND"}` without a token | 403, no row written (anonymous mint closed 2026-09-14; was 200) |
+| `POST /action/wallets/wallet_create` `{"currency":"VND"}` signed-in | 200 `wallet.created`, balance 0, owner-scoped row (`permission` 13696) |
 | `POST /action/wallets/wallet_credit\|wallet_debit` with `wallets_id`, positive `amount` | 200 `wallet.mutation` with `balance_before`/`balance_after` and a ledger row |
 | debit above the balance | HTTP 409 `insufficient_funds`, nothing written |
 | malformed `amount` (e.g. `50' OR '1'='1`) | HTTP 400, nothing written; all values are bound parameters |
 | `POST`/`PATCH`/`DELETE /api/wallets\|/api/wallet_ledger` (anonymous or signed-in) | 403 from `TableAccessPermissionChecker` |
 | `UPDATE`/`DELETE` on `wallet_ledger`, `DELETE` on `wallets` in psql | `ERROR: kientaohub: ... is refused (append-only, docs/decisions/0006)` |
+| ledger row `user_account_id` after credit/debit | equals the WALLET's owner, not the caller |
 
-Verify the guards after any rebuild: triggers
-`wallet_ledger_append_only` / `wallets_no_hard_delete` in
-`SELECT tgname FROM pg_trigger ...`, and a clean boot (zero `ERRO`/`WARN`
-after the last `Found files to load`, same slicing as above). Rolling the Go
-change back without git surgery: set
-`DAPTIN_IMAGE=daptin-local:v0.13.9-patched-pre-money` in `daptin/.env` and
+### Money-path boot gate (replaces the old negative-only `ERRO|WARN` gate)
+
+Slice logs from the LAST `Found files to load`, never from the top. The gate
+is positive and covers BOTH triggers:
+
+```sh
+cd daptin
+# (i) boot log names both triggers
+docker compose logs --no-color daptin | grep -F 'financial guards installed: wallet_ledger_append_only, wallets_no_hard_delete'
+# (ii) both triggers present on the right tables — exactly these two lines
+docker compose exec -T postgres psql -U daptin -d daptin -Atc \
+  "SELECT tg.tgname || ' on ' || c.relname FROM pg_trigger tg JOIN pg_class c ON c.oid = tg.tgrelid WHERE NOT tg.tgisinternal AND tg.tgname IN ('wallet_ledger_append_only','wallets_no_hard_delete') AND c.relname IN ('wallet_ledger','wallets') ORDER BY 1"
+# (iii) both triggers FIRE (FOR EACH STATEMENT triggers fire even with WHERE false)
+docker compose exec -T postgres psql -U daptin -d daptin \
+  -c "UPDATE wallet_ledger SET amount = amount WHERE false;" \
+  -c "DELETE FROM wallets WHERE false;"
+# both statements must error: kientaohub: <op> on <table> is refused (append-only, docs/decisions/0006)
+```
+
+The gate FAILS (expected) under `DAPTIN_SKIP_INITIALISE_RESOURCES=true` —
+that mode skips installation, it does not mean the triggers broke. Keep a
+separate manual boot-log review; do not gate on `ERRO`/`WARN` alone (a fatal
+install failure prints `FATA`, invisible to an `ERRO|WARN` filter).
+
+Verify the guards after any rebuild with the gate above (not the old
+`SELECT tgname FROM pg_trigger` fragment). Rolling the Go change back without
+git surgery: set `DAPTIN_IMAGE=daptin-local:v0.13.9-patched-pre-remediation`
+in `daptin/.env` (pre-money: `daptin-local:v0.13.9-patched-pre-money`) and
 `docker compose up -d --wait`.
+
+### Wallet-503 recovery
+
+503 on `/action/wallets/*` means the action transaction could not begin
+(`handle_action.go:119-129`). Check postgres health first:
+
+```sh
+cd daptin
+docker compose ps
+docker compose exec -T postgres pg_isready -U daptin -d daptin
+```
+
+If the boot gate's presence query shows `to_regclass NULL`, the tables are
+gone: if a backup exists, restore `wallets` + `wallet_ledger` from it (the
+ONLY path preserving ledger history); if not, re-mount the schema and boot
+(schema sync recreates empty tables, guards reinstall at boot per decision
+0003) and record a balance-loss incident — NEVER re-credit by direct SQL
+(writes no ledger row, violates PLAN.md §42.3); route compensations through
+`wallet_credit`, which ledger-records them. Nothing is "recovered" until both
+trigger assertions of the boot gate pass.
+
+### Mount readability on native Linux clones
+
+`docs/decisions/0005-*.md`, `docs/decisions/0006-*.md`, and
+`schema/schema_wallet.yaml` must be world-readable: the container reads them
+as uid 10001 (`daptin/docker-compose.yml:65-66`). Modes are 644 here but git
+records no mode bits, so after a fresh clone on native Linux verify with
+`stat -c '%a'` and `chmod 644` if a 0600 umask reintroduced unreadable files.
 
 ## Unknowns
 

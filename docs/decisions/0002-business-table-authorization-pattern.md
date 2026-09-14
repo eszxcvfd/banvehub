@@ -84,3 +84,21 @@ Tradeoffs:
   surface is defined.
 - Add a schema lint (a check that every `Tables:` entry has `AccessGroups`) once
   more than one business table exists.
+
+## Supplement: fallback permission constants (recorded 2026-09-14)
+
+Mechanism behind the Context's "`Permission: 0` is treated as unset": schema
+sync substitutes `auth.DEFAULT_PERMISSION = 561441`, or
+`auth.DEFAULT_PERMISSION_WHEN_NO_ADMIN = 2097151` when the instance has no
+administrator (`daptin/server/auth/auth.go:65-73`, applied at
+`daptin/server/resource/dbfunctions_update.go:1398-1401, 1434-1438`).
+
+- `DEFAULT_PERMISSION = GuestPeek|GuestExecute|UserRead|UserExecute|GroupRead|GroupExecute`
+  = 1+32+256+4096+32768+524288 = **561441**.
+- `DEFAULT_PERMISSION_WHEN_NO_ADMIN = GuestCRUD|GuestExecute|UserCRUD|UserExecute|GroupCRUD|GroupExecute`
+  = **2097151** (= 2^21−1).
+- `AuthenticatedExecute` (used by the money actions) = 1<<21 = **2097152**
+  (`auth.go:60`).
+
+This records previously unstated mechanism; it does not correct any earlier
+numeric claim — this decision never stated fallback numbers before.
