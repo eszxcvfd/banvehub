@@ -1,0 +1,15 @@
+# Harness core maintenance binary (installed by install-harness.sh)
+scripts/bin/harness
+scripts/bin/harness.exe
+
+# Node (web/)
+node_modules/
+dist/
+*.log
+
+# The backend lives in its own repository: see docs/ARCHITECTURE.md.
+# Locally it is checked out at daptin/ (upstream clone + local patches).
+daptin/
+
+# OS
+.DS_Store
