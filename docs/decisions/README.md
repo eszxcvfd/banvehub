@@ -20,6 +20,7 @@ documents here as real choices are accepted, then index them in this file.
 | [0005 Financial state machine](0005-financial-state-machine.md) | Accepted | `payment_intents` carries the exact `PLAN.md` §11.2 seven-state enum with the T1–T7 transition table; a late verified webhook wins from EXPIRED or CANCELLED; an amount mismatch stays PENDING with a reconciliation flag rather than auto-failing; wallets have no state machine; expiry is lazy in P0 |
 | [0006 Secure-download path](0006-secure-download-path.md) | Accepted | Downloads are entitlement-gated through an authenticated route with a one- to ten-minute one-time token, never a public URL; originals stay private; free downloads also create an entitlement; presigned storage GET replaces the proxy path when object storage lands |
 | [0007 Search engine](0007-search-engine.md) | Accepted | P0 search runs on PostgreSQL through Payload's query API per `PLAN.md` §43; Meilisearch is the P1 engine; Vietnamese diacritics, toneless matching, and typo tolerance are an accepted P0 gap until the search slice, and storefront copy must not promise them |
+| [0008 Role model](0008-role-model.md) | Accepted | Roles are `admin` (Super Admin), `buyer`, `seller`, `moderator`, and `financeAdmin` per `PLAN.md` §5; `buyer` replaces the template's `customer` and the default role is `buyer`; §22 rows are expressed as access helpers; money documents use `canEditMoney`, which denies every principal including administrators; changing a role value is a database migration of `enum_users_roles` |
 
 ## Superseded
 

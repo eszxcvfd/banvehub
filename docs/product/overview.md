@@ -47,7 +47,8 @@ Verified live on 2026-09-15 against `web/` on PostgreSQL:
 | `GET /admin/create-first-user` | 200 |
 | `GET /api/products` | 200, `{"docs":[],"totalDocs":0,...}` — the catalog is empty |
 | Database | PostgreSQL 16.15 in container `kientaohub-postgres` on `127.0.0.1:5433`, 87 base tables, applied through `web/src/migrations` |
-| Roles | `admin` and `customer` only, default `customer`, first user promoted to admin (`web/src/collections/Users/index.ts`) |
+| Roles | `admin`, `buyer`, `seller`, `moderator`, `financeAdmin` (decision 0008); default `buyer`; first user promoted to admin |
+| Access rules | product create is Seller or Admin and product update is Moderator or Admin, per `PLAN.md` §22; 14 matrix tests pass (`web/tests/int/rbac.int.spec.ts`) |
 
 The running application is the Payload ecommerce template, not the product. It
 sells physical goods with variants, carts, shipping addresses, USD-style
@@ -63,8 +64,10 @@ Nothing below exists, in any form:
 - Entitlements, download events, or the `/downloads/{product}` route.
 - Seller profiles, upload, moderation, or payouts.
 - Orders in the product sense, reviews, comments, tickets, or disputes.
-- The five §5 roles (Buyer, Seller, Moderator, Finance Admin, Super Admin) and
-  the §22 authorization matrix.
+- The five §5 roles are implemented (decision 0008), but the §22 rows whose
+  entities do not exist yet are not: purchase, download, ledger view, and
+  withdrawal approval arrive with the payment, order, and withdrawal slices.
+  Seller self-edit of an owned product also waits for the Phase 3 seller entity.
 - Object storage, Redis, CI, or observability.
 - Email delivery, deployment, TLS, CDN, or backups.
 

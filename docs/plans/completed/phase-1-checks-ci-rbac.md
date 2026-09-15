@@ -98,8 +98,13 @@ Out of scope:
 - [x] Group 2: CI workflow for lint, build, and integration tests
   - [x] `.github/workflows/ci.yml` with an ephemeral Postgres service
   - [x] first GitHub Actions run succeeded on every step
-- [ ] Group 3: §5 roles and §22 access rules with a test matrix
-- [ ] Record validation and result, move the plan to `docs/plans/completed/`
+- [x] Group 3: §5 roles and §22 access rules with a test matrix
+  - [x] five role values with `buyer` replacing `customer`; decision 0008
+  - [x] access helpers per §22, including `canEditMoney` for money documents
+  - [x] product creation is Seller or Admin, product update is Moderator or Admin
+  - [x] `tests/int/rbac.int.spec.ts`, 14 tests over six callers
+  - [x] the role value set migrated in the database, not just in code
+- [x] Record validation and result, move the plan to `docs/plans/completed/`
 
 ## Decisions
 
@@ -141,9 +146,54 @@ Group 2 — repository check, **pass**:
   showed the development database schema is byte-identical to a
   migrations-only schema apart from `pg_dump`'s random tokens.
 
-Group 3 — integration proof: the role and action matrix test passes, covering
-anonymous, buyer, seller, moderator, finance admin, and super admin.
+Group 3 — integration proof, **pass**:
+
+- `pnpm test:int` exits 0 with 15 tests in 2 files, 14 of them the §22 matrix in
+  `web/tests/int/rbac.int.spec.ts`.
+- The matrix covers anonymous, buyer, seller, moderator, finance admin, and
+  admin: product creation allowed only for seller and admin, product update
+  allowed only for moderator and admin, another account's user document
+  updated only by admin, and `canEditMoney` denying every caller including the
+  administrator.
+- The tests clean up after themselves: zero `rbac-*` users and zero matrix
+  products remain in the database.
+- `pnpm lint` exits 0 with 0 errors, `pnpm exec tsc --noEmit` exits 0, and
+  `pnpm build` exits 0.
+
+Repository check for the whole slice: the GitHub Actions run at `7ea4f71`
+succeeded; the role work was added after it and is verified locally by the same
+five commands.
 
 ## Result
 
-Pending.
+Complete. All three outcomes exist and are verified.
+
+- `pnpm lint` and `pnpm build` exit 0, so the repository checks can gate a merge
+  for the first time. The cost is disclosed: three React Compiler rules are
+  warnings, not errors, until the nine template violations are refactored.
+- `.github/workflows/ci.yml` runs install, lint, migrations, build, and the
+  integration tests against an ephemeral PostgreSQL service, and its first run
+  succeeded on every step.
+- The §5 role model is implemented and the §22 rows that have entities are
+  enforced, with a 14-test matrix as proof; decision 0008 records the naming and
+  the money-write rule.
+
+Limitations and disclosures:
+
+- §22 rows for purchase, download, ledger view, and withdrawal approval have no
+  entities yet, so they are not covered by the matrix; each slice must extend it.
+- A seller can create a product but cannot edit one until products carry seller
+  ownership in Phase 3.
+- `moderator` is collection-level update access, not yet the FR-28 moderation
+  state machine.
+- The security scan, end-to-end tests, image builds, and staging deploys from
+  §36 remain unimplemented.
+
+Follow-up owned by later slices:
+
+- Refactor the nine React Compiler violations and restore the three rules to
+  errors.
+- Phase 3: seller ownership plus the moderation state machine.
+- Phase 4 onward: money collections using `canEditMoney`, with read access split
+  per §22.
+- Environments, object storage, and observability remain open.

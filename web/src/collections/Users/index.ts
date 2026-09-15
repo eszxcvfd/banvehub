@@ -39,19 +39,31 @@ export const Users: CollectionConfig = {
         read: adminOnlyFieldAccess,
         update: adminOnlyFieldAccess,
       },
-      defaultValue: ['customer'],
+      defaultValue: ['buyer'],
       hasMany: true,
       hooks: {
         beforeChange: [ensureFirstUserIsAdmin],
       },
       options: [
         {
-          label: 'admin',
+          label: 'Super Admin',
           value: 'admin',
         },
         {
-          label: 'customer',
-          value: 'customer',
+          label: 'Buyer',
+          value: 'buyer',
+        },
+        {
+          label: 'Seller',
+          value: 'seller',
+        },
+        {
+          label: 'Moderator',
+          value: 'moderator',
+        },
+        {
+          label: 'Finance Admin',
+          value: 'financeAdmin',
         },
       ],
     },

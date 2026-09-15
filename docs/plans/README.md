@@ -30,5 +30,4 @@ decision into `docs/decisions/`; keep task-local choices in the plan.
 
 ## Active Plans
 
-- [`phase-1-checks-ci-rbac.md`](active/phase-1-checks-ci-rbac.md): make the
-  repository checks pass, add CI, and implement the §5 and §22 role model.
+No active execution plans are currently indexed.

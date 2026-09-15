@@ -29,9 +29,13 @@ admin panel at `/admin`, the REST API at `/api/<collection>`, GraphQL at
 
 - **Intent** — `PLAN.md`. Nothing in `web/` overrides it; the template's shape is
   a starting point, not policy.
-- **Authorization** — Payload collection `access` blocks. The §5 role model and
-  §22 matrix are not implemented; today the only roles are `admin` and
-  `customer`.
+- **Authorization** — Payload collection `access` blocks. The §5 role model is
+  implemented as `admin`, `buyer`, `seller`, `moderator`, and `financeAdmin`
+  (decision 0008), and the §22 rows that have entities today are enforced: for
+  products, creation is Seller or Admin and update is Moderator or Admin. Rows
+  whose entities do not exist yet — purchase, download, ledger view, withdrawal
+  approval — arrive with their slices. Money documents will use `canEditMoney`,
+  which denies every principal including administrators (decision 0002).
 - **Money** — one server-side write path only, with money collections denying
   create, update, and delete for every principal, and an append-only ledger
   enforced by migration-installed triggers (decision 0002). Not implemented.
@@ -62,9 +66,9 @@ decision 0006 records as a precondition for the storage slice.
 
 - No worker process: no malware scanning, no async jobs, no email dispatch.
 - No Redis or queue.
-- No CI; `PLAN.md` §36 defines the required pipeline and nothing implements it,
-  and neither repository check passes today: `pnpm lint` fails to load the
-  ESLint config, and `pnpm build` fails type checking in template components.
+- CI covers lint, build, and integration tests only (`.github/workflows/ci.yml`);
+  `PLAN.md` §36 also requires a security scan, and image builds and staging
+  deploys do not exist.
 - No observability: no structured logging configuration, metrics, tracing, or
   alerting (`PLAN.md` NFR-08).
 - No rate limiting on any surface, including the future webhook route that

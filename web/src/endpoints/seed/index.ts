@@ -156,7 +156,8 @@ export const seed = async ({
         name: 'Customer',
         email: 'customer@example.com',
         password: 'password',
-        roles: ['customer'],
+        // PLAN.md §5.2: the buying role is `buyer` (was `customer`).
+        roles: ['buyer'],
       },
     }),
     payload.create({

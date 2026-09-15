@@ -20,8 +20,18 @@ import {
 } from '@payloadcms/richtext-lexical'
 import { DefaultDocumentIDType, Where } from 'payload'
 
+import { adminOrModerator } from '@/access/adminOrModerator'
+import { adminOrSeller } from '@/access/adminOrSeller'
+
 export const ProductsCollection: CollectionOverride = ({ defaultCollection }) => ({
   ...defaultCollection,
+  // PLAN.md §22: Create product is Seller or Admin; Moderate product is
+  // Moderator or Admin. Read and delete keep the plugin defaults.
+  access: {
+    ...defaultCollection?.access,
+    create: adminOrSeller,
+    update: adminOrModerator,
+  },
   admin: {
     ...defaultCollection?.admin,
     defaultColumns: ['title', 'enableVariants', '_status', 'variants.variants'],
