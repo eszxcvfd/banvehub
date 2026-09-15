@@ -1,0 +1,29 @@
+# Local development PostgreSQL for the Payload application.
+#
+# Host port is 5433, not 5432, because another stack on this machine already
+# binds 127.0.0.1:5432. Binding to loopback keeps the database off the network
+# (PLAN.md §35: local and staging never use production credentials).
+#
+# These are disposable local development credentials, not secrets.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: kientaohub-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: payload
+      POSTGRES_PASSWORD: payload
+      POSTGRES_DB: kientaohub
+    ports:
+      - '127.0.0.1:5433:5432'
+    volumes:
+      - kientaohub-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U payload -d kientaohub']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  kientaohub-pgdata:

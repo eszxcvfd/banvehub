@@ -94,8 +94,13 @@ Out of scope:
         `docs/threat-model.md`, `docs/api-conventions.md`, `docs/HARNESS.md`
   - [x] resolved the two dangling links in `docs/README.md` by creating
         `docs/ARCHITECTURE.md` and restoring `docs/HARNESS.md`
-- [ ] Group B: PostgreSQL, adapter, migrations, run, verify
-- [ ] Record validation + result, move plan to `docs/plans/completed/`
+- [x] Group B: PostgreSQL, adapter, migrations, run, verify
+  - [x] `web/docker-compose.yml` with `postgres:16-alpine` on `127.0.0.1:5433`
+  - [x] `@payloadcms/db-postgres` installed, adapter swapped, `DATABASE_URL`
+        repointed, `@payloadcms/db-sqlite` removed
+  - [x] initial migration created and applied; 87 Postgres tables match the
+        SQLite baseline; app serves from Postgres and `payload.db` is untouched
+- [x] Record validation and result, move the plan to `docs/plans/completed/`
 
 ## Decisions
 
@@ -109,16 +114,81 @@ Out of scope:
 - 2026-09-15: Restore Phase 0 artifacts now rather than proceeding without them.
 - 2026-09-15: Obsolete daptin decisions are not restored; the decisions index
   records them as superseded by decision 0001 with a pointer to `470bf41`.
+- 2026-09-15: The Compose service binds `127.0.0.1:5433` instead of the planned
+  5432, because another stack on this machine already holds `127.0.0.1:5432` and
+  this slice must not disturb it. Task-local; recorded in the compose file and
+  in the decision 0001 amendment.
+- 2026-09-15: Running the Payload CLI rewrites the generated
+  `web/src/app/(payload)/admin/importMap.js` with different formatting. The key
+  sets were compared and are identical, so the regeneration was reverted to keep
+  the diff limited to this slice's intent.
+- 2026-09-15: The Postgres adapter's development `push` stays enabled. It wrote
+  a `dev` row at batch `-1` in `payload_migrations`; whether development should
+  run migrations only is left open rather than decided here.
 
 ## Validation
 
-- Focused proof: `pnpm payload migrate` exits 0 from an empty database, and the
-  Postgres table count matches the SQLite baseline of 87 tables.
-- Integration proof: `pnpm dev` boots with the Postgres adapter,
-  `GET /admin` and `GET /api/products` return 200, and the response comes from
-  Postgres rather than `web/payload.db`.
-- Repository-required checks: `pnpm lint` and `pnpm build` for `web/`.
+Focused proof — **pass**:
+
+- `pnpm payload migrate:create initial` exits 0 and writes
+  `web/src/migrations/20260915_020514_initial.ts` with its snapshot and index.
+- `pnpm payload migrate` exits 0 against an empty database, and
+  `select count(*) from information_schema.tables` in container
+  `kientaohub-postgres` returns **87** base tables in `public`, matching the
+  87-table SQLite baseline exactly.
+- `payload_migrations` records `20260915_020514_initial` at batch 1.
+
+Integration proof — **pass**:
+
+- `pnpm dev` boots with the Postgres adapter and answers `GET /` 200,
+  `GET /admin` 200, and `GET /api/products` with the expected envelope.
+- `web/payload.db` has the same size and modification time before and after the
+  run, which shows the application no longer reads or writes SQLite.
+
+Repository-required checks — **fail, pre-existing, not caused by this slice**:
+
+- `pnpm lint` aborts before linting: ESLint 9.39.5 with `@eslint/eslintrc`
+  `FlatCompat` throws `TypeError: Converting circular structure to JSON` while
+  loading `next/core-web-vitals`. No eslint package appears in this slice's
+  lockfile diff.
+- `pnpm build` fails type checking in template components that this slice did
+  not touch: `src/components/Cart/CartModal.tsx`,
+  `src/components/checkout/CheckoutPage.tsx`, and
+  `src/utilities/generatePreviewPath.ts`, the last importing
+  `@/app/(frontend)/next/preview/route`, a directory that does not exist in this
+  template (it ships `src/app/(app)/`).
+- Consequence: neither check can gate CI, and `PLAN.md` §36 requires both to
+  pass on pull requests. Fixing the template is a separate slice.
 
 ## Result
 
-Pending.
+Complete. Both outcomes exist and are verified.
+
+- PostgreSQL replaced SQLite for local development. The Compose service
+  `kientaohub-postgres` (`postgres:16-alpine`) runs on `127.0.0.1:5433`, the
+  adapter is `postgresAdapter` with a `pool.connectionString` from
+  `DATABASE_URL`, and `web/src/migrations/20260915_020514_initial.ts` is the
+  committed schema source of truth. The Postgres schema matches the SQLite
+  baseline table for table, and the application serves from Postgres while the
+  old SQLite file stays untouched.
+- The Phase 0 authority records exist again as decisions 0002–0007 plus
+  `docs/product/overview.md`, `docs/ARCHITECTURE.md`, `docs/threat-model.md`,
+  `docs/api-conventions.md`, and `docs/HARNESS.md`, each restated for Payload
+  instead of copied from the removed daptin implementation.
+
+Limitations and disclosures:
+
+- `pnpm lint` and `pnpm build` fail for pre-existing template reasons, with the
+  exact errors recorded under Validation. This slice neither caused nor fixed
+  them.
+- Development `push` is still enabled alongside migrations; the `dev` row in
+  `payload_migrations` records that.
+- The `postgresAdapter` dependency, the compose file, and the migration are the
+  only application changes; no product behaviour was added.
+
+Follow-up owned by later slices:
+
+- Make the two repository checks pass, since CI depends on them.
+- Decide whether development keeps `push` or runs migrations only.
+- Object storage, Redis, observability, CI, and the §5 role model remain
+  unavailable and each needs its own decision.

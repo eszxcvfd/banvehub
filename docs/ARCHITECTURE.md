@@ -45,11 +45,14 @@ admin panel at `/admin`, the REST API at `/api/<collection>`, GraphQL at
 
 ## Data
 
-Payload's Postgres or SQLite adapter, selected by `DATABASE_URL` and the adapter
-in `web/src/payload.config.ts`. Local development currently uses SQLite at
-`web/payload.db`. `PLAN.md` §27 Phase 1 and decision 0001 require PostgreSQL
-before any money work; the migration is the first step of
-`docs/plans/active/phase-1-foundation.md`.
+Payload's PostgreSQL adapter, selected through `DATABASE_URL` and the adapter in
+`web/src/payload.config.ts`. Local development runs `postgres:16-alpine` from
+`web/docker-compose.yml` as container `kientaohub-postgres` on
+`127.0.0.1:5433`; the host port is 5433 because another stack on this machine
+already holds `127.0.0.1:5432`. The schema is owned by the versioned migrations
+in `web/src/migrations`, created with `payload migrate:create` and applied with
+`payload migrate`, per `PLAN.md` §37. An earlier SQLite file at `web/payload.db`
+remains on disk as a pre-migration artefact and is no longer read or written.
 
 Media uploads go to local disk through the template's `media` collection. There
 is no object storage, so there is no private bucket and no presigned URL, which
@@ -59,7 +62,9 @@ decision 0006 records as a precondition for the storage slice.
 
 - No worker process: no malware scanning, no async jobs, no email dispatch.
 - No Redis or queue.
-- No CI; `PLAN.md` §36 defines the required pipeline and nothing implements it.
+- No CI; `PLAN.md` §36 defines the required pipeline and nothing implements it,
+  and neither repository check passes today: `pnpm lint` fails to load the
+  ESLint config, and `pnpm build` fails type checking in template components.
 - No observability: no structured logging configuration, metrics, tracing, or
   alerting (`PLAN.md` NFR-08).
 - No rate limiting on any surface, including the future webhook route that

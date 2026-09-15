@@ -41,8 +41,9 @@ daptin; no second CMS or backend is introduced.
   `workspace:*`.
 - Dependency-build policy lives in `web/pnpm-workspace.yaml` under `allowBuilds`
   (the pnpm 11 replacement for `pnpm.onlyBuiltDependencies`).
-- Local development uses SQLite through `@payloadcms/db-sqlite` at
-  `web/payload.db`; Postgres is the production target.
+- Local development runs PostgreSQL through a Compose service in
+  `web/docker-compose.yml`; PostgreSQL is also the production target (amended
+  2026-09-15, see the amendment below).
 - Payment stays on the template's Stripe adapter until the internal wallet and
   SePay rail from `PLAN.md` §11 are built.
 
@@ -73,8 +74,9 @@ Tradeoffs:
 - The template targets a foreign product shape: physical-goods ecommerce, Stripe
   checkout, en-US copy, and "Payload Commerce" branding. Currency presentation
   (VND), language, payment rail, and branding all need replacement.
-- SQLite is not the production database; money features must not be exercised
-  before the Postgres migration.
+- The database decision now matches production at both ends, so the money rules
+  in decision 0002 are exercised against PostgreSQL behaviour rather than SQLite
+  behaviour.
 - Template and packages must move together; an upgrade must take a matching
   Payload tag, not `main`.
 - `web/` adds a second toolchain (pnpm 11, Node >= 24.15, Next.js 16) inside the
@@ -89,3 +91,29 @@ Tradeoffs:
 - Rebrand to KienTaoHub with Vietnamese copy and VND presentation.
 - Decide how the Next.js-generated `web/AGENTS.md` and `web/CLAUDE.md` relate to
   the harness `AGENTS.md`.
+
+## Amendment — local development database (2026-09-15)
+
+The SQLite decision above is superseded. Local development now runs
+PostgreSQL, decided in `docs/plans/active/phase-1-foundation.md` and applied in
+the same commit as this amendment.
+
+Observed after the change:
+
+- `web/docker-compose.yml` runs `postgres:16-alpine` as container
+  `kientaohub-postgres`, bound to `127.0.0.1:5433` because another stack on this
+  machine already holds `127.0.0.1:5432`. The port choice is task-local and
+  belongs to the compose file, not to this decision.
+- `web/src/migrations/` holds a versioned initial migration created by
+  `payload migrate:create` and applied by `payload migrate`, per `PLAN.md` §37.
+- `payload migrate` reports success and PostgreSQL holds 87 base tables in
+  `public`, matching the 87-table SQLite baseline.
+- `pnpm dev` serves `GET /`, `GET /admin`, and `GET /api/products` with 200
+  against PostgreSQL, and `web/payload.db` is not modified while it runs.
+- `@payloadcms/db-sqlite` is no longer a dependency; `web/payload.db` remains
+  on disk, ignored, as the pre-migration artefact.
+
+Open item recorded, not decided: the Postgres adapter's development `push` is
+still enabled, so `payload_migrations` contains a `dev` row at batch `-1`
+alongside the migrated schema. `PLAN.md` §37 requires versioned migrations;
+whether development should run migrations only is undecided.
