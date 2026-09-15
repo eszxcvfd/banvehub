@@ -87,8 +87,17 @@ Out of scope:
 
 - [x] Owner decisions: fix checks in place, add CI, RBAC next, migrations-only
       schema
-- [ ] Group 1: make `pnpm lint` and `pnpm build` exit 0
-- [ ] Group 2: CI workflow for lint, build, and integration tests
+- [x] Group 1: make `pnpm lint` and `pnpm build` exit 0
+  - [x] ESLint uses the flat exports of `eslint-config-next`; three React
+        Compiler rules downgraded to warnings with the refactor recorded
+  - [x] `tailwind.config.mjs` uses ESM imports instead of `require`
+  - [x] `generatePreviewPath` imports the real route and maps real collections
+  - [x] implicit `any` parameters typed from the generated `Product` and
+        `Variant` types
+  - [x] Postgres adapter set to `push: false`
+- [x] Group 2: CI workflow for lint, build, and integration tests
+  - [x] `.github/workflows/ci.yml` with an ephemeral Postgres service
+  - [x] first GitHub Actions run succeeded on every step
 - [ ] Group 3: §5 roles and §22 access rules with a test matrix
 - [ ] Record validation and result, move the plan to `docs/plans/completed/`
 
@@ -101,15 +110,39 @@ Out of scope:
 - 2026-09-15: CI changes authorized by the owner, per `docs/WORKFLOW.md`.
 - 2026-09-15: RBAC keeps the existing `admin` role name for compatibility with
   the Payload admin panel while adding the §5 roles.
+- 2026-09-15: `payload migrate` prompts for confirmation when the database still
+  carries Payload's dev-push marker (a `payload_migrations` row named `dev` at
+  batch `-1`). `--forceAcceptWarning` does not suppress that prompt, so the
+  marker was deleted from the local development database instead. CI is not
+  affected: an empty database plus one `migrate` call creates all 87 tables with
+  no prompt, verified on a scratch database.
 
 ## Validation
 
-- Group 1 — focused proof: `pnpm lint` exits 0 and `pnpm build` exits 0.
-- Group 2 — repository check: the workflow file parses, the same commands pass
-  locally, and the first CI run's result is reported as observed or as
-  unverified.
-- Group 3 — integration proof: the role and action matrix test passes, covering
-  anonymous, buyer, seller, moderator, finance admin, and super admin.
+Group 1 — focused proof, **pass**:
+
+- `pnpm lint` exits 0 with 0 errors and 122 warnings.
+- `pnpm build` exits 0 and prints the full route table.
+- `pnpm test:int` exits 0.
+- The running application still answers `GET /` 200, `GET /admin` 200, and 404
+  for an unknown product slug, with no errors in the development log.
+
+Group 2 — repository check, **pass**:
+
+- YAML parses, and the workflow's five commands were run in order locally with
+  every exit code 0: install `--frozen-lockfile`, lint, `payload migrate`,
+  build, `test:int`.
+- The first GitHub Actions run succeeded on the real runner:
+  run `34921503753` at `7ea4f71`, conclusion `success`, with every step
+  green — initialize containers, install dependencies, lint, apply database
+  migrations, build and type check, integration tests.
+- Empty-database proof for the CI path: a scratch database plus one
+  `payload migrate` produced 87 tables and no prompt, and the same comparison
+  showed the development database schema is byte-identical to a
+  migrations-only schema apart from `pg_dump`'s random tokens.
+
+Group 3 — integration proof: the role and action matrix test passes, covering
+anonymous, buyer, seller, moderator, finance admin, and super admin.
 
 ## Result
 
