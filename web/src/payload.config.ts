@@ -43,6 +43,9 @@ export default buildConfig({
     pool: {
       connectionString: process.env.DATABASE_URL || '',
     },
+    // Development uses migrations too, so the database never drifts ahead of a
+    // committed migration (PLAN.md §37).
+    push: false,
   }),
   editor: lexicalEditor({
     features: () => {
