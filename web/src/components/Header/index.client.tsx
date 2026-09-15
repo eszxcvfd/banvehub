@@ -54,6 +54,12 @@ export function HeaderClient({ header }: Props) {
 
           <div className="flex items-center justify-end md:w-1/3 gap-3 pb-3">
             <Link
+              href="/wallet"
+              className="text-xs font-semibold px-3 py-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 transition-colors flex items-center gap-1"
+            >
+              Ví tiền
+            </Link>
+            <Link
               href="/seller"
               className="text-xs font-semibold px-3 py-1.5 rounded-full border border-primary/20 bg-primary/10 hover:bg-primary/20 text-primary transition-colors"
             >

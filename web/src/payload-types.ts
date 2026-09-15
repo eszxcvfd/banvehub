@@ -82,6 +82,11 @@ export interface Config {
     product_files: ProductFile;
     products: Product;
     seller_profiles: SellerProfile;
+    wallets: Wallet;
+    wallet_ledger: WalletLedger;
+    payment_intents: PaymentIntent;
+    payment_transactions: PaymentTransaction;
+    payment_webhook_events: PaymentWebhookEvent;
     forms: Form;
     'form-submissions': FormSubmission;
     addresses: Address;
@@ -109,6 +114,11 @@ export interface Config {
     product_files: ProductFilesSelect<false> | ProductFilesSelect<true>;
     products: ProductsSelect<false> | ProductsSelect<true>;
     seller_profiles: SellerProfilesSelect<false> | SellerProfilesSelect<true>;
+    wallets: WalletsSelect<false> | WalletsSelect<true>;
+    wallet_ledger: WalletLedgerSelect<false> | WalletLedgerSelect<true>;
+    payment_intents: PaymentIntentsSelect<false> | PaymentIntentsSelect<true>;
+    payment_transactions: PaymentTransactionsSelect<false> | PaymentTransactionsSelect<true>;
+    payment_webhook_events: PaymentWebhookEventsSelect<false> | PaymentWebhookEventsSelect<true>;
     forms: FormsSelect<false> | FormsSelect<true>;
     'form-submissions': FormSubmissionsSelect<false> | FormSubmissionsSelect<true>;
     addresses: AddressesSelect<false> | AddressesSelect<true>;
@@ -1089,6 +1099,135 @@ export interface SellerProfile {
   createdAt: string;
 }
 /**
+ * Số dư ví người dùng (Chỉ đọc - Mọi biến động phải qua Money Write Path và Ledger)
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "wallets".
+ */
+export interface Wallet {
+  id: number;
+  user: number | User;
+  balance: number;
+  pendingBalance: number;
+  currency: 'VND';
+  status: 'active' | 'frozen' | 'closed';
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Sổ cái tài chính bất biến (Append-Only Ledger - Không thể sửa hoặc xóa)
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "wallet_ledger".
+ */
+export interface WalletLedger {
+  id: number;
+  wallet: number | Wallet;
+  user: number | User;
+  type: 'topup' | 'purchase' | 'refund' | 'adjustment' | 'withdrawal' | 'payout';
+  amount: number;
+  direction: 'credit' | 'debit';
+  referenceType: 'payment_intent' | 'order' | 'adjustment' | 'withdrawal' | 'system';
+  referenceId: string;
+  balanceBefore: number;
+  balanceAfter: number;
+  description?: string | null;
+  metadata?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Ý định thanh toán / Nạp tiền người dùng (Payment Intents State Machine)
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payment_intents".
+ */
+export interface PaymentIntent {
+  id: number;
+  code: string;
+  user: number | User;
+  provider: 'sepay' | 'vnpay' | 'momo';
+  amount: number;
+  currency: 'VND';
+  status: 'CREATED' | 'PENDING' | 'PAID' | 'EXPIRED' | 'FAILED' | 'CANCELLED' | 'REFUNDED';
+  reconciliationFlag?: boolean | null;
+  reconciliationNote?: string | null;
+  expiresAt: string;
+  checkoutUrl?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Lịch sử giao dịch từ nhà cung cấp thanh toán (SePay) - Ràng buộc duy nhất BR-02
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payment_transactions".
+ */
+export interface PaymentTransaction {
+  id: number;
+  paymentIntent: number | PaymentIntent;
+  user: number | User;
+  provider: string;
+  providerTransactionId: string;
+  amount: number;
+  rawReference?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  status: 'SUCCESS' | 'FAILED' | 'PENDING';
+  paidAt: string;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Nhật ký sự kiện Webhook từ cổng thanh toán (Đã che giấu dữ liệu nhạy cảm)
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payment_webhook_events".
+ */
+export interface PaymentWebhookEvent {
+  id: number;
+  provider: string;
+  eventId?: string | null;
+  payload:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  headers?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  signatureValid: boolean;
+  status: 'processed' | 'duplicate_ignored' | 'amount_mismatch' | 'invalid_signature' | 'failed';
+  processedAt: string;
+  errorDetails?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "form-submissions".
  */
@@ -1168,6 +1307,26 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'seller_profiles';
         value: number | SellerProfile;
+      } | null)
+    | ({
+        relationTo: 'wallets';
+        value: number | Wallet;
+      } | null)
+    | ({
+        relationTo: 'wallet_ledger';
+        value: number | WalletLedger;
+      } | null)
+    | ({
+        relationTo: 'payment_intents';
+        value: number | PaymentIntent;
+      } | null)
+    | ({
+        relationTo: 'payment_transactions';
+        value: number | PaymentTransaction;
+      } | null)
+    | ({
+        relationTo: 'payment_webhook_events';
+        value: number | PaymentWebhookEvent;
       } | null)
     | ({
         relationTo: 'forms';
@@ -1624,6 +1783,88 @@ export interface SellerProfilesSelect<T extends boolean = true> {
   rating?: T;
   generateSlug?: T;
   slug?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "wallets_select".
+ */
+export interface WalletsSelect<T extends boolean = true> {
+  user?: T;
+  balance?: T;
+  pendingBalance?: T;
+  currency?: T;
+  status?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "wallet_ledger_select".
+ */
+export interface WalletLedgerSelect<T extends boolean = true> {
+  wallet?: T;
+  user?: T;
+  type?: T;
+  amount?: T;
+  direction?: T;
+  referenceType?: T;
+  referenceId?: T;
+  balanceBefore?: T;
+  balanceAfter?: T;
+  description?: T;
+  metadata?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payment_intents_select".
+ */
+export interface PaymentIntentsSelect<T extends boolean = true> {
+  code?: T;
+  user?: T;
+  provider?: T;
+  amount?: T;
+  currency?: T;
+  status?: T;
+  reconciliationFlag?: T;
+  reconciliationNote?: T;
+  expiresAt?: T;
+  checkoutUrl?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payment_transactions_select".
+ */
+export interface PaymentTransactionsSelect<T extends boolean = true> {
+  paymentIntent?: T;
+  user?: T;
+  provider?: T;
+  providerTransactionId?: T;
+  amount?: T;
+  rawReference?: T;
+  status?: T;
+  paidAt?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payment_webhook_events_select".
+ */
+export interface PaymentWebhookEventsSelect<T extends boolean = true> {
+  provider?: T;
+  eventId?: T;
+  payload?: T;
+  headers?: T;
+  signatureValid?: T;
+  status?: T;
+  processedAt?: T;
+  errorDetails?: T;
   updatedAt?: T;
   createdAt?: T;
 }
