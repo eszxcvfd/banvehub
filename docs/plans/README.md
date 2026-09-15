@@ -30,4 +30,6 @@ decision into `docs/decisions/`; keep task-local choices in the plan.
 
 ## Active Plans
 
-No active execution plans are currently indexed.
+- [`phase-1-foundation.md`](active/phase-1-foundation.md): Phase 1 Foundation,
+  starting with PostgreSQL and the restoration of the deleted Phase 0
+  authority records.
