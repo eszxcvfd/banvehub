@@ -295,7 +295,7 @@ export const seed = async ({
   payload.logger.info(`— Seeding orders...`)
 
   const orderInCompleted = await payload.create({
-    collection: 'orders',
+    collection: 'orders' as any,
     data: {
       amount: 7499,
       currency: 'USD',
@@ -317,7 +317,7 @@ export const seed = async ({
   })
 
   const orderInProcessing = await payload.create({
-    collection: 'orders',
+    collection: 'orders' as any,
     data: {
       amount: 7499,
       currency: 'USD',

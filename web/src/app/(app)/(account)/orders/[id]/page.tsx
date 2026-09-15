@@ -1,196 +1,167 @@
-import type { Order } from '@/payload-types'
 import type { Metadata } from 'next'
-
 import { Price } from '@/components/Price'
 import { Button } from '@/components/ui/button'
 import { formatDateTime } from '@/utilities/formatDateTime'
 import { mergeOpenGraph } from '@/utilities/mergeOpenGraph'
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
-import { ChevronLeftIcon } from 'lucide-react'
-import { ProductItem } from '@/components/ProductItem'
-import { headers as getHeaders } from 'next/headers.js'
+import { notFound, redirect } from 'next/navigation'
+import { ChevronLeftIcon, FileCode, CheckCircle2 } from 'lucide-react'
+import { headers as getHeaders } from 'next/headers'
 import configPromise from '@payload-config'
 import { getPayload } from 'payload'
 import { OrderStatus } from '@/components/OrderStatus'
-import { AddressItem } from '@/components/addresses/AddressItem'
+import { DownloadButton } from '@/components/download/DownloadButton'
 
 export const dynamic = 'force-dynamic'
 
 type PageProps = {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ email?: string; accessToken?: string }>
 }
 
-export default async function Order({ params, searchParams }: PageProps) {
+export default async function OrderPage({ params }: PageProps) {
   const headers = await getHeaders()
   const payload = await getPayload({ config: configPromise })
   const { user } = await payload.auth({ headers })
 
-  const { id } = await params
-  const { email = '', accessToken = '' } = await searchParams
-
-  let order: Order | null = null
-
-  try {
-    const {
-      docs: [orderResult],
-    } = await payload.find({
-      collection: 'orders',
-      user,
-      overrideAccess: !Boolean(user),
-      depth: 2,
-      where: {
-        and: [
-          {
-            id: {
-              equals: id,
-            },
-          },
-          ...(user
-            ? [
-                {
-                  customer: {
-                    equals: user.id,
-                  },
-                },
-              ]
-            : [
-                {
-                  accessToken: {
-                    equals: accessToken,
-                  },
-                },
-                ...(email
-                  ? [
-                      {
-                        customerEmail: {
-                          equals: email,
-                        },
-                      },
-                    ]
-                  : []),
-              ]),
-        ],
-      },
-      select: {
-        amount: true,
-        currency: true,
-        items: true,
-        customerEmail: true,
-        customer: true,
-        status: true,
-        createdAt: true,
-        updatedAt: true,
-        shippingAddress: true,
-      },
-    })
-
-    const canAccessAsGuest =
-      !user &&
-      email &&
-      accessToken &&
-      orderResult &&
-      orderResult.customerEmail &&
-      orderResult.customerEmail === email
-    const canAccessAsUser =
-      user &&
-      orderResult &&
-      orderResult.customer &&
-      (typeof orderResult.customer === 'object'
-        ? orderResult.customer.id
-        : orderResult.customer) === user.id
-
-    if (orderResult && (canAccessAsGuest || canAccessAsUser)) {
-      order = orderResult
-    }
-  } catch (error) {
-    console.error(error)
+  if (!user) {
+    redirect(`/login?warning=${encodeURIComponent('Vui lòng đăng nhập để xem đơn hàng.')}`)
   }
 
-  if (!order) {
+  const { id } = await params
+  const orderId = Number(id)
+  if (isNaN(orderId) || orderId <= 0) {
     notFound()
   }
 
-  return (
-    <div className="">
-      <div className="flex gap-8 justify-between items-center mb-6">
-        {user ? (
-          <div className="flex gap-4">
-            <Button asChild variant="ghost">
-              <Link href="/orders">
-                <ChevronLeftIcon />
-                All orders
-              </Link>
-            </Button>
-          </div>
-        ) : (
-          <div></div>
-        )}
+  let order: any = null
+  let orderItems: any[] = []
 
-        <h1 className="text-sm uppercase font-mono px-2 bg-primary/10 rounded tracking-[0.07em]">
-          <span className="">{`Order #${order.id}`}</span>
+  try {
+    order = await payload.findByID({
+      collection: 'orders',
+      id: orderId,
+      user,
+      overrideAccess: false,
+    })
+
+    if (!order) {
+      notFound()
+    }
+
+    // Fetch order items
+    const itemsResult = await payload.find({
+      collection: 'order_items',
+      where: {
+        order: {
+          equals: orderId,
+        },
+      },
+      depth: 2,
+      overrideAccess: true,
+    })
+
+    orderItems = itemsResult?.docs || []
+  } catch (error) {
+    console.error('Error loading order:', error)
+    notFound()
+  }
+
+  const orderIdentifier = order.code || `#${order.id}`
+
+  return (
+    <div className="space-y-6">
+      <div className="flex gap-4 justify-between items-center">
+        <Button asChild variant="ghost" size="sm">
+          <Link href="/orders" className="flex items-center gap-1">
+            <ChevronLeftIcon className="w-4 h-4" />
+            Tất cả đơn hàng
+          </Link>
+        </Button>
+
+        <h1 className="text-sm font-mono px-3 py-1 bg-primary/10 rounded-full tracking-wider font-semibold">
+          {orderIdentifier}
         </h1>
       </div>
 
-      <div className="bg-card border rounded-lg px-6 py-4 flex flex-col gap-12">
-        <div className="flex flex-col gap-6 lg:flex-row lg:justify-between">
-          <div className="">
-            <p className="font-mono uppercase text-primary/50 mb-1 text-sm">Order Date</p>
-            <p className="text-lg">
+      <div className="bg-card border rounded-xl p-6 md:p-8 flex flex-col gap-8 shadow-sm">
+        {/* Order Header Summary */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 pb-6 border-b">
+          <div>
+            <p className="font-mono uppercase text-muted-foreground text-xs font-semibold">Ngày đặt</p>
+            <p className="text-base font-medium mt-1">
               <time dateTime={order.createdAt}>
-                {formatDateTime({ date: order.createdAt, format: 'MMMM dd, yyyy' })}
+                {formatDateTime({ date: order.createdAt, format: 'dd/MM/yyyy HH:mm' })}
               </time>
             </p>
           </div>
 
-          <div className="">
-            <p className="font-mono uppercase text-primary/50 mb-1 text-sm">Total</p>
-            {order.amount && <Price className="text-lg" amount={order.amount} />}
+          <div>
+            <p className="font-mono uppercase text-muted-foreground text-xs font-semibold">Tổng thanh toán</p>
+            <p className="text-xl font-bold font-mono text-primary mt-1">
+              {order.totalAmount !== undefined && (
+                <Price as="span" amount={order.totalAmount} currencyCode={order.currency ?? 'VND'} />
+              )}
+            </p>
           </div>
 
-          {order.status && (
-            <div className="grow max-w-1/3">
-              <p className="font-mono uppercase text-primary/50 mb-1 text-sm">Status</p>
-              <OrderStatus className="text-sm" status={order.status} />
-            </div>
-          )}
+          <div>
+            <p className="font-mono uppercase text-muted-foreground text-xs font-semibold mb-1">Trạng thái</p>
+            <OrderStatus status={order.status} />
+          </div>
         </div>
 
-        {order.items && (
-          <div>
-            <h2 className="font-mono text-primary/50 mb-4 uppercase text-sm">Items</h2>
-            <ul className="flex flex-col gap-6">
-              {order.items?.map((item, index) => {
-                if (typeof item.product === 'string') {
-                  return null
-                }
+        {/* Digital Items List */}
+        <div>
+          <h2 className="text-base font-semibold mb-4 flex items-center gap-2">
+            <FileCode className="w-5 h-5 text-primary" />
+            Tài nguyên kỹ thuật số ({orderItems.length})
+          </h2>
 
-                if (!item.product || typeof item.product !== 'object') {
-                  return <div key={index}>This item is no longer available.</div>
-                }
+          {orderItems.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Không có mục chi tiết đơn hàng.</p>
+          ) : (
+            <ul className="flex flex-col divide-y border rounded-lg overflow-hidden bg-background">
+              {orderItems.map((item) => {
+                const product = typeof item.product === 'object' ? item.product : null
+                const productId = product ? product.id : item.product
+                const productTitle = product?.title || `Sản phẩm #${productId}`
 
                 return (
-                  <li key={item.id}>
-                    <ProductItem
-                      product={item.product}
-                      quantity={item.quantity}
-                    />
+                  <li
+                    key={item.id}
+                    className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                  >
+                    <div className="space-y-1">
+                      <Link
+                        href={`/products/${product?.slug || productId}`}
+                        className="font-semibold hover:text-primary transition-colors line-clamp-1"
+                      >
+                        {productTitle}
+                      </Link>
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                        <span>Đơn giá: {item.salePrice?.toLocaleString('vi-VN')} ₫</span>
+                        <span>•</span>
+                        <span className="flex items-center gap-1 text-emerald-600 font-medium">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          Đã cấp quyền tải vĩnh viễn
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="shrink-0">
+                      <DownloadButton
+                        productId={productId}
+                        productTitle={productTitle}
+                        buttonText="Tải tệp ngay"
+                        size="sm"
+                      />
+                    </div>
                   </li>
                 )
               })}
             </ul>
-          </div>
-        )}
-
-        {order.shippingAddress && (
-          <div>
-            <h2 className="font-mono text-primary/50 mb-4 uppercase text-sm">Shipping Address</h2>
-
-            {/* @ts-expect-error - some kind of type hell */}
-            <AddressItem address={order.shippingAddress} hideActions />
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   )
@@ -200,11 +171,11 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const { id } = await params
 
   return {
-    description: `Order details for order ${id}.`,
+    description: `Chi tiết đơn hàng #${id} tại KienTaoHub.`,
     openGraph: mergeOpenGraph({
-      title: `Order ${id}`,
+      title: `Đơn hàng #${id}`,
       url: `/orders/${id}`,
     }),
-    title: `Order ${id}`,
+    title: `Đơn hàng #${id}`,
   }
 }

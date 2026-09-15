@@ -7,11 +7,6 @@
  */
 
 /**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "OrderStatus".
- */
-export type OrderStatus = ('processing' | 'completed' | 'cancelled' | 'refunded') | null;
-/**
  * Supported timezones in IANA format.
  *
  * This interface was referenced by `Config`'s JSON-Schema
@@ -87,10 +82,13 @@ export interface Config {
     payment_intents: PaymentIntent;
     payment_transactions: PaymentTransaction;
     payment_webhook_events: PaymentWebhookEvent;
+    orders: Order;
+    order_items: OrderItem;
+    entitlements: Entitlement;
+    download_events: DownloadEvent;
     forms: Form;
     'form-submissions': FormSubmission;
     addresses: Address;
-    orders: Order;
     transactions: Transaction;
     'payload-kv': PayloadKv;
     'payload-locked-documents': PayloadLockedDocument;
@@ -101,6 +99,9 @@ export interface Config {
     users: {
       orders: 'orders';
       addresses: 'addresses';
+    };
+    orders: {
+      items: 'order_items';
     };
   };
   collectionsSelect: {
@@ -119,10 +120,13 @@ export interface Config {
     payment_intents: PaymentIntentsSelect<false> | PaymentIntentsSelect<true>;
     payment_transactions: PaymentTransactionsSelect<false> | PaymentTransactionsSelect<true>;
     payment_webhook_events: PaymentWebhookEventsSelect<false> | PaymentWebhookEventsSelect<true>;
+    orders: OrdersSelect<false> | OrdersSelect<true>;
+    order_items: OrderItemsSelect<false> | OrderItemsSelect<true>;
+    entitlements: EntitlementsSelect<false> | EntitlementsSelect<true>;
+    download_events: DownloadEventsSelect<false> | DownloadEventsSelect<true>;
     forms: FormsSelect<false> | FormsSelect<true>;
     'form-submissions': FormSubmissionsSelect<false> | FormSubmissionsSelect<true>;
     addresses: AddressesSelect<false> | AddressesSelect<true>;
-    orders: OrdersSelect<false> | OrdersSelect<true>;
     transactions: TransactionsSelect<false> | TransactionsSelect<true>;
     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
@@ -157,7 +161,6 @@ export interface Config {
     collections: {
       addresses: Address;
       customers?: User;
-      orders: Order;
       products: Product;
       transactions: Transaction;
     };
@@ -219,38 +222,72 @@ export interface User {
   collection: 'users';
 }
 /**
+ * Đơn hàng kỹ thuật số (Digital Orders - Immutable Snapshot Price)
+ *
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "orders".
  */
 export interface Order {
   id: number;
-  items?:
-    | {
-        product?: (number | null) | Product;
-        quantity: number;
-        id?: string | null;
-      }[]
-    | null;
-  shippingAddress?: {
-    title?: string | null;
-    firstName?: string | null;
-    lastName?: string | null;
-    company?: string | null;
-    addressLine1?: string | null;
-    addressLine2?: string | null;
-    city?: string | null;
-    state?: string | null;
-    postalCode?: string | null;
-    country?: string | null;
-    phone?: string | null;
+  /**
+   * Mã định danh duy nhất của đơn hàng (VD: ORD-20260915-XXXXX)
+   */
+  code: string;
+  buyer: number | User;
+  /**
+   * Tổng giá trị đơn hàng tính theo VND
+   */
+  totalAmount: number;
+  currency: 'VND';
+  status: 'PENDING' | 'COMPLETED' | 'CANCELLED';
+  paymentSource: 'wallet' | 'free';
+  /**
+   * Thời điểm hoàn tất thanh toán và cấp quyền sở hữu
+   */
+  paidAt?: string | null;
+  /**
+   * Ghi chú nội bộ hoặc thông tin bổ sung về đơn hàng
+   */
+  notes?: string | null;
+  items?: {
+    docs?: (number | OrderItem)[];
+    hasNextPage?: boolean;
+    totalDocs?: number;
   };
-  customer?: (number | null) | User;
-  customerEmail?: string | null;
-  transactions?: (number | Transaction)[] | null;
-  status?: OrderStatus;
-  amount?: number | null;
-  currency?: 'USD' | null;
-  accessToken?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Chi tiết sản phẩm đơn hàng snapshot bất biến (BR-07)
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "order_items".
+ */
+export interface OrderItem {
+  id: number;
+  order: number | Order;
+  product: number | Product;
+  seller: number | User;
+  /**
+   * Giá bán snapshot tại thời điểm đặt hàng (BR-07)
+   */
+  salePrice: number;
+  /**
+   * Phí hoa hồng sàn thu
+   */
+  platformFee: number;
+  /**
+   * Số tiền thực nhận của người bán (salePrice - platformFee - tax)
+   */
+  sellerAmount: number;
+  /**
+   * Thuế áp dụng
+   */
+  tax: number;
+  /**
+   * Phiên bản chính sách phân chia doanh thu áp dụng tại thời điểm giao dịch
+   */
+  policyVersion: string;
   updatedAt: string;
   createdAt: string;
 }
@@ -970,46 +1007,6 @@ export interface ProductFile {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "transactions".
- */
-export interface Transaction {
-  id: number;
-  items?:
-    | {
-        product?: (number | null) | Product;
-        quantity: number;
-        id?: string | null;
-      }[]
-    | null;
-  paymentMethod?: 'stripe' | null;
-  stripe?: {
-    customerID?: string | null;
-    paymentIntentID?: string | null;
-  };
-  billingAddress?: {
-    title?: string | null;
-    firstName?: string | null;
-    lastName?: string | null;
-    company?: string | null;
-    addressLine1?: string | null;
-    addressLine2?: string | null;
-    city?: string | null;
-    state?: string | null;
-    postalCode?: string | null;
-    country?: string | null;
-    phone?: string | null;
-  };
-  status: 'pending' | 'succeeded' | 'failed' | 'cancelled' | 'expired' | 'refunded';
-  customer?: (number | null) | User;
-  customerEmail?: string | null;
-  order?: (number | null) | Order;
-  amount?: number | null;
-  currency?: 'USD' | null;
-  updatedAt: string;
-  createdAt: string;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "addresses".
  */
 export interface Address {
@@ -1228,6 +1225,108 @@ export interface PaymentWebhookEvent {
   createdAt: string;
 }
 /**
+ * Sổ cái quyền sở hữu và tải tài nguyên số (Entitlements Ledger - PLAN.md FR-16, Decision 0006)
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "entitlements".
+ */
+export interface Entitlement {
+  id: number;
+  /**
+   * Người dùng sở hữu quyền tải
+   */
+  user: number | User;
+  /**
+   * Sản phẩm được cấp quyền
+   */
+  product: number | Product;
+  /**
+   * Đơn hàng mua sản phẩm (để trống nếu là tải miễn phí)
+   */
+  order?: (number | null) | Order;
+  /**
+   * Mục đơn hàng liên kết (để trống nếu là tải miễn phí)
+   */
+  orderItem?: (number | null) | OrderItem;
+  /**
+   * Trạng thái quyền tải
+   */
+  status: 'active' | 'revoked' | 'expired';
+  /**
+   * Thời điểm cấp quyền
+   */
+  grantedAt: string;
+  /**
+   * Số lần đã tải file thành công
+   */
+  downloadCount: number;
+  /**
+   * Giới hạn số lần tải tối đa (để trống nếu không giới hạn)
+   */
+  maxDownloads?: number | null;
+  /**
+   * Thời điểm hết hạn tải (để trống nếu vĩnh viễn)
+   */
+  expiresAt?: string | null;
+  /**
+   * Thời điểm thu hồi quyền
+   */
+  revokedAt?: string | null;
+  /**
+   * Lý do thu hồi hoặc ghi chú cấp quyền
+   */
+  reason?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Nhật ký kiểm toán lượt tải tệp riêng tư (Append-Only Audit Log - PLAN.md FR-17, Decision 0006)
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "download_events".
+ */
+export interface DownloadEvent {
+  id: number;
+  /**
+   * Người dùng thực hiện yêu cầu tải (để trống nếu là khách hoặc unauthenticated)
+   */
+  user?: (number | null) | User;
+  /**
+   * Sản phẩm được yêu cầu tải
+   */
+  product: number | Product;
+  /**
+   * Quyền sở hữu liên kết (để trống nếu bị từ chối trước khi xác thực quyền)
+   */
+  entitlement?: (number | null) | Entitlement;
+  /**
+   * Địa chỉ IP của client
+   */
+  ipAddress?: string | null;
+  /**
+   * User-Agent header của client
+   */
+  userAgent?: string | null;
+  /**
+   * Thời điểm ghi nhận lượt tải
+   */
+  downloadedAt: string;
+  /**
+   * Kết quả của yêu cầu tải
+   */
+  status: 'SUCCESS' | 'DENIED' | 'EXPIRED' | 'FAILED';
+  /**
+   * Mã băm SHA-256 của token một lần (phục vụ đối soát và chống replay)
+   */
+  downloadTokenHash?: string | null;
+  /**
+   * Nguyên nhân từ chối hoặc chi tiết lỗi kỹ thuật
+   */
+  errorReason?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "form-submissions".
  */
@@ -1241,6 +1340,46 @@ export interface FormSubmission {
         id?: string | null;
       }[]
     | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "transactions".
+ */
+export interface Transaction {
+  id: number;
+  items?:
+    | {
+        product?: (number | null) | Product;
+        quantity: number;
+        id?: string | null;
+      }[]
+    | null;
+  paymentMethod?: 'stripe' | null;
+  stripe?: {
+    customerID?: string | null;
+    paymentIntentID?: string | null;
+  };
+  billingAddress?: {
+    title?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    company?: string | null;
+    addressLine1?: string | null;
+    addressLine2?: string | null;
+    city?: string | null;
+    state?: string | null;
+    postalCode?: string | null;
+    country?: string | null;
+    phone?: string | null;
+  };
+  status: 'pending' | 'succeeded' | 'failed' | 'cancelled' | 'expired' | 'refunded';
+  customer?: (number | null) | User;
+  customerEmail?: string | null;
+  order?: (number | null) | Order;
+  amount?: number | null;
+  currency?: 'USD' | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -1329,6 +1468,22 @@ export interface PayloadLockedDocument {
         value: number | PaymentWebhookEvent;
       } | null)
     | ({
+        relationTo: 'orders';
+        value: number | Order;
+      } | null)
+    | ({
+        relationTo: 'order_items';
+        value: number | OrderItem;
+      } | null)
+    | ({
+        relationTo: 'entitlements';
+        value: number | Entitlement;
+      } | null)
+    | ({
+        relationTo: 'download_events';
+        value: number | DownloadEvent;
+      } | null)
+    | ({
         relationTo: 'forms';
         value: number | Form;
       } | null)
@@ -1339,10 +1494,6 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'addresses';
         value: number | Address;
-      } | null)
-    | ({
-        relationTo: 'orders';
-        value: number | Order;
       } | null)
     | ({
         relationTo: 'transactions';
@@ -1870,6 +2021,75 @@ export interface PaymentWebhookEventsSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "orders_select".
+ */
+export interface OrdersSelect<T extends boolean = true> {
+  code?: T;
+  buyer?: T;
+  totalAmount?: T;
+  currency?: T;
+  status?: T;
+  paymentSource?: T;
+  paidAt?: T;
+  notes?: T;
+  items?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "order_items_select".
+ */
+export interface OrderItemsSelect<T extends boolean = true> {
+  order?: T;
+  product?: T;
+  seller?: T;
+  salePrice?: T;
+  platformFee?: T;
+  sellerAmount?: T;
+  tax?: T;
+  policyVersion?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "entitlements_select".
+ */
+export interface EntitlementsSelect<T extends boolean = true> {
+  user?: T;
+  product?: T;
+  order?: T;
+  orderItem?: T;
+  status?: T;
+  grantedAt?: T;
+  downloadCount?: T;
+  maxDownloads?: T;
+  expiresAt?: T;
+  revokedAt?: T;
+  reason?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "download_events_select".
+ */
+export interface DownloadEventsSelect<T extends boolean = true> {
+  user?: T;
+  product?: T;
+  entitlement?: T;
+  ipAddress?: T;
+  userAgent?: T;
+  downloadedAt?: T;
+  status?: T;
+  downloadTokenHash?: T;
+  errorReason?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "forms_select".
  */
 export interface FormsSelect<T extends boolean = true> {
@@ -2034,43 +2254,6 @@ export interface AddressesSelect<T extends boolean = true> {
   postalCode?: T;
   country?: T;
   phone?: T;
-  updatedAt?: T;
-  createdAt?: T;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "orders_select".
- */
-export interface OrdersSelect<T extends boolean = true> {
-  items?:
-    | T
-    | {
-        product?: T;
-        quantity?: T;
-        id?: T;
-      };
-  shippingAddress?:
-    | T
-    | {
-        title?: T;
-        firstName?: T;
-        lastName?: T;
-        company?: T;
-        addressLine1?: T;
-        addressLine2?: T;
-        city?: T;
-        state?: T;
-        postalCode?: T;
-        country?: T;
-        phone?: T;
-      };
-  customer?: T;
-  customerEmail?: T;
-  transactions?: T;
-  status?: T;
-  amount?: T;
-  currency?: T;
-  accessToken?: T;
   updatedAt?: T;
   createdAt?: T;
 }

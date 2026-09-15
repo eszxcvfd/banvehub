@@ -198,15 +198,23 @@ export async function debitWallet(
     throw new InsufficientFundsError(currentBalance, amount)
   }
 
-  // Attempt atomic conditional update via database execution if available,
-  // or fetch with lock / check to guarantee BR-01 (no negative balance under race conditions)
-  const db = (payload.db as any)
+  // Attempt atomic conditional update via database execution inside active transaction if available (BR-01)
   let updateSuccess = false
   let newBalance = currentBalance - amount
 
-  if (db && typeof db.execute === 'function') {
+  // Resolve Drizzle instance: if inside a transaction (req.transactionID), use the session transaction;
+  // otherwise fallback to the root Drizzle instance.
+  let dTx = (payload.db as any)?.drizzle
+  if (req?.transactionID && (payload.db as any)?.sessions) {
+    const txId = req.transactionID instanceof Promise ? await req.transactionID : req.transactionID
+    if (txId && (payload.db as any).sessions[txId]?.db) {
+      dTx = (payload.db as any).sessions[txId].db
+    }
+  }
+
+  if (dTx && typeof dTx.execute === 'function') {
     try {
-      const result = await db.execute(sql`
+      const result = await dTx.execute(sql`
         UPDATE "wallets"
         SET "balance" = "balance" - ${amount}, "updated_at" = NOW()
         WHERE "id" = ${wallet.id} AND "balance" >= ${amount}

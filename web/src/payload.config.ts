@@ -17,6 +17,10 @@ import { fileURLToPath } from 'url'
 
 import { Categories } from '@/collections/Categories'
 import { Media } from '@/collections/Media'
+import { Entitlements } from '@/collections/Entitlements'
+import { DownloadEvents } from '@/collections/DownloadEvents'
+import { Orders } from '@/collections/Orders'
+import { OrderItems } from '@/collections/OrderItems'
 import { Pages } from '@/collections/Pages'
 import { PaymentIntents } from '@/collections/PaymentIntents'
 import { PaymentTransactions } from '@/collections/PaymentTransactions'
@@ -65,6 +69,10 @@ export default buildConfig({
     PaymentIntents,
     PaymentTransactions,
     PaymentWebhookEvents,
+    Orders,
+    OrderItems,
+    Entitlements,
+    DownloadEvents,
   ],
   db: postgresAdapter({
     pool: {

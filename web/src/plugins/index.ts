@@ -88,34 +88,7 @@ export const plugins: Plugin[] = [
     },
     carts: false,
     products: false,
-    orders: {
-      ordersCollectionOverride: ({ defaultCollection }) => ({
-        ...defaultCollection,
-        fields: [
-          ...defaultCollection.fields,
-          {
-            name: 'accessToken',
-            type: 'text',
-            unique: true,
-            index: true,
-            admin: {
-              position: 'sidebar',
-              readOnly: true,
-            },
-            hooks: {
-              beforeValidate: [
-                ({ value, operation }) => {
-                  if (operation === 'create' || !value) {
-                    return crypto.randomUUID()
-                  }
-                  return value
-                },
-              ],
-            },
-          },
-        ],
-      }),
-    },
+    orders: false,
     transactions: {
       transactionsCollectionOverride: ({ defaultCollection }) => ({
         ...defaultCollection,
@@ -148,6 +121,12 @@ export const plugins: Plugin[] = [
       }
       if (Array.isArray(collections?.required)) {
         collections.required = collections.required.filter((s: string) => s !== 'carts')
+      }
+      if (collections?.properties?.orders) {
+        delete collections.properties.orders
+      }
+      if (Array.isArray(collections?.required)) {
+        collections.required = collections.required.filter((s: string) => s !== 'orders')
       }
       return jsonSchema
     })

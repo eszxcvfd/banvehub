@@ -3,6 +3,7 @@ import * as migration_20260915_023701_user_roles_from_plan_5 from './20260915_02
 import * as migration_20260915_033625_phase2_digital_catalog from './20260915_033625_phase2_digital_catalog';
 import * as migration_20260915_062953_phase3_seller_moderation from './20260915_062953_phase3_seller_moderation';
 import * as migration_20260915_064708_phase4_payment_wallet from './20260915_064708_phase4_payment_wallet';
+import * as migration_20260915_071500_phase5_purchase_download from './20260915_071500_phase5_purchase_download';
 
 export const migrations = [
   {
@@ -28,6 +29,11 @@ export const migrations = [
   {
     up: migration_20260915_064708_phase4_payment_wallet.up,
     down: migration_20260915_064708_phase4_payment_wallet.down,
-    name: '20260915_064708_phase4_payment_wallet'
+    name: '20260915_064708_phase4_payment_wallet',
+  },
+  {
+    up: migration_20260915_071500_phase5_purchase_download.up,
+    down: migration_20260915_071500_phase5_purchase_download.down,
+    name: '20260915_071500_phase5_purchase_download',
   },
 ];

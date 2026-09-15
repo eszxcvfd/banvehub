@@ -71,10 +71,10 @@ export const Users: CollectionConfig = {
       name: 'orders',
       type: 'join',
       collection: 'orders',
-      on: 'customer',
+      on: 'buyer',
       admin: {
         allowCreate: false,
-        defaultColumns: ['id', 'createdAt', 'total', 'currency', 'items'],
+        defaultColumns: ['id', 'code', 'createdAt', 'totalAmount', 'status'],
       },
     },
     {
