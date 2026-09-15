@@ -8,15 +8,7 @@ import type { DefaultDocumentIDType } from 'payload'
 type Props = { item: Product; priority?: boolean; size: 'full' | 'half' }
 
 export const ThreeItemGridItem: React.FC<Props> = ({ item, size }) => {
-  let price = item.priceInUSD
-
-  if (item.enableVariants && item.variants?.docs?.length) {
-    const variant = item.variants.docs[0]
-
-    if (variant && typeof variant === 'object' && variant.priceInUSD) {
-      price = variant.priceInUSD
-    }
-  }
+  const price = item.price ?? 0
 
   return (
     <div
@@ -25,7 +17,7 @@ export const ThreeItemGridItem: React.FC<Props> = ({ item, size }) => {
       <Link className="relative block aspect-square h-full w-full" href={`/products/${item.slug}`}>
         <GridTileImage
           label={{
-            amount: price!,
+            amount: price,
             position: size === 'full' ? 'center' : 'bottom',
             title: item.title,
           }}

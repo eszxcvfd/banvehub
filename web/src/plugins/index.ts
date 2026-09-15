@@ -9,7 +9,6 @@ import { stripeAdapter } from '@payloadcms/plugin-ecommerce/payments/stripe'
 
 import { Page, Product } from '@/payload-types'
 import { getServerSideURL } from '@/utilities/getURL'
-import { ProductsCollection } from '@/collections/Products'
 import { adminOrPublishedStatus } from '@/access/adminOrPublishedStatus'
 import { adminOnlyFieldAccess } from '@/access/adminOnlyFieldAccess'
 import { buyerOnlyFieldAccess } from '@/access/buyerOnlyFieldAccess'
@@ -87,6 +86,8 @@ export const plugins: Plugin[] = [
     customers: {
       slug: 'users',
     },
+    carts: false,
+    products: false,
     orders: {
       ordersCollectionOverride: ({ defaultCollection }) => ({
         ...defaultCollection,
@@ -115,6 +116,14 @@ export const plugins: Plugin[] = [
         ],
       }),
     },
+    transactions: {
+      transactionsCollectionOverride: ({ defaultCollection }) => ({
+        ...defaultCollection,
+        fields: defaultCollection.fields.filter(
+          (field) => !('name' in field && field.name === 'cart'),
+        ),
+      }),
+    },
     payments: {
       paymentMethods: [
         stripeAdapter({
@@ -124,8 +133,24 @@ export const plugins: Plugin[] = [
         }),
       ],
     },
-    products: {
-      productsCollectionOverride: ProductsCollection,
-    },
   }),
+  (incomingConfig) => {
+    if (!incomingConfig.typescript) {
+      incomingConfig.typescript = {}
+    }
+    if (!incomingConfig.typescript.schema) {
+      incomingConfig.typescript.schema = []
+    }
+    incomingConfig.typescript.schema.push(({ jsonSchema }) => {
+      const collections = (jsonSchema?.properties?.ecommerce as any)?.properties?.collections
+      if (collections?.properties?.carts) {
+        delete collections.properties.carts
+      }
+      if (Array.isArray(collections?.required)) {
+        collections.required = collections.required.filter((s: string) => s !== 'carts')
+      }
+      return jsonSchema
+    })
+    return incomingConfig
+  },
 ]

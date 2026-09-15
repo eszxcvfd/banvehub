@@ -1,4 +1,4 @@
-import type { Product, Variant } from '@/payload-types'
+import type { Product } from '@/payload-types'
 
 import Link from 'next/link'
 import React from 'react'
@@ -11,23 +11,7 @@ type Props = {
 }
 
 export const ProductGridItem: React.FC<Props> = ({ product }) => {
-  const { gallery, priceInUSD, title } = product
-
-  let price = priceInUSD
-
-  const variants = product.variants?.docs
-
-  if (variants && variants.length > 0) {
-    const variant = variants[0]
-    if (
-      variant &&
-      typeof variant === 'object' &&
-      variant?.priceInUSD &&
-      typeof variant.priceInUSD === 'number'
-    ) {
-      price = variant.priceInUSD
-    }
-  }
+  const { gallery, price, isFree, title } = product
 
   const image =
     gallery?.[0]?.image && typeof gallery[0]?.image !== 'string' ? gallery[0]?.image : false
@@ -51,11 +35,15 @@ export const ProductGridItem: React.FC<Props> = ({ product }) => {
       <div className="font-mono text-primary/50 group-hover:text-primary flex justify-between items-center mt-4">
         <div>{title}</div>
 
-        {typeof price === 'number' && (
+        {isFree ? (
+          <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+            Miễn phí
+          </span>
+        ) : typeof price === 'number' ? (
           <div className="">
             <Price amount={price} />
           </div>
-        )}
+        ) : null}
       </div>
     </Link>
   )

@@ -9,13 +9,9 @@ const eslintConfig = [
   ...nextTypescript,
   {
     rules: {
-      // Next 16 ships the React Compiler rules as errors. The template predates
-      // them and has 9 violations in cart, checkout, gallery, and theme code.
-      // They are warnings until that refactor lands; see
-      // docs/plans/active/phase-1-checks-ci-rbac.md.
-      'react-hooks/preserve-manual-memoization': 'warn',
-      'react-hooks/refs': 'warn',
-      'react-hooks/set-state-in-effect': 'warn',
+      'react-hooks/preserve-manual-memoization': 'error',
+      'react-hooks/refs': 'error',
+      'react-hooks/set-state-in-effect': 'error',
       '@typescript-eslint/ban-ts-comment': 'warn',
       '@typescript-eslint/no-empty-object-type': 'warn',
       '@typescript-eslint/no-explicit-any': 'warn',
@@ -34,7 +30,13 @@ const eslintConfig = [
     },
   },
   {
-    ignores: ['.next/', 'src/payload-types.ts', 'src/payload-generated-schema.ts'],
+    ignores: [
+      '.next/',
+      'src/payload-types.ts',
+      'src/payload-generated-schema.ts',
+      'playwright-report/**',
+      'test-results/**',
+    ],
   },
 ]
 

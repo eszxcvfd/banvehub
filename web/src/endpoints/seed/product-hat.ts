@@ -1,11 +1,10 @@
-import type { Category, Product, VariantOption, VariantType } from '@/payload-types'
+import type { Category, Product } from '@/payload-types'
 import type { Media } from '@/payload-types'
 import { RequiredDataFromCollectionSlug } from 'payload'
 
 type ProductArgs = {
   galleryImage: Media
   metaImage: Media
-  variantTypes: VariantType[]
   categories: Category[]
   relatedProducts: Product[]
 }
@@ -14,7 +13,6 @@ export const productHatData: (args: ProductArgs) => RequiredDataFromCollectionSl
   galleryImage,
   relatedProducts,
   metaImage,
-  variantTypes,
   categories,
 }) => {
   return {
@@ -61,8 +59,8 @@ export const productHatData: (args: ProductArgs) => RequiredDataFromCollectionSl
     gallery: [{ image: galleryImage }],
     title: 'Hat',
     slug: 'hat',
-    priceInUSDEnabled: true,
-    priceInUSD: 2500,
+    price: 250000,
+    isFree: false,
     relatedProducts: relatedProducts,
   }
 }

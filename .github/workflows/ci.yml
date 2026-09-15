@@ -1,9 +1,9 @@
 name: CI
 
 # PLAN.md §36 requires lint, tests, and a build on every pull request. This
-# workflow covers lint, the production build (which type-checks), and the
-# integration tests. Security scanning, end-to-end tests, image builds, and
-# staging deploys are not part of it yet.
+# workflow covers lint, security scanning, the production build (which
+# type-checks), and the integration tests. End-to-end tests, image builds,
+# and staging deploys are not part of it yet.
 
 on:
   pull_request:
@@ -13,7 +13,7 @@ on:
 
 jobs:
   checks:
-    name: lint, build, integration tests
+    name: lint, security, build, integration tests
     runs-on: ubuntu-latest
 
     defaults:
@@ -66,6 +66,9 @@ jobs:
 
       - name: Lint
         run: pnpm lint
+
+      - name: Security audit
+        run: pnpm audit --audit-level=high
 
       # The schema comes from versioned migrations, never from a development
       # push (PLAN.md §37), so both the build and the tests need this step.

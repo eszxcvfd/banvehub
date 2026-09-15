@@ -2,14 +2,16 @@ import type { Metadata } from 'next'
 
 const defaultOpenGraph: Metadata['openGraph'] = {
   type: 'website',
-  description: 'An open-source website built with Payload and Next.js.',
+  description:
+    'KienTaoHub - Nền tảng thương mại và chia sẻ tài nguyên bản vẽ CAD, mô hình 3D, BIM, Revit và hồ sơ kỹ thuật số.',
   images: [
     {
       url: 'https://payloadcms.com/images/og-image.jpg',
     },
   ],
-  siteName: 'Payload Website Template',
-  title: 'Payload Website Template',
+  siteName: 'KienTaoHub',
+  title: 'KienTaoHub - Sàn chia sẻ bản vẽ & mô hình kỹ thuật số',
+  locale: 'vi_VN',
 }
 
 export const mergeOpenGraph = (og?: Partial<Metadata['openGraph']>): Metadata['openGraph'] => {

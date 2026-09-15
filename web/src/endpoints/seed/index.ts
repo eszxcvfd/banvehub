@@ -3,13 +3,13 @@ import type { CollectionSlug, GlobalSlug, Payload, PayloadRequest, File } from '
 import { contactFormData } from './contact-form'
 import { contactPageData } from './contact-page'
 import { productHatData } from './product-hat'
-import { productTshirtData, productTshirtVariant } from './product-tshirt'
+import { productTshirtData } from './product-tshirt'
 import { homePageData } from './home'
 import { imageHatData } from './image-hat'
 import { imageTshirtBlackData } from './image-tshirt-black'
 import { imageTshirtWhiteData } from './image-tshirt-white'
 import { imageHero1Data } from './image-hero-1'
-import { Address, Transaction, VariantOption } from '@/payload-types'
+import { Address, Transaction } from '@/payload-types'
 
 const collections: CollectionSlug[] = [
   'categories',
@@ -18,28 +18,15 @@ const collections: CollectionSlug[] = [
   'products',
   'forms',
   'form-submissions',
-  'variants',
-  'variantOptions',
-  'variantTypes',
-  'carts',
   'transactions',
   'addresses',
   'orders',
+  'software_types',
+  'tags',
+  'product_previews',
 ]
 
 const categories = ['Accessories', 'T-Shirts', 'Hats']
-
-const sizeVariantOptions = [
-  { label: 'Small', value: 'small' },
-  { label: 'Medium', value: 'medium' },
-  { label: 'Large', value: 'large' },
-  { label: 'X Large', value: 'xlarge' },
-]
-
-const colorVariantOptions = [
-  { label: 'Black', value: 'black' },
-  { label: 'White', value: 'white' },
-]
 
 const globals: GlobalSlug[] = ['header', 'footer']
 
@@ -191,51 +178,6 @@ export const seed = async ({
     ),
   ])
 
-  payload.logger.info(`— Seeding variant types and options...`)
-
-  const sizeVariantType = await payload.create({
-    collection: 'variantTypes',
-    data: {
-      name: 'size',
-      label: 'Size',
-    },
-  })
-
-  const sizeVariantOptionsResults: VariantOption[] = []
-
-  for (const option of sizeVariantOptions) {
-    const result = await payload.create({
-      collection: 'variantOptions',
-      data: {
-        ...option,
-        variantType: sizeVariantType.id,
-      },
-    })
-    sizeVariantOptionsResults.push(result)
-  }
-
-  const [small, medium, large, xlarge] = sizeVariantOptionsResults
-
-  const colorVariantType = await payload.create({
-    collection: 'variantTypes',
-    data: {
-      name: 'color',
-      label: 'Color',
-    },
-  })
-
-  const [black, white] = await Promise.all(
-    colorVariantOptions.map((option) => {
-      return payload.create({
-        collection: 'variantOptions',
-        data: {
-          ...option,
-          variantType: colorVariantType.id,
-        },
-      })
-    }),
-  )
-
   payload.logger.info(`— Seeding products...`)
 
   const productHat = await payload.create({
@@ -244,7 +186,6 @@ export const seed = async ({
     data: productHatData({
       galleryImage: imageHat,
       metaImage: imageHat,
-      variantTypes: [colorVariantType],
       categories: [hatsCategory],
       relatedProducts: [],
     }),
@@ -255,54 +196,15 @@ export const seed = async ({
     depth: 0,
     data: productTshirtData({
       galleryImages: [
-        { image: imageTshirtBlack, variantOption: black },
-        { image: imageTshirtWhite, variantOption: white },
+        { image: imageTshirtBlack },
+        { image: imageTshirtWhite },
       ],
       metaImage: imageTshirtBlack,
       contentImage: imageHero,
-      variantTypes: [colorVariantType, sizeVariantType],
       categories: [tshirtsCategory],
       relatedProducts: [productHat],
     }),
   })
-
-  let hoodieID: number | string = productTshirt.id
-
-  if (payload.db.defaultIDType === 'text') {
-    hoodieID = `"${hoodieID}"`
-  }
-
-  const [
-    smallTshirtHoodieVariant,
-    mediumTshirtHoodieVariant,
-    largeTshirtHoodieVariant,
-    xlargeTshirtHoodieVariant,
-  ] = await Promise.all(
-    [small, medium, large, xlarge].map((variantOption) =>
-      payload.create({
-        collection: 'variants',
-        depth: 0,
-        data: productTshirtVariant({
-          product: productTshirt,
-          variantOptions: [variantOption, white],
-        }),
-      }),
-    ),
-  )
-
-  await Promise.all(
-    [small, medium, large, xlarge].map((variantOption) =>
-      payload.create({
-        collection: 'variants',
-        depth: 0,
-        data: productTshirtVariant({
-          product: productTshirt,
-          variantOptions: [variantOption, black],
-          ...(variantOption.value === 'medium' ? { inventory: 0 } : {}),
-        }),
-      }),
-    ),
-  )
 
   payload.logger.info(`— Seeding contact form...`)
 
@@ -390,70 +292,6 @@ export const seed = async ({
     succeededTransactionID = `"${succeededTransactionID}"`
   }
 
-  payload.logger.info(`— Seeding carts...`)
-
-  // This cart is open as it's created now
-  const openCart = await payload.create({
-    collection: 'carts',
-    data: {
-      customer: customer.id,
-      currency: 'USD',
-      items: [
-        {
-          product: productTshirt.id,
-          variant: mediumTshirtHoodieVariant.id,
-          quantity: 1,
-        },
-      ],
-    },
-  })
-
-  const oldTimestamp = new Date('2023-01-01T00:00:00Z').toISOString()
-
-  // Cart is abandoned because it was created long in the past
-  const abandonedCart = await payload.create({
-    collection: 'carts',
-    data: {
-      currency: 'USD',
-      createdAt: oldTimestamp,
-      items: [
-        {
-          product: productHat.id,
-          quantity: 1,
-        },
-      ],
-    },
-  })
-
-  // Cart is purchased because it has a purchasedAt date
-  const completedCart = await payload.create({
-    collection: 'carts',
-    data: {
-      customer: customer.id,
-      currency: 'USD',
-      purchasedAt: new Date().toISOString(),
-      subtotal: 7499,
-      items: [
-        {
-          product: productTshirt.id,
-          variant: smallTshirtHoodieVariant.id,
-          quantity: 1,
-        },
-        {
-          product: productTshirt.id,
-          variant: mediumTshirtHoodieVariant.id,
-          quantity: 1,
-        },
-      ],
-    },
-  })
-
-  let completedCartID: number | string = completedCart.id
-
-  if (payload.db.defaultIDType === 'text') {
-    completedCartID = `"${completedCartID}"`
-  }
-
   payload.logger.info(`— Seeding orders...`)
 
   const orderInCompleted = await payload.create({
@@ -466,12 +304,10 @@ export const seed = async ({
       items: [
         {
           product: productTshirt.id,
-          variant: smallTshirtHoodieVariant.id,
           quantity: 1,
         },
         {
-          product: productTshirt.id,
-          variant: mediumTshirtHoodieVariant.id,
+          product: productHat.id,
           quantity: 1,
         },
       ],
@@ -490,12 +326,10 @@ export const seed = async ({
       items: [
         {
           product: productTshirt.id,
-          variant: smallTshirtHoodieVariant.id,
           quantity: 1,
         },
         {
-          product: productTshirt.id,
-          variant: mediumTshirtHoodieVariant.id,
+          product: productHat.id,
           quantity: 1,
         },
       ],

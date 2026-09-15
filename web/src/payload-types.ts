@@ -76,14 +76,13 @@ export interface Config {
     pages: Page;
     categories: Category;
     media: Media;
+    software_types: SoftwareType;
+    tags: Tag;
+    product_previews: ProductPreview;
+    products: Product;
     forms: Form;
     'form-submissions': FormSubmission;
     addresses: Address;
-    variants: Variant;
-    variantTypes: VariantType;
-    variantOptions: VariantOption;
-    products: Product;
-    carts: Cart;
     orders: Order;
     transactions: Transaction;
     'payload-kv': PayloadKv;
@@ -94,14 +93,7 @@ export interface Config {
   collectionsJoins: {
     users: {
       orders: 'orders';
-      cart: 'carts';
       addresses: 'addresses';
-    };
-    variantTypes: {
-      options: 'variantOptions';
-    };
-    products: {
-      variants: 'variants';
     };
   };
   collectionsSelect: {
@@ -109,14 +101,13 @@ export interface Config {
     pages: PagesSelect<false> | PagesSelect<true>;
     categories: CategoriesSelect<false> | CategoriesSelect<true>;
     media: MediaSelect<false> | MediaSelect<true>;
+    software_types: SoftwareTypesSelect<false> | SoftwareTypesSelect<true>;
+    tags: TagsSelect<false> | TagsSelect<true>;
+    product_previews: ProductPreviewsSelect<false> | ProductPreviewsSelect<true>;
+    products: ProductsSelect<false> | ProductsSelect<true>;
     forms: FormsSelect<false> | FormsSelect<true>;
     'form-submissions': FormSubmissionsSelect<false> | FormSubmissionsSelect<true>;
     addresses: AddressesSelect<false> | AddressesSelect<true>;
-    variants: VariantsSelect<false> | VariantsSelect<true>;
-    variantTypes: VariantTypesSelect<false> | VariantTypesSelect<true>;
-    variantOptions: VariantOptionsSelect<false> | VariantOptionsSelect<true>;
-    products: ProductsSelect<false> | ProductsSelect<true>;
-    carts: CartsSelect<false> | CartsSelect<true>;
     orders: OrdersSelect<false> | OrdersSelect<true>;
     transactions: TransactionsSelect<false> | TransactionsSelect<true>;
     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
@@ -151,14 +142,10 @@ export interface Config {
   ecommerce: {
     collections: {
       addresses: Address;
-      carts: Cart;
       customers?: User;
       orders: Order;
       products: Product;
       transactions: Transaction;
-      variantOptions: VariantOption;
-      variants: Variant;
-      variantTypes: VariantType;
     };
   };
 }
@@ -190,11 +177,6 @@ export interface User {
   roles?: ('admin' | 'buyer' | 'seller' | 'moderator' | 'financeAdmin')[] | null;
   orders?: {
     docs?: (number | Order)[];
-    hasNextPage?: boolean;
-    totalDocs?: number;
-  };
-  cart?: {
-    docs?: (number | Cart)[];
     hasNextPage?: boolean;
     totalDocs?: number;
   };
@@ -231,7 +213,6 @@ export interface Order {
   items?:
     | {
         product?: (number | null) | Product;
-        variant?: (number | null) | Variant;
         quantity: number;
         id?: string | null;
       }[]
@@ -281,24 +262,32 @@ export interface Product {
     };
     [k: string]: unknown;
   } | null;
+  /**
+   * Public watermarked previews (images, PDF sample sheets, 3D models)
+   */
+  previewGallery?: (number | ProductPreview)[] | null;
   gallery?:
     | {
         image: number | Media;
-        variantOption?: (number | null) | VariantOption;
+        caption?: string | null;
         id?: string | null;
       }[]
     | null;
   layout?: (CallToActionBlock | ContentBlock | MediaBlock)[] | null;
-  inventory?: number | null;
-  enableVariants?: boolean | null;
-  variantTypes?: (number | VariantType)[] | null;
-  variants?: {
-    docs?: (number | Variant)[];
-    hasNextPage?: boolean;
-    totalDocs?: number;
+  /**
+   * Price in Vietnamese Dong (VND). Set to 0 if free.
+   */
+  price: number;
+  /**
+   * Mark as free asset (displays "Tải miễn phí" CTA)
+   */
+  isFree?: boolean | null;
+  technicalSpecs?: {
+    fileFormat?: string | null;
+    softwareVersion?: string | null;
+    fileSize?: string | null;
+    unit?: ('metric' | 'imperial' | 'other') | null;
   };
-  priceInUSDEnabled?: boolean | null;
-  priceInUSD?: number | null;
   relatedProducts?: (number | Product)[] | null;
   meta?: {
     title?: string | null;
@@ -309,6 +298,8 @@ export interface Product {
     description?: string | null;
   };
   categories?: (number | Category)[] | null;
+  software_types?: (number | SoftwareType)[] | null;
+  tags?: (number | Tag)[] | null;
   /**
    * When enabled, the slug will auto-generate from the title field on save and autosave.
    */
@@ -316,8 +307,22 @@ export interface Product {
   slug: string;
   updatedAt: string;
   createdAt: string;
-  deletedAt?: string | null;
   _status?: ('draft' | 'published') | null;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "product_previews".
+ */
+export interface ProductPreview {
+  id: number;
+  title: string;
+  previewImage: number | Media;
+  previewType: 'image' | 'pdf' | 'model_viewer';
+  isWatermarked?: boolean | null;
+  caption?: string | null;
+  sortOrder?: number | null;
+  updatedAt: string;
+  createdAt: string;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -352,40 +357,6 @@ export interface Media {
   height?: number | null;
   focalX?: number | null;
   focalY?: number | null;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "variantOptions".
- */
-export interface VariantOption {
-  id: number;
-  _variantOptions_options_order?: string | null;
-  variantType: number | VariantType;
-  label: string;
-  /**
-   * should be defaulted or dynamic based on label
-   */
-  value: string;
-  updatedAt: string;
-  createdAt: string;
-  deletedAt?: string | null;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "variantTypes".
- */
-export interface VariantType {
-  id: number;
-  label: string;
-  name: string;
-  options?: {
-    docs?: (number | VariantOption)[];
-    hasNextPage?: boolean;
-    totalDocs?: number;
-  };
-  updatedAt: string;
-  createdAt: string;
-  deletedAt?: string | null;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -604,6 +575,20 @@ export interface Category {
    */
   generateSlug?: boolean | null;
   slug: string;
+  description?: string | null;
+  parent?: (number | null) | Category;
+  icon?: (number | null) | Media;
+  image?: (number | null) | Media;
+  sortOrder?: number | null;
+  status?: ('active' | 'archived') | null;
+  meta?: {
+    title?: string | null;
+    /**
+     * Maximum upload file size: 12MB. Recommended file size for images is <500KB.
+     */
+    image?: (number | null) | Media;
+    description?: string | null;
+  };
   updatedAt: string;
   createdAt: string;
 }
@@ -867,23 +852,41 @@ export interface Form {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "variants".
+ * via the `definition` "software_types".
  */
-export interface Variant {
+export interface SoftwareType {
   id: number;
+  title: string;
   /**
-   * Used for administrative purposes, not shown to customers. This is populated by default.
+   * When enabled, the slug will auto-generate from the title field on save and autosave.
    */
-  title?: string | null;
-  product: number | Product;
-  options: (number | VariantOption)[];
-  inventory?: number | null;
-  priceInUSDEnabled?: boolean | null;
-  priceInUSD?: number | null;
+  generateSlug?: boolean | null;
+  slug: string;
+  icon?: (number | null) | Media;
+  /**
+   * File extensions supported by this software type (e.g. .dwg, .rvt, .skp)
+   */
+  fileExtensions?: string[] | null;
+  description?: string | null;
+  sortOrder?: number | null;
   updatedAt: string;
   createdAt: string;
-  deletedAt?: string | null;
-  _status?: ('draft' | 'published') | null;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "tags".
+ */
+export interface Tag {
+  id: number;
+  title: string;
+  /**
+   * When enabled, the slug will auto-generate from the title field on save and autosave.
+   */
+  generateSlug?: boolean | null;
+  slug: string;
+  description?: string | null;
+  updatedAt: string;
+  createdAt: string;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -894,7 +897,6 @@ export interface Transaction {
   items?:
     | {
         product?: (number | null) | Product;
-        variant?: (number | null) | Variant;
         quantity: number;
         id?: string | null;
       }[]
@@ -921,31 +923,7 @@ export interface Transaction {
   customer?: (number | null) | User;
   customerEmail?: string | null;
   order?: (number | null) | Order;
-  cart?: (number | null) | Cart;
   amount?: number | null;
-  currency?: 'USD' | null;
-  updatedAt: string;
-  createdAt: string;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "carts".
- */
-export interface Cart {
-  id: number;
-  items?:
-    | {
-        product?: (number | null) | Product;
-        variant?: (number | null) | Variant;
-        quantity: number;
-        id?: string | null;
-      }[]
-    | null;
-  secret?: string | null;
-  customer?: (number | null) | User;
-  purchasedAt?: string | null;
-  status?: ('active' | 'purchased' | 'abandoned') | null;
-  subtotal?: number | null;
   currency?: 'USD' | null;
   updatedAt: string;
   createdAt: string;
@@ -1069,6 +1047,22 @@ export interface PayloadLockedDocument {
         value: number | Media;
       } | null)
     | ({
+        relationTo: 'software_types';
+        value: number | SoftwareType;
+      } | null)
+    | ({
+        relationTo: 'tags';
+        value: number | Tag;
+      } | null)
+    | ({
+        relationTo: 'product_previews';
+        value: number | ProductPreview;
+      } | null)
+    | ({
+        relationTo: 'products';
+        value: number | Product;
+      } | null)
+    | ({
         relationTo: 'forms';
         value: number | Form;
       } | null)
@@ -1079,26 +1073,6 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'addresses';
         value: number | Address;
-      } | null)
-    | ({
-        relationTo: 'variants';
-        value: number | Variant;
-      } | null)
-    | ({
-        relationTo: 'variantTypes';
-        value: number | VariantType;
-      } | null)
-    | ({
-        relationTo: 'variantOptions';
-        value: number | VariantOption;
-      } | null)
-    | ({
-        relationTo: 'products';
-        value: number | Product;
-      } | null)
-    | ({
-        relationTo: 'carts';
-        value: number | Cart;
       } | null)
     | ({
         relationTo: 'orders';
@@ -1158,7 +1132,6 @@ export interface UsersSelect<T extends boolean = true> {
   name?: T;
   roles?: T;
   orders?: T;
-  cart?: T;
   addresses?: T;
   updatedAt?: T;
   createdAt?: T;
@@ -1357,6 +1330,19 @@ export interface CategoriesSelect<T extends boolean = true> {
   title?: T;
   generateSlug?: T;
   slug?: T;
+  description?: T;
+  parent?: T;
+  icon?: T;
+  image?: T;
+  sortOrder?: T;
+  status?: T;
+  meta?:
+    | T
+    | {
+        title?: T;
+        image?: T;
+        description?: T;
+      };
   updatedAt?: T;
   createdAt?: T;
 }
@@ -1378,6 +1364,96 @@ export interface MediaSelect<T extends boolean = true> {
   height?: T;
   focalX?: T;
   focalY?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "software_types_select".
+ */
+export interface SoftwareTypesSelect<T extends boolean = true> {
+  title?: T;
+  generateSlug?: T;
+  slug?: T;
+  icon?: T;
+  fileExtensions?: T;
+  description?: T;
+  sortOrder?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "tags_select".
+ */
+export interface TagsSelect<T extends boolean = true> {
+  title?: T;
+  generateSlug?: T;
+  slug?: T;
+  description?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "product_previews_select".
+ */
+export interface ProductPreviewsSelect<T extends boolean = true> {
+  title?: T;
+  previewImage?: T;
+  previewType?: T;
+  isWatermarked?: T;
+  caption?: T;
+  sortOrder?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "products_select".
+ */
+export interface ProductsSelect<T extends boolean = true> {
+  title?: T;
+  description?: T;
+  previewGallery?: T;
+  gallery?:
+    | T
+    | {
+        image?: T;
+        caption?: T;
+        id?: T;
+      };
+  layout?:
+    | T
+    | {
+        cta?: T | CallToActionBlockSelect<T>;
+        content?: T | ContentBlockSelect<T>;
+        mediaBlock?: T | MediaBlockSelect<T>;
+      };
+  price?: T;
+  isFree?: T;
+  technicalSpecs?:
+    | T
+    | {
+        fileFormat?: T;
+        softwareVersion?: T;
+        fileSize?: T;
+        unit?: T;
+      };
+  relatedProducts?: T;
+  meta?:
+    | T
+    | {
+        title?: T;
+        image?: T;
+        description?: T;
+      };
+  categories?: T;
+  software_types?: T;
+  tags?: T;
+  generateSlug?: T;
+  slug?: T;
+  updatedAt?: T;
+  createdAt?: T;
+  _status?: T;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -1550,112 +1626,6 @@ export interface AddressesSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "variants_select".
- */
-export interface VariantsSelect<T extends boolean = true> {
-  title?: T;
-  product?: T;
-  options?: T;
-  inventory?: T;
-  priceInUSDEnabled?: T;
-  priceInUSD?: T;
-  updatedAt?: T;
-  createdAt?: T;
-  deletedAt?: T;
-  _status?: T;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "variantTypes_select".
- */
-export interface VariantTypesSelect<T extends boolean = true> {
-  label?: T;
-  name?: T;
-  options?: T;
-  updatedAt?: T;
-  createdAt?: T;
-  deletedAt?: T;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "variantOptions_select".
- */
-export interface VariantOptionsSelect<T extends boolean = true> {
-  _variantOptions_options_order?: T;
-  variantType?: T;
-  label?: T;
-  value?: T;
-  updatedAt?: T;
-  createdAt?: T;
-  deletedAt?: T;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "products_select".
- */
-export interface ProductsSelect<T extends boolean = true> {
-  title?: T;
-  description?: T;
-  gallery?:
-    | T
-    | {
-        image?: T;
-        variantOption?: T;
-        id?: T;
-      };
-  layout?:
-    | T
-    | {
-        cta?: T | CallToActionBlockSelect<T>;
-        content?: T | ContentBlockSelect<T>;
-        mediaBlock?: T | MediaBlockSelect<T>;
-      };
-  inventory?: T;
-  enableVariants?: T;
-  variantTypes?: T;
-  variants?: T;
-  priceInUSDEnabled?: T;
-  priceInUSD?: T;
-  relatedProducts?: T;
-  meta?:
-    | T
-    | {
-        title?: T;
-        image?: T;
-        description?: T;
-      };
-  categories?: T;
-  generateSlug?: T;
-  slug?: T;
-  updatedAt?: T;
-  createdAt?: T;
-  deletedAt?: T;
-  _status?: T;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "carts_select".
- */
-export interface CartsSelect<T extends boolean = true> {
-  items?:
-    | T
-    | {
-        product?: T;
-        variant?: T;
-        quantity?: T;
-        id?: T;
-      };
-  secret?: T;
-  customer?: T;
-  purchasedAt?: T;
-  status?: T;
-  subtotal?: T;
-  currency?: T;
-  updatedAt?: T;
-  createdAt?: T;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "orders_select".
  */
 export interface OrdersSelect<T extends boolean = true> {
@@ -1663,7 +1633,6 @@ export interface OrdersSelect<T extends boolean = true> {
     | T
     | {
         product?: T;
-        variant?: T;
         quantity?: T;
         id?: T;
       };
@@ -1701,7 +1670,6 @@ export interface TransactionsSelect<T extends boolean = true> {
     | T
     | {
         product?: T;
-        variant?: T;
         quantity?: T;
         id?: T;
       };
@@ -1731,7 +1699,6 @@ export interface TransactionsSelect<T extends boolean = true> {
   customer?: T;
   customerEmail?: T;
   order?: T;
-  cart?: T;
   amount?: T;
   currency?: T;
   updatedAt?: T;

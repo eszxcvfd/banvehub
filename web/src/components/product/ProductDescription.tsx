@@ -1,92 +1,75 @@
 'use client'
-import type { Product, Variant } from '@/payload-types'
 
+import type { Category, Product, SoftwareType } from '@/payload-types'
 import { RichText } from '@/components/RichText'
-import { AddToCart } from '@/components/Cart/AddToCart'
-import { Price } from '@/components/Price'
-import React, { Suspense } from 'react'
-
-import { VariantSelector } from './VariantSelector'
-import { useCurrency } from '@payloadcms/plugin-ecommerce/client/react'
-import { StockIndicator } from '@/components/product/StockIndicator'
+import { DigitalProductCTA } from '@/components/product/DigitalProductCTA'
+import { SellerAttribution } from '@/components/product/SellerAttribution'
+import React from 'react'
+import Link from 'next/link'
 
 export function ProductDescription({ product }: { product: Product }) {
-  const { currency } = useCurrency()
-  let amount = 0,
-    lowestAmount = 0,
-    highestAmount = 0
-  const priceField = `priceIn${currency.code}` as keyof Product
-  const hasVariants = product.enableVariants && Boolean(product.variants?.docs?.length)
+  const isFree = Boolean(product.isFree)
+  const price = product.price ?? 0
 
-  if (hasVariants) {
-    const priceField = `priceIn${currency.code}` as keyof Variant
-    const variantsOrderedByPrice = product.variants?.docs
-      ?.filter((variant) => variant && typeof variant === 'object')
-      .sort((a, b) => {
-        if (
-          typeof a === 'object' &&
-          typeof b === 'object' &&
-          priceField in a &&
-          priceField in b &&
-          typeof a[priceField] === 'number' &&
-          typeof b[priceField] === 'number'
-        ) {
-          return a[priceField] - b[priceField]
-        }
-
-        return 0
-      }) as Variant[]
-
-    const lowestVariant = variantsOrderedByPrice[0][priceField]
-    const highestVariant = variantsOrderedByPrice[variantsOrderedByPrice.length - 1][priceField]
-    if (
-      variantsOrderedByPrice &&
-      typeof lowestVariant === 'number' &&
-      typeof highestVariant === 'number'
-    ) {
-      lowestAmount = lowestVariant
-      highestAmount = highestVariant
-    }
-  } else if (product[priceField] && typeof product[priceField] === 'number') {
-    amount = product[priceField]
-  }
+  const primaryCategory = (product.categories || []).find(
+    (c): c is Category => typeof c === 'object' && c !== null,
+  )
+  const primarySoftware = (product.software_types || []).find(
+    (s): s is SoftwareType => typeof s === 'object' && s !== null,
+  )
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">
-        <h1 className="text-2xl font-medium">{product.title}</h1>
-        <div className="uppercase font-mono">
-          {hasVariants ? (
-            <Price highestAmount={highestAmount} lowestAmount={lowestAmount} />
-          ) : (
-            <Price amount={amount} />
+      {/* Taxonomy Pills */}
+      {(primaryCategory || primarySoftware) && (
+        <div className="flex items-center gap-2 flex-wrap -mb-2">
+          {primaryCategory && (
+            <Link
+              href={`/shop?category=${primaryCategory.slug}`}
+              className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+            >
+              {primaryCategory.title}
+            </Link>
+          )}
+          {primarySoftware && (
+            <Link
+              href={`/shop?softwareType=${primarySoftware.slug}`}
+              className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors"
+            >
+              {primarySoftware.title}
+            </Link>
           )}
         </div>
-      </div>
-      {product.description ? (
-        <RichText className="" data={product.description} enableGutter={false} />
-      ) : null}
-      <hr />
-      {hasVariants && (
-        <>
-          <Suspense fallback={null}>
-            <VariantSelector product={product} />
-          </Suspense>
-
-          <hr />
-        </>
       )}
-      <div className="flex items-center justify-between">
-        <Suspense fallback={null}>
-          <StockIndicator product={product} />
-        </Suspense>
+
+      {/* Title */}
+      <div>
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
+          {product.title}
+        </h1>
       </div>
 
-      <div className="flex items-center justify-between">
-        <Suspense fallback={null}>
-          <AddToCart product={product} />
-        </Suspense>
-      </div>
+      {/* Digital CTA Card */}
+      <DigitalProductCTA
+        isFree={isFree}
+        price={price}
+        fileFormat={product.technicalSpecs?.fileFormat}
+        fileSize={product.technicalSpecs?.fileSize}
+        productTitle={product.title}
+      />
+
+      {/* Seller Attribution Block */}
+      <SellerAttribution />
+
+      {/* Asset Description */}
+      {product.description ? (
+        <div className="space-y-2 pt-2">
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            Mô tả chi tiết tài nguyên
+          </h3>
+          <RichText className="prose dark:prose-invert max-w-none text-sm leading-relaxed" data={product.description} enableGutter={false} />
+        </div>
+      ) : null}
     </div>
   )
 }

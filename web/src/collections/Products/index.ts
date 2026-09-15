@@ -2,8 +2,8 @@ import { CallToAction } from '@/blocks/CallToAction/config'
 import { Content } from '@/blocks/Content/config'
 import { MediaBlock } from '@/blocks/MediaBlock/config'
 import { slugField } from 'payload'
+import type { CollectionConfig } from 'payload'
 import { generatePreviewPath } from '@/utilities/generatePreviewPath'
-import { CollectionOverride } from '@payloadcms/plugin-ecommerce/types'
 import {
   MetaDescriptionField,
   MetaImageField,
@@ -18,23 +18,23 @@ import {
   InlineToolbarFeature,
   lexicalEditor,
 } from '@payloadcms/richtext-lexical'
-import { DefaultDocumentIDType, Where } from 'payload'
 
+import { adminOnly } from '@/access/adminOnly'
 import { adminOrModerator } from '@/access/adminOrModerator'
+import { adminSellerModeratorOrPublished } from '@/access/adminSellerModeratorOrPublished'
 import { adminOrSeller } from '@/access/adminOrSeller'
 
-export const ProductsCollection: CollectionOverride = ({ defaultCollection }) => ({
-  ...defaultCollection,
-  // PLAN.md §22: Create product is Seller or Admin; Moderate product is
-  // Moderator or Admin. Read and delete keep the plugin defaults.
+export const Products: CollectionConfig = {
+  slug: 'products',
   access: {
-    ...defaultCollection?.access,
     create: adminOrSeller,
+    delete: adminOnly,
+    read: adminSellerModeratorOrPublished,
+    readVersions: adminOrModerator,
     update: adminOrModerator,
   },
   admin: {
-    ...defaultCollection?.admin,
-    defaultColumns: ['title', 'enableVariants', '_status', 'variants.variants'],
+    defaultColumns: ['title', 'price', 'isFree', '_status', 'updatedAt'],
     livePreview: {
       url: ({ data, req }) =>
         generatePreviewPath({
@@ -50,47 +50,67 @@ export const ProductsCollection: CollectionOverride = ({ defaultCollection }) =>
         req,
       }),
     useAsTitle: 'title',
+    group: 'Catalog',
   },
   defaultPopulate: {
-    ...defaultCollection?.defaultPopulate,
     title: true,
     slug: true,
-    variantOptions: true,
-    variants: true,
-    enableVariants: true,
+    price: true,
+    isFree: true,
+    previewGallery: true,
     gallery: true,
-    priceInUSD: true,
-    inventory: true,
+    categories: true,
+    software_types: true,
+    tags: true,
+    technicalSpecs: true,
     meta: true,
   },
+  versions: {
+    drafts: {
+      autosave: true,
+    },
+    maxPerDoc: 50,
+  },
   fields: [
-    { name: 'title', type: 'text', required: true },
+    {
+      name: 'title',
+      type: 'text',
+      required: true,
+    },
     {
       type: 'tabs',
       tabs: [
         {
+          label: 'Content',
           fields: [
             {
               name: 'description',
               type: 'richText',
               editor: lexicalEditor({
-                features: ({ rootFeatures }) => {
-                  return [
-                    ...rootFeatures,
-                    HeadingFeature({ enabledHeadingSizes: ['h1', 'h2', 'h3', 'h4'] }),
-                    FixedToolbarFeature(),
-                    InlineToolbarFeature(),
-                    HorizontalRuleFeature(),
-                  ]
-                },
+                features: ({ rootFeatures }) => [
+                  ...rootFeatures,
+                  HeadingFeature({ enabledHeadingSizes: ['h1', 'h2', 'h3', 'h4'] }),
+                  FixedToolbarFeature(),
+                  InlineToolbarFeature(),
+                  HorizontalRuleFeature(),
+                ],
               }),
               label: false,
               required: false,
             },
             {
+              name: 'previewGallery',
+              type: 'relationship',
+              relationTo: 'product_previews',
+              hasMany: true,
+              admin: {
+                description: 'Public watermarked previews (images, PDF sample sheets, 3D models)',
+              },
+            },
+            {
               name: 'gallery',
               type: 'array',
-              minRows: 1,
+              label: 'Direct Gallery Images',
               fields: [
                 {
                   name: 'image',
@@ -99,63 +119,83 @@ export const ProductsCollection: CollectionOverride = ({ defaultCollection }) =>
                   required: true,
                 },
                 {
-                  name: 'variantOption',
-                  type: 'relationship',
-                  relationTo: 'variantOptions',
-                  admin: {
-                    condition: (data) => {
-                      return data?.enableVariants === true && data?.variantTypes?.length > 0
-                    },
-                  },
-                  filterOptions: ({ data }) => {
-                    if (data?.enableVariants && data?.variantTypes?.length) {
-                      const variantTypeIDs = data.variantTypes.map((item: any) => {
-                        if (typeof item === 'object' && item?.id) {
-                          return item.id
-                        }
-                        return item
-                      }) as DefaultDocumentIDType[]
-
-                      if (variantTypeIDs.length === 0)
-                        return {
-                          variantType: {
-                            in: [],
-                          },
-                        }
-
-                      const query: Where = {
-                        variantType: {
-                          in: variantTypeIDs,
-                        },
-                      }
-
-                      return query
-                    }
-
-                    return {
-                      variantType: {
-                        in: [],
-                      },
-                    }
-                  },
+                  name: 'caption',
+                  type: 'text',
                 },
               ],
             },
-
             {
               name: 'layout',
               type: 'blocks',
               blocks: [CallToAction, Content, MediaBlock],
             },
           ],
-          label: 'Content',
         },
         {
+          label: 'Specifications & Pricing',
           fields: [
-            ...defaultCollection.fields,
+            {
+              name: 'price',
+              type: 'number',
+              required: true,
+              defaultValue: 0,
+              min: 0,
+              admin: {
+                description: 'Price in Vietnamese Dong (VND). Set to 0 if free.',
+                step: 1000,
+              },
+            },
+            {
+              name: 'isFree',
+              type: 'checkbox',
+              defaultValue: false,
+              admin: {
+                description: 'Mark as free asset (displays "Tải miễn phí" CTA)',
+              },
+            },
+            {
+              name: 'technicalSpecs',
+              type: 'group',
+              label: 'Technical Specifications',
+              fields: [
+                {
+                  name: 'fileFormat',
+                  type: 'text',
+                  admin: {
+                    placeholder: '.dwg, .rvt, .skp, .max',
+                  },
+                },
+                {
+                  name: 'softwareVersion',
+                  type: 'text',
+                  admin: {
+                    placeholder: 'AutoCAD 2021+, Revit 2024',
+                  },
+                },
+                {
+                  name: 'fileSize',
+                  type: 'text',
+                  admin: {
+                    placeholder: '45.2 MB',
+                  },
+                },
+                {
+                  name: 'unit',
+                  type: 'select',
+                  defaultValue: 'metric',
+                  options: [
+                    { label: 'Metric (mm / m)', value: 'metric' },
+                    { label: 'Imperial (inch / ft)', value: 'imperial' },
+                    { label: 'Other', value: 'other' },
+                  ],
+                },
+              ],
+            },
             {
               name: 'relatedProducts',
               type: 'relationship',
+              hasMany: true,
+              relationTo: 'products',
               filterOptions: ({ id }) => {
                 if (id) {
                   return {
@@ -164,19 +204,14 @@ export const ProductsCollection: CollectionOverride = ({ defaultCollection }) =>
                     },
                   }
                 }
-
-                // ID comes back as undefined during seeding so we need to handle that case
                 return {
                   id: {
                     exists: true,
                   },
                 }
               },
-              hasMany: true,
-              relationTo: 'products',
             },
           ],
-          label: 'Product Details',
         },
         {
           name: 'meta',
@@ -193,13 +228,9 @@ export const ProductsCollection: CollectionOverride = ({ defaultCollection }) =>
             MetaImageField({
               relationTo: 'media',
             }),
-
             MetaDescriptionField({}),
             PreviewField({
-              // if the `generateUrl` function is configured
               hasGenerateFn: true,
-
-              // field paths to match the target field for data
               titlePath: 'meta.title',
               descriptionPath: 'meta.description',
             }),
@@ -217,6 +248,26 @@ export const ProductsCollection: CollectionOverride = ({ defaultCollection }) =>
       hasMany: true,
       relationTo: 'categories',
     },
+    {
+      name: 'software_types',
+      type: 'relationship',
+      admin: {
+        position: 'sidebar',
+        sortOptions: 'title',
+      },
+      hasMany: true,
+      relationTo: 'software_types',
+    },
+    {
+      name: 'tags',
+      type: 'relationship',
+      admin: {
+        position: 'sidebar',
+        sortOptions: 'title',
+      },
+      hasMany: true,
+      relationTo: 'tags',
+    },
     slugField(),
   ],
-})
+}

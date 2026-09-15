@@ -15,8 +15,9 @@ export const CategoryItem: React.FC<Props> = ({ category }) => {
   const searchParams = useSearchParams()
 
   const isActive = useMemo(() => {
-    return searchParams.get('category') === String(category.id)
-  }, [category.id, searchParams])
+    const current = searchParams.get('category')
+    return current === category.slug || current === String(category.id)
+  }, [category.id, category.slug, searchParams])
 
   const setQuery = useCallback(() => {
     const params = new URLSearchParams(searchParams.toString())
@@ -24,19 +25,20 @@ export const CategoryItem: React.FC<Props> = ({ category }) => {
     if (isActive) {
       params.delete('category')
     } else {
-      params.set('category', String(category.id))
+      params.set('category', category.slug || String(category.id))
     }
 
     const newParams = params.toString()
 
-    router.push(pathname + '?' + newParams)
-  }, [category.id, isActive, pathname, router, searchParams])
+    router.push(newParams ? `${pathname}?${newParams}` : pathname)
+  }, [category.id, category.slug, isActive, pathname, router, searchParams])
 
   return (
     <button
       onClick={() => setQuery()}
-      className={clsx('hover:cursor-pointer', {
-        ' underline': isActive,
+      className={clsx('hover:cursor-pointer text-left', {
+        ' underline font-medium text-foreground': isActive,
+        ' text-muted-foreground hover:text-foreground': !isActive,
       })}
     >
       {category.title}

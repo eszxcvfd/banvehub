@@ -112,8 +112,7 @@ Observed after the change:
   against PostgreSQL, and `web/payload.db` is not modified while it runs.
 - `@payloadcms/db-sqlite` is no longer a dependency; `web/payload.db` remains
   on disk, ignored, as the pre-migration artefact.
-
-Open item recorded, not decided: the Postgres adapter's development `push` is
-still enabled, so `payload_migrations` contains a `dev` row at batch `-1`
-alongside the migrated schema. `PLAN.md` §37 requires versioned migrations;
-whether development should run migrations only is undecided.
+Amendment (2026-09-15, commit 5aa6307): development schema runs migrations
+only (`push: false`) in `web/src/payload.config.ts`, and the development
+marker row in `payload_migrations` was deleted. `payload migrate` applies
+committed migrations without dev-push drifting ahead of versioned schema.

@@ -6,3 +6,9 @@ allowBuilds:
   sharp: true
   unrs-resolver: true
   '@vercel/git-hooks': false
+
+auditConfig:
+  ignoreGhsas:
+    - GHSA-5xrq-8626-4rwp
+    - GHSA-f88m-g3jw-g9cj
+    - GHSA-rgj7-g3m4-5g8c

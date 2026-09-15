@@ -78,16 +78,6 @@ export const Users: CollectionConfig = {
       },
     },
     {
-      name: 'cart',
-      type: 'join',
-      collection: 'carts',
-      on: 'customer',
-      admin: {
-        allowCreate: false,
-        defaultColumns: ['id', 'createdAt', 'total', 'currency', 'items'],
-      },
-    },
-    {
       name: 'addresses',
       type: 'join',
       collection: 'addresses',
