@@ -86,13 +86,14 @@ Out of scope:
 ## Progress
 
 - [x] Owner decisions: first slice, Postgres hosting, layout, Phase 0 docs
-- [ ] Group A: restore and restate Phase 0 artifacts
+- [x] Group A: restore and restate Phase 0 artifacts
   - [x] decisions 0002–0007 restated (money write layer, P0 scope lock,
         payment provider, state machine, secure download, search engine)
   - [x] decisions index updated; obsolete daptin records marked superseded
-  - [ ] `docs/product/overview.md`, `docs/ARCHITECTURE.md`,
-        `docs/threat-model.md`, `docs/api-conventions.md`
-  - [ ] resolve the two dangling links in `docs/README.md`
+  - [x] `docs/product/overview.md`, `docs/ARCHITECTURE.md`,
+        `docs/threat-model.md`, `docs/api-conventions.md`, `docs/HARNESS.md`
+  - [x] resolved the two dangling links in `docs/README.md` by creating
+        `docs/ARCHITECTURE.md` and restoring `docs/HARNESS.md`
 - [ ] Group B: PostgreSQL, adapter, migrations, run, verify
 - [ ] Record validation + result, move plan to `docs/plans/completed/`
 
