@@ -1,0 +1,79 @@
+name: CI
+
+# PLAN.md §36 requires lint, tests, and a build on every pull request. This
+# workflow covers lint, the production build (which type-checks), and the
+# integration tests. Security scanning, end-to-end tests, image builds, and
+# staging deploys are not part of it yet.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  checks:
+    name: lint, build, integration tests
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: web
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: payload
+          POSTGRES_PASSWORD: payload
+          POSTGRES_DB: kientaohub
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U payload -d kientaohub"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      # CI-only values. Not secrets: the database is an ephemeral service
+      # container and the Stripe keys are placeholders for the template's
+      # payment plugin, which is not the product rail (decision 0004).
+      DATABASE_URL: postgres://payload:payload@127.0.0.1:5432/kientaohub
+      PAYLOAD_SECRET: ci-only-payload-secret
+      PAYLOAD_PUBLIC_SERVER_URL: http://localhost:3000
+      NEXT_PUBLIC_SERVER_URL: http://localhost:3000
+      PREVIEW_SECRET: ci-only-preview-secret
+      STRIPE_SECRET_KEY: sk_test_ci
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: pk_test_ci
+      STRIPE_WEBHOOKS_SIGNING_SECRET: whsec_ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.3.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      # The schema comes from versioned migrations, never from a development
+      # push (PLAN.md §37), so both the build and the tests need this step.
+      - name: Apply database migrations
+        run: pnpm payload migrate
+
+      - name: Build and type check
+        run: pnpm build
+
+      - name: Integration tests
+        run: pnpm test:int
