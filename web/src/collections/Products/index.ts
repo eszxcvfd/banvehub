@@ -23,6 +23,7 @@ import { adminOnly } from '@/access/adminOnly'
 import { adminOrModerator } from '@/access/adminOrModerator'
 import { adminSellerModeratorOrPublished } from '@/access/adminSellerModeratorOrPublished'
 import { adminOrSeller } from '@/access/adminOrSeller'
+import { enforceModerationState } from './hooks/enforceModerationState'
 
 export const Products: CollectionConfig = {
   slug: 'products',
@@ -34,7 +35,7 @@ export const Products: CollectionConfig = {
     update: adminOrModerator,
   },
   admin: {
-    defaultColumns: ['title', 'price', 'isFree', '_status', 'updatedAt'],
+    defaultColumns: ['title', 'seller', 'price', 'isFree', 'moderationStatus', '_status', 'updatedAt'],
     livePreview: {
       url: ({ data, req }) =>
         generatePreviewPath({
@@ -57,6 +58,10 @@ export const Products: CollectionConfig = {
     slug: true,
     price: true,
     isFree: true,
+    seller: true,
+    originalFiles: true,
+    moderationStatus: true,
+    copyrightDeclared: true,
     previewGallery: true,
     gallery: true,
     categories: true,
@@ -64,6 +69,9 @@ export const Products: CollectionConfig = {
     tags: true,
     technicalSpecs: true,
     meta: true,
+  },
+  hooks: {
+    beforeChange: [enforceModerationState],
   },
   versions: {
     drafts: {
@@ -267,6 +275,91 @@ export const Products: CollectionConfig = {
       },
       hasMany: true,
       relationTo: 'tags',
+    },
+    {
+      name: 'seller',
+      type: 'relationship',
+      relationTo: 'users',
+      admin: {
+        position: 'sidebar',
+        description: 'Tài khoản người bán sở hữu tài nguyên này',
+      },
+    },
+    {
+      name: 'originalFiles',
+      type: 'relationship',
+      relationTo: 'product_files',
+      hasMany: true,
+      admin: {
+        description: 'Tệp bản vẽ gốc riêng tư (Private originals - BR-06)',
+      },
+    },
+    {
+      name: 'moderationStatus',
+      type: 'select',
+      defaultValue: 'draft',
+      options: [
+        { label: 'Draft (Bản nháp)', value: 'draft' },
+        { label: 'Submitted (Chờ duyệt)', value: 'submitted' },
+        { label: 'In Review (Đang duyệt)', value: 'in_review' },
+        { label: 'Changes Requested (Cần sửa)', value: 'changes_requested' },
+        { label: 'Approved (Đã duyệt)', value: 'approved' },
+        { label: 'Rejected (Từ chối)', value: 'rejected' },
+      ],
+      admin: {
+        position: 'sidebar',
+        description: 'Trạng thái quy trình kiểm duyệt (FR-28 & BR-08)',
+      },
+    },
+    {
+      name: 'moderationNotes',
+      type: 'textarea',
+      admin: {
+        position: 'sidebar',
+        description: 'Lý do yêu cầu sửa hoặc từ chối từ ban kiểm duyệt',
+      },
+    },
+    {
+      name: 'moderationHistory',
+      type: 'array',
+      admin: {
+        position: 'sidebar',
+        readOnly: true,
+      },
+      fields: [
+        {
+          name: 'reviewer',
+          type: 'relationship',
+          relationTo: 'users',
+        },
+        {
+          name: 'action',
+          type: 'select',
+          options: [
+            { label: 'Submitted', value: 'submitted' },
+            { label: 'In Review', value: 'in_review' },
+            { label: 'Changes Requested', value: 'changes_requested' },
+            { label: 'Approved', value: 'approved' },
+            { label: 'Rejected', value: 'rejected' },
+          ],
+        },
+        {
+          name: 'note',
+          type: 'text',
+        },
+        {
+          name: 'timestamp',
+          type: 'date',
+        },
+      ],
+    },
+    {
+      name: 'copyrightDeclared',
+      type: 'checkbox',
+      defaultValue: false,
+      admin: {
+        description: 'Cam kết có quyền sở hữu hợp pháp đối với tài nguyên số này',
+      },
     },
     slugField(),
   ],

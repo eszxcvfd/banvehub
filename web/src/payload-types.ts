@@ -79,7 +79,9 @@ export interface Config {
     software_types: SoftwareType;
     tags: Tag;
     product_previews: ProductPreview;
+    product_files: ProductFile;
     products: Product;
+    seller_profiles: SellerProfile;
     forms: Form;
     'form-submissions': FormSubmission;
     addresses: Address;
@@ -104,7 +106,9 @@ export interface Config {
     software_types: SoftwareTypesSelect<false> | SoftwareTypesSelect<true>;
     tags: TagsSelect<false> | TagsSelect<true>;
     product_previews: ProductPreviewsSelect<false> | ProductPreviewsSelect<true>;
+    product_files: ProductFilesSelect<false> | ProductFilesSelect<true>;
     products: ProductsSelect<false> | ProductsSelect<true>;
+    seller_profiles: SellerProfilesSelect<false> | SellerProfilesSelect<true>;
     forms: FormsSelect<false> | FormsSelect<true>;
     'form-submissions': FormSubmissionsSelect<false> | FormSubmissionsSelect<true>;
     addresses: AddressesSelect<false> | AddressesSelect<true>;
@@ -300,6 +304,35 @@ export interface Product {
   categories?: (number | Category)[] | null;
   software_types?: (number | SoftwareType)[] | null;
   tags?: (number | Tag)[] | null;
+  /**
+   * Tài khoản người bán sở hữu tài nguyên này
+   */
+  seller?: (number | null) | User;
+  /**
+   * Tệp bản vẽ gốc riêng tư (Private originals - BR-06)
+   */
+  originalFiles?: (number | ProductFile)[] | null;
+  /**
+   * Trạng thái quy trình kiểm duyệt (FR-28 & BR-08)
+   */
+  moderationStatus?: ('draft' | 'submitted' | 'in_review' | 'changes_requested' | 'approved' | 'rejected') | null;
+  /**
+   * Lý do yêu cầu sửa hoặc từ chối từ ban kiểm duyệt
+   */
+  moderationNotes?: string | null;
+  moderationHistory?:
+    | {
+        reviewer?: (number | null) | User;
+        action?: ('submitted' | 'in_review' | 'changes_requested' | 'approved' | 'rejected') | null;
+        note?: string | null;
+        timestamp?: string | null;
+        id?: string | null;
+      }[]
+    | null;
+  /**
+   * Cam kết có quyền sở hữu hợp pháp đối với tài nguyên số này
+   */
+  copyrightDeclared?: boolean | null;
   /**
    * When enabled, the slug will auto-generate from the title field on save and autosave.
    */
@@ -890,6 +923,43 @@ export interface Tag {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "product_files".
+ */
+export interface ProductFile {
+  id: number;
+  seller: number | User;
+  /**
+   * Tên file gốc người bán tải lên
+   */
+  originalFilename?: string | null;
+  /**
+   * Định dạng tệp (ví dụ: .dwg, .rvt, .zip)
+   */
+  fileFormat?: string | null;
+  /**
+   * Mã băm SHA-256 xác thực tính toàn vẹn của tệp
+   */
+  checksum?: string | null;
+  /**
+   * Dung lượng tệp tính bằng bytes
+   */
+  fileSize?: number | null;
+  virusScanStatus?: ('pending' | 'clean' | 'quarantined') | null;
+  status?: ('UPLOADING' | 'PROCESSING' | 'READY' | 'FAILED' | 'QUARANTINED') | null;
+  updatedAt: string;
+  createdAt: string;
+  url?: string | null;
+  thumbnailURL?: string | null;
+  filename?: string | null;
+  mimeType?: string | null;
+  filesize?: number | null;
+  width?: number | null;
+  height?: number | null;
+  focalX?: number | null;
+  focalY?: number | null;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "transactions".
  */
 export interface Transaction {
@@ -991,6 +1061,35 @@ export interface Address {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "seller_profiles".
+ */
+export interface SellerProfile {
+  id: number;
+  user: number | User;
+  displayName: string;
+  bio?: string | null;
+  avatar?: (number | null) | Media;
+  phone?: string | null;
+  payoutInfo?: {
+    bankName?: string | null;
+    accountNumber?: string | null;
+    accountHolderName?: string | null;
+  };
+  sellerTermsAccepted: boolean;
+  sellerTermsAcceptedAt?: string | null;
+  status?: ('pending' | 'active' | 'suspended' | 'rejected') | null;
+  totalSales?: number | null;
+  rating?: number | null;
+  /**
+   * When enabled, the slug will auto-generate from the title field on save and autosave.
+   */
+  generateSlug?: boolean | null;
+  slug: string;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "form-submissions".
  */
 export interface FormSubmission {
@@ -1059,8 +1158,16 @@ export interface PayloadLockedDocument {
         value: number | ProductPreview;
       } | null)
     | ({
+        relationTo: 'product_files';
+        value: number | ProductFile;
+      } | null)
+    | ({
         relationTo: 'products';
         value: number | Product;
+      } | null)
+    | ({
+        relationTo: 'seller_profiles';
+        value: number | SellerProfile;
       } | null)
     | ({
         relationTo: 'forms';
@@ -1408,6 +1515,30 @@ export interface ProductPreviewsSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "product_files_select".
+ */
+export interface ProductFilesSelect<T extends boolean = true> {
+  seller?: T;
+  originalFilename?: T;
+  fileFormat?: T;
+  checksum?: T;
+  fileSize?: T;
+  virusScanStatus?: T;
+  status?: T;
+  updatedAt?: T;
+  createdAt?: T;
+  url?: T;
+  thumbnailURL?: T;
+  filename?: T;
+  mimeType?: T;
+  filesize?: T;
+  width?: T;
+  height?: T;
+  focalX?: T;
+  focalY?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "products_select".
  */
 export interface ProductsSelect<T extends boolean = true> {
@@ -1449,11 +1580,52 @@ export interface ProductsSelect<T extends boolean = true> {
   categories?: T;
   software_types?: T;
   tags?: T;
+  seller?: T;
+  originalFiles?: T;
+  moderationStatus?: T;
+  moderationNotes?: T;
+  moderationHistory?:
+    | T
+    | {
+        reviewer?: T;
+        action?: T;
+        note?: T;
+        timestamp?: T;
+        id?: T;
+      };
+  copyrightDeclared?: T;
   generateSlug?: T;
   slug?: T;
   updatedAt?: T;
   createdAt?: T;
   _status?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "seller_profiles_select".
+ */
+export interface SellerProfilesSelect<T extends boolean = true> {
+  user?: T;
+  displayName?: T;
+  bio?: T;
+  avatar?: T;
+  phone?: T;
+  payoutInfo?:
+    | T
+    | {
+        bankName?: T;
+        accountNumber?: T;
+        accountHolderName?: T;
+      };
+  sellerTermsAccepted?: T;
+  sellerTermsAcceptedAt?: T;
+  status?: T;
+  totalSales?: T;
+  rating?: T;
+  generateSlug?: T;
+  slug?: T;
+  updatedAt?: T;
+  createdAt?: T;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema

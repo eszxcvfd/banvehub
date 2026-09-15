@@ -52,7 +52,20 @@ export function HeaderClient({ header }: Props) {
             ) : null}
           </div>
 
-          <div className="flex justify-end md:w-1/3 gap-4" />
+          <div className="flex items-center justify-end md:w-1/3 gap-3 pb-3">
+            <Link
+              href="/seller"
+              className="text-xs font-semibold px-3 py-1.5 rounded-full border border-primary/20 bg-primary/10 hover:bg-primary/20 text-primary transition-colors"
+            >
+              Kênh người bán
+            </Link>
+            <Link
+              href="/account"
+              className="text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Tài khoản
+            </Link>
+          </div>
         </div>
       </nav>
     </div>

@@ -18,8 +18,10 @@ import { fileURLToPath } from 'url'
 import { Categories } from '@/collections/Categories'
 import { Media } from '@/collections/Media'
 import { Pages } from '@/collections/Pages'
+import { ProductFiles } from '@/collections/ProductFiles'
 import { ProductPreviews } from '@/collections/ProductPreviews'
 import { Products } from '@/collections/Products'
+import { SellerProfiles } from '@/collections/SellerProfiles'
 import { SoftwareTypes } from '@/collections/SoftwareTypes'
 import { Tags } from '@/collections/Tags'
 import { Users } from '@/collections/Users'
@@ -50,7 +52,9 @@ export default buildConfig({
     SoftwareTypes,
     Tags,
     ProductPreviews,
+    ProductFiles,
     Products,
+    SellerProfiles,
   ],
   db: postgresAdapter({
     pool: {
