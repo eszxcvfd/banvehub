@@ -1,0 +1,8 @@
+# pnpm 11 reads dependency-build policy from this file; the "pnpm" field in
+# package.json is ignored. Without an explicit policy `pnpm install` exits 1 on
+# ignored build scripts and `pnpm dev` aborts before starting Next.js.
+allowBuilds:
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
+  '@vercel/git-hooks': false
