@@ -1,405 +1,704 @@
-# Milestone 1: PostgreSQL Migration Batch 6 Design Report
+# Phase 6 Milestone 1 — Focus Area 3: Refunds Collection, Payload Config Registration, & PostgreSQL Migration Batch 7
+
+## Executive Summary
+This report delivers the complete architectural specification and ready-to-implement design for **Focus Area 3 of Milestone 1** in KienTaoHub (Phase 6: Seller Revenue). It provides the exact implementation for:
+1. The **`Refunds` Collection** (`web/src/collections/Refunds/index.ts`) with immutable snapshot financial fields, automatic code generation (`REF-YYYYMMDD-XXXXX`), and strict access control (`web/src/access/refundAccess.ts`).
+2. The registration of all four Phase 6 collections (`SellerEarnings`, `Withdrawals`, `WithdrawalEvents`, `Refunds`) in `web/src/payload.config.ts`.
+3. The complete **PostgreSQL Migration Batch 7** (`web/src/migrations/20260915_100000_phase6_seller_revenue.ts`), including DDL for enum types, tables, foreign keys, b-tree & unique indices, check constraints (`amount >= 50000 AND amount <= 50000000`, `seller_amount >= 0`, `platform_fee >= 0`), payload locked documents relations, and down migration statements.
+4. Migration registry integration in `web/src/migrations/index.ts`.
+
+---
 
 ## 1. Observation
 
-### Current Migrations and Registration
-1. `web/src/migrations/` contains 5 prior migrations (`index.ts` lines 1-33):
-   - `20260915_020514_initial` (Batch 1)
-   - `20260915_023701_user_roles_from_plan_5` (Batch 2)
-   - `20260915_033625_phase2_digital_catalog` (Batch 3)
-   - `20260915_062953_phase3_seller_moderation` (Batch 4)
-   - `20260915_064708_phase4_payment_wallet` (Batch 5)
-2. In `20260915_020514_initial.ts` (lines 865-903, 1145-1155, 1433-1444):
-   - Table `"orders_items"` was created with columns `_order`, `_parent_id`, `id` (varchar PK), `product_id`, `variant_id`, `quantity`.
-   - Table `"orders"` was created with 11 physical shipping address fields (`shipping_address_title`, `shipping_address_first_name`, etc.), `customer_id`, `customer_email`, `status` (`enum_orders_status`: `'processing', 'completed', 'cancelled', 'refunded'`), `amount`, `currency` (`enum_orders_currency`: `'USD'`), `access_token`.
-   - Table `"orders_rels"` was created with `id`, `order`, `parent_id`, `path`, `transactions_id`.
-   - Foreign keys: `orders_items_parent_id_fk` referencing `orders(id)`, `orders_customer_id_users_id_fk` referencing `users(id)`, `payload_locked_documents_rels_orders_fk` referencing `orders(id)`, and `transactions_order_id_orders_id_fk` referencing `orders(id)`.
-3. In `20260915_033625_phase2_digital_catalog.ts` (lines 51-66):
-   - Clean deletion pattern for deprecated physical template tables:
-     `ALTER TABLE "variants" DISABLE ROW LEVEL SECURITY; DROP TABLE "variants" CASCADE;`
-     `DROP TABLE "carts" CASCADE; DROP TABLE "carts_items" CASCADE;`
-4. In `20260915_064708_phase4_payment_wallet.ts` (lines 87-91, 120-124, 131-160):
-   - Added collection columns and FKs to `"payload_locked_documents_rels"` (`wallets_id`, `wallet_ledger_id`, `payment_intents_id`, `payment_transactions_id`, `payment_webhook_events_id`).
-   - Appended custom constraints and PostgreSQL triggers for financial invariants (BR-02, BR-03, Decision 0002).
-5. Current Database Table Inspection via `docker exec -i kientaohub-postgres psql`:
-   - Query: `SELECT count(*) FROM orders; SELECT count(*) FROM orders_items; SELECT count(*) FROM orders_rels;`
-   - Results:
-     - `orders`: 0 rows
-     - `orders_items`: 0 rows
-     - `orders_rels`: 0 rows
-     - `transactions`: 0 rows
-     - `payload_locked_documents_rels WHERE orders_id IS NOT NULL`: 0 rows
+### 1.1 Requirements in `ORIGINAL_REQUEST.md` & `PLAN.md`
+- **`ORIGINAL_REQUEST.md:110-118` (R3. Refund with Compensating Ledger Entries)**:
+  - *Refunds must never update or delete existing ledger entries. Instead, create compensating (reversal) entries (BR-03).*
+  - *Refund flow (FLOW-U15): create refund record → lock original transaction → credit buyer wallet via reversal entry → reverse seller earning → reverse platform revenue → update order status → optionally revoke entitlement → audit log.*
+  - *Finance Admin or Super Admin can initiate refunds per §5.5 and §22.*
+  - *Refunded orders must reflect the refunded state without altering original purchase records.*
+- **`ORIGINAL_REQUEST.md:128` (Verification & Quality Gates)**:
+  - *All new collections must have versioned PostgreSQL migrations applied via Payload migration tooling (`pnpm --prefix web payload migrate`).*
+- **`PLAN.md:1334-1358` (FLOW-U15 — Hoàn tiền)**:
+  - *Refund không được sửa/xóa giao dịch cũ:*
+    ```text
+    Original ledger entries + Compensating entries = Current financial result
+    ```
+- **`PLAN.md:2279-2289` (Collections Catalog)**:
+  - Lists: `seller_earnings`, `withdrawals`, `withdrawal_events`, `refunds`.
+- **`PLAN.md:22` (Authorization Matrix)**:
+  - Action `Refund`: Super Admin ✅, Finance Admin ✅, Moderator ❌, Seller ❌, Buyer ❌.
+  - Action `View Ledger`: Super Admin ✅, Finance Admin ✅, Seller (own entries only), Buyer (own entries only).
+
+### 1.2 Access Control Patterns
+- **`web/src/access/canEditMoney.ts:15`**:
+  ```typescript
+  export const canEditMoney: Access = () => false
+  export const canEditMoneyField = (): boolean => false
+  ```
+  Per Decision 0002 (`docs/decisions/0002-money-write-layer.md`), direct REST/GraphQL mutations on money documents are strictly forbidden for all principals, including administrators. Money collections use `canEditMoney` for `create`, `update`, and `delete`.
+- **`web/src/access/orderAccess.ts:10-24`**:
+  ```typescript
+  export const orderReadAccess: Access = ({ req: { user } }) => {
+    if (!user) return false
+    if (checkRole(['admin', 'financeAdmin'], user)) return true
+    return { buyer: { equals: user.id } }
+  }
+  ```
+- **`web/src/access/financialAccess.ts:32-46`**:
+  ```typescript
+  export const walletLedgerReadAccess: Access = ({ req: { user } }) => {
+    if (!user) return false
+    if (checkRole(['admin', 'financeAdmin'], user)) return true
+    return { user: { equals: user.id } }
+  }
+  ```
+- **`web/src/collections/Users/index.ts:47-68`**:
+  Defines roles: `'admin'`, `'buyer'`, `'seller'`, `'moderator'`, `'financeAdmin'`.
+- Role verification utility: `checkRole(roles, user)` in `web/src/access/utilities.ts`.
+
+### 1.3 Existing Code Generation Patterns
+- In `web/src/collections/Orders/index.ts:46-56`:
+  ```typescript
+  hooks: {
+    beforeValidate: [
+      ({ value, operation }) => {
+        if (operation === 'create' && !value) {
+          const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+          const randomSuffix = crypto.randomBytes(3).toString('hex').toUpperCase()
+          return `ORD-${dateStr}-${randomSuffix}`
+        }
+        return value
+      },
+    ],
+  }
+  ```
+  Generates immutable formatted codes like `ORD-20260915-1A2B3C`.
+
+### 1.4 Existing Migration Patterns (Batch 5 & Batch 6)
+- **`web/src/migrations/20260915_064708_phase4_payment_wallet.ts` (Batch 5)**:
+  - Creates ENUM types: `"enum_wallets_currency"`, `"enum_wallet_ledger_type"`, etc.
+  - Creates tables with `serial PRIMARY KEY`, `numeric`, `varchar`, `timestamp(3) with time zone`.
+  - Creates columns in `"payload_locked_documents_rels"`.
+  - Creates foreign keys with `ON DELETE set null` or `ON DELETE cascade`.
+  - Creates btree indices and unique indices.
+  - Adds check constraints (`CHECK ("balance" >= 0)`).
+  - Down migration drops triggers, tables with `CASCADE`, locked document columns/constraints, and ENUM types.
+- **`web/src/migrations/20260915_071500_phase5_purchase_download.ts` (Batch 6)**:
+  - Creates ENUM types: `"enum_orders_currency"`, `"enum_orders_status"`, `"enum_orders_payment_source"`, `"enum_entitlements_status"`, `"enum_download_events_status"`.
+  - Creates tables: `orders`, `order_items`, `entitlements`, `download_events`.
+  - Adds columns to `payload_locked_documents_rels`: `order_items_id`, `entitlements_id`, `download_events_id`.
+  - Adds check constraints on non-negative monetary fields.
+  - Implements down migration dropping all created entities.
+- **`web/src/migrations/index.ts`**:
+  - Central array exporting all migration functions. Payload reads this array when `pnpm --prefix web payload migrate` is executed.
+- **`web/src/payload.config.ts:83`**:
+  - `push: false` is configured for `@payloadcms/db-postgres`. Schema synchronization relies 100% on explicit, versioned migrations.
+
+### 1.5 Alignment with Peer Focus Areas (1 and 2)
+- **Focus Area 1 (`m1_explorer_1`)**:
+  - `Orders` status enum extended to include `'REFUNDED'` (and `'PARTIALLY_REFUNDED'`).
+  - `SellerProfiles` collection adds optional `commissionRate` (number, min 0, max 1, step 0.01).
+  - `SellerEarnings` collection (`slug: 'seller_earnings'`):
+    - Fields: `seller`, `order`, `orderItem` (unique index), `product`, `salePrice`, `platformFee`, `sellerAmount`, `commissionRate`, `currency`, `status` (`PENDING`, `AVAILABLE`, `REVERSED`, `PAID`), `holdPeriodDays`, `holdUntil`, `availableAt`, `paidAt`, `reversedAt`, `policyVersion`, `notes`.
+- **Focus Area 2 (`m1_explorer_2`)**:
+  - `Withdrawals` collection (`slug: 'withdrawals'`):
+    - Fields: `code`, `seller`, `amount` (min 50000, max 50000000), `currency`, `status` (`REQUESTED`, `UNDER_REVIEW`, `APPROVED`, `PROCESSING`, `PAID`, `REJECTED`, `CANCELLED`, `FAILED`), `bankInfo` (group: `bankName`, `accountNumber`, `accountHolderName`), `requestedAt`, `reviewedAt`, `reviewedBy`, `paidAt`, `rejectionReason`, `failureReason`, `notes`.
+  - `WithdrawalEvents` collection (`slug: 'withdrawal_events'`):
+    - Append-only audit trail: `withdrawal`, `fromStatus`, `toStatus`, `actor`, `actorRole`, `reason`, `timestamp`, `metadata`.
 
 ---
 
 ## 2. Logic Chain
 
-1. **Zero-Data State Enables Clean Drop vs Complex Alter**:
-   - Because `orders`, `orders_items`, and `orders_rels` have exactly 0 rows, no user or transaction data exists to preserve.
-   - The legacy `orders` table contains 11 physical shipping address columns, legacy enums (`enum_orders_status` with `'processing', 'refunded'` and `enum_orders_currency` with `'USD'`), and varchar PKs in `orders_items` instead of numeric/integer digital columns.
-   - Altering the existing tables would require dropping 11 columns, renaming `orders_items` to `order_items`, altering column types, rewriting primary keys, and mutating enum types. This approach is error-prone, leaves database schema artifacts, and complicates rollbacks.
-   - Conversely, dropping `orders_items`, `orders`, and `orders_rels` via `DROP TABLE IF EXISTS "orders_items", "orders", "orders_rels" CASCADE;` (following the exact precedent established in Batch 2 for `carts` and `variants`) allows clean, deterministic creation of `orders`, `order_items`, `entitlements`, and `download_events`.
+### Step 1: Designing the `Refunds` Collection (`web/src/collections/Refunds/index.ts`)
+1. **Slug**: `'refunds'`.
+2. **Access Control**:
+   - `create: canEditMoney` (deny external REST creation; local API only).
+   - `update: canEditMoney` (deny external REST updates; local API only).
+   - `delete: canEditMoney` (deny external REST deletion; immutable record).
+   - `read: refundReadAccess` (detailed below).
+3. **Fields Definition**:
+   - `code` (`text`, unique, indexed, required): Autogenerated `REF-YYYYMMDD-XXXXXX` hook via `crypto.randomBytes(3).toString('hex').toUpperCase()`.
+   - `order` (`relationship` to `orders`, required, indexed): Tracks the refunded order.
+   - `orderItem` (`relationship` to `order_items`, required, indexed): Specific item refunded.
+   - `buyer` (`relationship` to `users`, required, indexed): The user receiving the wallet credit.
+   - `seller` (`relationship` to `users`, required, indexed): The user whose earning is reversed.
+   - `amount` (`number`, required, min 0): Total refund amount credited to buyer in VND.
+   - `platformFeeRefunded` (`number`, required, min 0, defaultValue 0): Platform commission reversed.
+   - `sellerAmountRefunded` (`number`, required, min 0, defaultValue 0): Seller portion reversed.
+   - `currency` (`select`, required, defaultValue `'VND'`, options `['VND']`).
+   - `reason` (`textarea`, required): Justification for refund per §5.5.
+   - `status` (`select`, required, defaultValue `'COMPLETED'`, options `['COMPLETED', 'FAILED']`).
+   - `processedBy` (`relationship` to `users`, required, indexed): Admin or Finance Admin who authorized the refund.
+   - `ledgerTransaction` (`relationship` to `wallet_ledger`, indexed, optional): The compensating reversal ledger entry (`wallet_ledger.id`).
+   - `entitlementRevoked` (`checkbox`, defaultValue false): Whether the associated entitlement was revoked.
+   - `createdAt` / `updatedAt`: Handled by Payload's standard timestamps.
 
-2. **Phase 5 Digital Orders & Entitlements Schema Specification**:
-   - `orders`:
-     - `id`: serial PRIMARY KEY NOT NULL
-     - `code`: varchar NOT NULL (unique identifier, e.g. `ORD-xxx`)
-     - `buyer_id`: integer NOT NULL (FK to `users(id)`)
-     - `total_amount`: numeric DEFAULT 0 NOT NULL (check `>= 0`)
-     - `currency`: `enum_orders_currency` (`'VND'`) DEFAULT 'VND' NOT NULL
-     - `status`: `enum_orders_status` (`'PENDING'`, `'COMPLETED'`, `'CANCELLED'`) DEFAULT 'PENDING' NOT NULL
-     - `payment_source`: `enum_orders_payment_source` (`'wallet'`, `'free'`) DEFAULT 'wallet' NOT NULL
-     - `paid_at`: timestamp(3) with time zone
-     - `notes`: varchar
-     - `updated_at`, `created_at`: timestamp(3) with time zone DEFAULT now() NOT NULL
-   - `order_items`:
-     - `id`: serial PRIMARY KEY NOT NULL
-     - `order_id`: integer NOT NULL (FK to `orders(id)` ON DELETE cascade)
-     - `product_id`: integer NOT NULL (FK to `products(id)`)
-     - `seller_id`: integer NOT NULL (FK to `users(id)`)
-     - `sale_price`: numeric DEFAULT 0 NOT NULL (BR-07 immutable snapshot price)
-     - `platform_fee`: numeric DEFAULT 0 NOT NULL
-     - `seller_amount`: numeric DEFAULT 0 NOT NULL
-     - `tax`: numeric DEFAULT 0 NOT NULL
-     - `policy_version`: varchar DEFAULT 'v1' NOT NULL
-     - `updated_at`, `created_at`: timestamp(3) with time zone DEFAULT now() NOT NULL
-   - `entitlements`:
-     - `id`: serial PRIMARY KEY NOT NULL
-     - `user_id`: integer NOT NULL (FK to `users(id)`)
-     - `product_id`: integer NOT NULL (FK to `products(id)`)
-     - `order_id`: integer (FK to `orders(id)`, nullable for free products)
-     - `order_item_id`: integer (FK to `order_items(id)`, nullable for free products)
-     - `status`: `enum_entitlements_status` (`'active'`, `'revoked'`, `'expired'`) DEFAULT 'active' NOT NULL
-     - `granted_at`: timestamp(3) with time zone DEFAULT now() NOT NULL
-     - `download_count`: numeric DEFAULT 0 NOT NULL (check `>= 0`)
-     - `max_downloads`: numeric (nullable)
-     - `expires_at`: timestamp(3) with time zone
-     - `revoked_at`: timestamp(3) with time zone
-     - `reason`: varchar
-     - `updated_at`, `created_at`: timestamp(3) with time zone DEFAULT now() NOT NULL
-     - **Partial Unique Index (R2 Invariant)**:
-       `CREATE UNIQUE INDEX "entitlements_user_product_active_idx" ON "entitlements" ("user_id", "product_id") WHERE ("status" = 'active');`
-       Guarantees at the database engine level that a buyer can hold only ONE active entitlement per product.
-   - `download_events`:
-     - `id`: serial PRIMARY KEY NOT NULL
-     - `user_id`: integer (FK to `users(id)`, nullable for unauthenticated attempts)
-     - `product_id`: integer NOT NULL (FK to `products(id)`)
-     - `entitlement_id`: integer (FK to `entitlements(id)`, nullable for early denial)
-     - `ip_address`: varchar
-     - `user_agent`: varchar
-     - `downloaded_at`: timestamp(3) with time zone DEFAULT now() NOT NULL
-     - `status`: `enum_download_events_status` (`'SUCCESS'`, `'DENIED'`, `'EXPIRED'`, `'FAILED'`) NOT NULL
-     - `download_token_hash`: varchar
-     - `error_reason`: varchar
-     - `updated_at`, `created_at`: timestamp(3) with time zone DEFAULT now() NOT NULL
+### Step 2: Designing Access Control (`web/src/access/refundAccess.ts`)
+1. Super Admin and Finance Admin must be able to view all refunds across the platform (PLAN.md §5.5, §22).
+2. Buyers must only be able to view refunds where they are the recipient (`buyer === user.id`).
+3. Sellers must only be able to view refunds where they are the affected vendor (`seller === user.id`).
+4. Any other role (e.g., Moderator or third-party users) and unauthenticated requests must be denied (`false`).
+5. Direct write operations (`create`, `update`, `delete`) must be denied for all principals (`canEditMoney`).
 
-3. **Invariants & Database Guards (BR-04, BR-07, Decision 0002)**:
-   - **BR-04 (Anti-Self-Purchase)**: A PostgreSQL `BEFORE INSERT OR UPDATE` trigger `enforce_br04_seller_anti_self_purchase` on `order_items` checks if `orders.buyer_id == order_items.seller_id` and raises an exception if violated, providing ironclad database-level enforcement in addition to application hooks.
-   - **BR-07 (Price Snapshot Immutability)**: Snapshot columns (`sale_price`, `platform_fee`, `seller_amount`, `tax`) are enforced as immutable in `OrderItems` access controls (`update: () => false`).
-   - **Non-Negative Constraints**: Check constraints added on `orders.total_amount >= 0`, `order_items.sale_price >= 0`, `order_items.platform_fee >= 0`, `order_items.seller_amount >= 0`, `order_items.tax >= 0`, and `entitlements.download_count >= 0`.
+### Step 3: Integrating `web/src/payload.config.ts`
+1. Import all four new Phase 6 collections:
+   - `import { SellerEarnings } from '@/collections/SellerEarnings'`
+   - `import { Withdrawals } from '@/collections/Withdrawals'`
+   - `import { WithdrawalEvents } from '@/collections/WithdrawalEvents'`
+   - `import { Refunds } from '@/collections/Refunds'`
+2. Add them to `collections` array in `payload.config.ts`.
+3. Maintain existing configuration (`push: false`, lexical editor, admin config).
 
-4. **Payload Locked Documents Relations**:
-   - `payload_locked_documents_rels` already has `orders_id`. Dropping `orders` cascades the FK constraint, which is recreated.
-   - Adds columns `order_items_id`, `entitlements_id`, `download_events_id` with cascading FKs and btree indexes to maintain Payload CMS document lock integrity.
+### Step 4: Designing PostgreSQL Migration Batch 7 (`web/src/migrations/20260915_100000_phase6_seller_revenue.ts`)
+1. **ENUMs**:
+   - `enum_orders_status`: Add values `'REFUNDED'` and `'PARTIALLY_REFUNDED'`.
+   - `enum_seller_earnings_currency`: `'VND'`.
+   - `enum_seller_earnings_status`: `'PENDING'`, `'AVAILABLE'`, `'REVERSED'`, `'PAID'`.
+   - `enum_withdrawals_currency`: `'VND'`.
+   - `enum_withdrawals_status`: `'REQUESTED'`, `'UNDER_REVIEW'`, `'APPROVED'`, `'PROCESSING'`, `'PAID'`, `'REJECTED'`, `'CANCELLED'`, `'FAILED'`.
+   - `enum_refunds_currency`: `'VND'`.
+   - `enum_refunds_status`: `'COMPLETED'`, `'FAILED'`.
+   - `enum_wallet_ledger_reference_type`: Add value `'refund'` if not present.
+2. **Table Modifications**:
+   - `seller_profiles`: Add `commission_rate numeric` with check constraint `commission_rate >= 0 AND commission_rate <= 1`.
+3. **Table Creations**:
+   - `seller_earnings`: With all columns, foreign keys to `users`, `orders`, `order_items`, `products`, and unique index on `order_item_id`.
+   - `withdrawals`: With bank info columns (`bank_info_bank_name`, `bank_info_account_number`, `bank_info_account_holder_name`), foreign keys to `users`, and unique index on `code`.
+   - `withdrawal_events`: Audit trail with foreign keys to `withdrawals` and `users`.
+   - `refunds`: With foreign keys to `orders`, `order_items`, `users` (buyer, seller, processedBy), `wallet_ledger`, and unique index on `code`.
+4. **Locked Documents Relations**:
+   - Add `seller_earnings_id`, `withdrawals_id`, `withdrawal_events_id`, `refunds_id` to `payload_locked_documents_rels` with cascading foreign keys and btree indices.
+5. **Check Constraints**:
+   - `withdrawals`: `CHECK ("amount" >= 50000 AND "amount" <= 50000000)`.
+   - `seller_earnings`: `CHECK ("sale_price" >= 0)`, `CHECK ("platform_fee" >= 0)`, `CHECK ("seller_amount" >= 0)`, `CHECK ("commission_rate" >= 0 AND "commission_rate" <= 1)`.
+   - `refunds`: `CHECK ("amount" >= 0)`, `CHECK ("platform_fee_refunded" >= 0)`, `CHECK ("seller_amount_refunded" >= 0)`.
+6. **Down Migration**:
+   - Drops tables `refunds`, `withdrawal_events`, `withdrawals`, `seller_earnings` with `CASCADE`.
+   - Drops locked documents relations constraints, indices, and columns.
+   - Drops column `commission_rate` and its check constraint from `seller_profiles`.
+   - Drops all Phase 6 ENUM types.
 
-5. **Rollback Symmetry (`down` function)**:
-   - Drops all Phase 5 tables, triggers, functions, enums, and `payload_locked_documents_rels` columns.
-   - Recreates the exact Batch 1 `orders`, `orders_items`, `orders_rels` tables, enums, and foreign keys.
-   - Verified via PostgreSQL transaction rollback testing (`BEGIN ... UP ... DOWN ... ROLLBACK;`) with 0 errors.
-
----
-
-## 3. Caveats
-
-1. **Payload Collections Must Be Disabled in Ecommerce Plugin**:
-   - As identified by `m1_explorer_1`, `web/src/plugins/index.ts` must configure `ecommercePlugin({ orders: false })` so Payload does not auto-inject the legacy template `orders` collection.
-2. **Snapshot JSON Generation**:
-   - Once `m1_explorer_1` and `m1_explorer_2` register the 4 collections in `payload.config.ts`, `pnpm --prefix web payload migrate:create phase5_purchase_download` will generate the exact snapshot JSON comparing against Batch 5's JSON. The generated `.ts` file should then have its `up` and `down` functions replaced with our verified DDL below.
-3. **Foreign Key to Transactions**:
-   - `transactions.order_id` references `orders(id)`. When `orders` is recreated, our migration re-attaches `ALTER TABLE "transactions" ADD CONSTRAINT "transactions_order_id_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE set null ON UPDATE no action;` ensuring full backward compatibility.
+### Step 5: Updating Migration Registry (`web/src/migrations/index.ts`)
+- Import `migration_20260915_100000_phase6_seller_revenue` and register it in the `migrations` array.
 
 ---
 
-## 4. Conclusion & Complete Migration Design
+## 3. Implementation Code Specifications
 
-### 4.1 Migration File Details
-- **Migration Name**: `20260915_071500_phase5_purchase_download`
-- **TypeScript File**: `web/src/migrations/20260915_071500_phase5_purchase_download.ts`
-- **Snapshot JSON File**: `web/src/migrations/20260915_071500_phase5_purchase_download.json`
-- **Registration in `web/src/migrations/index.ts`**: Import and append to `migrations` array.
+### 3.1 Access Control: `web/src/access/refundAccess.ts`
 
-### 4.2 Complete TypeScript Implementation (`20260915_071500_phase5_purchase_download.ts`)
+```typescript
+import type { Access, Where } from 'payload'
+import { checkRole } from '@/access/utilities'
+
+/**
+ * Access control for reading refunds (PLAN.md §5.5, §22):
+ * - Admin and FinanceAdmin can view all refund records.
+ * - Authenticated buyers can view refunds for their purchases.
+ * - Authenticated sellers can view refunds for their sold products.
+ * - Unauthenticated users and unrelated roles are denied.
+ */
+export const refundReadAccess: Access = ({ req: { user } }) => {
+  if (!user) return false
+
+  if (checkRole(['admin', 'financeAdmin'], user)) {
+    return true
+  }
+
+  const query: Where = {
+    or: [
+      {
+        buyer: {
+          equals: user.id,
+        },
+      },
+      {
+        seller: {
+          equals: user.id,
+        },
+      },
+    ],
+  }
+
+  return query
+}
+```
+
+### 3.2 Collection Configuration: `web/src/collections/Refunds/index.ts`
+
+```typescript
+import type { CollectionConfig } from 'payload'
+import crypto from 'crypto'
+import { canEditMoney } from '@/access/canEditMoney'
+import { refundReadAccess } from '@/access/refundAccess'
+
+export const Refunds: CollectionConfig = {
+  slug: 'refunds',
+  access: {
+    create: canEditMoney,
+    delete: canEditMoney,
+    read: refundReadAccess,
+    update: canEditMoney,
+  },
+  admin: {
+    defaultColumns: [
+      'code',
+      'order',
+      'orderItem',
+      'buyer',
+      'seller',
+      'amount',
+      'status',
+      'processedBy',
+      'createdAt',
+    ],
+    group: 'Finance',
+    useAsTitle: 'code',
+    description: 'Lịch sử hoàn tiền và bút toán bù trừ (Refunds & Compensating Ledger - BR-03)',
+  },
+  fields: [
+    {
+      name: 'code',
+      type: 'text',
+      required: true,
+      unique: true,
+      index: true,
+      label: 'Mã hoàn tiền',
+      admin: {
+        readOnly: true,
+        description: 'Mã định danh duy nhất của giao dịch hoàn tiền (VD: REF-YYYYMMDD-XXXXX)',
+      },
+      hooks: {
+        beforeValidate: [
+          ({ value, operation }) => {
+            if (operation === 'create' && !value) {
+              const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+              const randomSuffix = crypto.randomBytes(3).toString('hex').toUpperCase()
+              return `REF-${dateStr}-${randomSuffix}`
+            }
+            return value
+          },
+        ],
+      },
+    },
+    {
+      name: 'order',
+      type: 'relationship',
+      relationTo: 'orders',
+      required: true,
+      index: true,
+      label: 'Đơn hàng gốc',
+      admin: {
+        readOnly: true,
+      },
+    },
+    {
+      name: 'orderItem',
+      type: 'relationship',
+      relationTo: 'order_items',
+      required: true,
+      index: true,
+      label: 'Chi tiết sản phẩm được hoàn tiền',
+      admin: {
+        readOnly: true,
+      },
+    },
+    {
+      name: 'buyer',
+      type: 'relationship',
+      relationTo: 'users',
+      required: true,
+      index: true,
+      label: 'Người mua nhận hoàn tiền',
+      admin: {
+        readOnly: true,
+      },
+    },
+    {
+      name: 'seller',
+      type: 'relationship',
+      relationTo: 'users',
+      required: true,
+      index: true,
+      label: 'Người bán bị đảo ngược doanh thu',
+      admin: {
+        readOnly: true,
+      },
+    },
+    {
+      name: 'amount',
+      type: 'number',
+      required: true,
+      min: 0,
+      label: 'Số tiền hoàn cho người mua (VND)',
+      admin: {
+        readOnly: true,
+        step: 1,
+      },
+    },
+    {
+      name: 'platformFeeRefunded',
+      type: 'number',
+      required: true,
+      min: 0,
+      defaultValue: 0,
+      label: 'Phí sàn được hoàn lại (VND)',
+      admin: {
+        readOnly: true,
+        step: 1,
+      },
+    },
+    {
+      name: 'sellerAmountRefunded',
+      type: 'number',
+      required: true,
+      min: 0,
+      defaultValue: 0,
+      label: 'Doanh thu người bán bị đảo ngược (VND)',
+      admin: {
+        readOnly: true,
+        step: 1,
+      },
+    },
+    {
+      name: 'currency',
+      type: 'select',
+      required: true,
+      defaultValue: 'VND',
+      options: [{ label: 'VND (Việt Nam Đồng)', value: 'VND' }],
+      admin: {
+        readOnly: true,
+      },
+    },
+    {
+      name: 'reason',
+      type: 'textarea',
+      required: true,
+      label: 'Lý do hoàn tiền',
+      admin: {
+        readOnly: true,
+      },
+    },
+    {
+      name: 'status',
+      type: 'select',
+      required: true,
+      defaultValue: 'COMPLETED',
+      index: true,
+      label: 'Trạng thái hoàn tiền',
+      options: [
+        { label: 'Hoàn thành (COMPLETED)', value: 'COMPLETED' },
+        { label: 'Thất bại (FAILED)', value: 'FAILED' },
+      ],
+      admin: {
+        readOnly: true,
+      },
+    },
+    {
+      name: 'processedBy',
+      type: 'relationship',
+      relationTo: 'users',
+      required: true,
+      index: true,
+      label: 'Người xử lý hoàn tiền (Finance/Super Admin)',
+      admin: {
+        readOnly: true,
+      },
+    },
+    {
+      name: 'ledgerTransaction',
+      type: 'relationship',
+      relationTo: 'wallet_ledger',
+      index: true,
+      label: 'Bút toán sổ cái bồi hoàn (Wallet Ledger Entry)',
+      admin: {
+        readOnly: true,
+      },
+    },
+    {
+      name: 'entitlementRevoked',
+      type: 'checkbox',
+      defaultValue: false,
+      label: 'Quyền tải về đã bị thu hồi (Revoke Entitlement)',
+      admin: {
+        readOnly: true,
+      },
+    },
+  ],
+}
+```
+
+### 3.3 Payload Configuration Update: `web/src/payload.config.ts`
+
+```typescript
+// Add imports:
+import { SellerEarnings } from '@/collections/SellerEarnings'
+import { Withdrawals } from '@/collections/Withdrawals'
+import { WithdrawalEvents } from '@/collections/WithdrawalEvents'
+import { Refunds } from '@/collections/Refunds'
+
+// Update collections array:
+  collections: [
+    Users,
+    Pages,
+    Categories,
+    Media,
+    SoftwareTypes,
+    Tags,
+    ProductPreviews,
+    ProductFiles,
+    Products,
+    SellerProfiles,
+    Wallets,
+    WalletLedger,
+    PaymentIntents,
+    PaymentTransactions,
+    PaymentWebhookEvents,
+    Orders,
+    OrderItems,
+    Entitlements,
+    DownloadEvents,
+    SellerEarnings,
+    Withdrawals,
+    WithdrawalEvents,
+    Refunds,
+  ],
+```
+
+### 3.4 PostgreSQL Migration Batch 7: `web/src/migrations/20260915_100000_phase6_seller_revenue.ts`
 
 ```typescript
 import { MigrateUpArgs, MigrateDownArgs, sql } from '@payloadcms/db-postgres'
 
 export async function up({ db, payload, req }: MigrateUpArgs): Promise<void> {
   await db.execute(sql`
-  -- 1. Drop old template tables and enums from Batch 1
-  DROP TABLE IF EXISTS "orders_items", "orders", "orders_rels" CASCADE;
-  DROP TYPE IF EXISTS "public"."enum_orders_status";
-  DROP TYPE IF EXISTS "public"."enum_orders_currency";
+  -- 1. Extend existing enums
+  ALTER TYPE "public"."enum_orders_status" ADD VALUE IF NOT EXISTS 'REFUNDED';
+  ALTER TYPE "public"."enum_orders_status" ADD VALUE IF NOT EXISTS 'PARTIALLY_REFUNDED';
+  ALTER TYPE "public"."enum_wallet_ledger_reference_type" ADD VALUE IF NOT EXISTS 'refund';
 
-  -- 2. Create Phase 5 ENUMs
-  CREATE TYPE "public"."enum_orders_currency" AS ENUM('VND');
-  CREATE TYPE "public"."enum_orders_status" AS ENUM('PENDING', 'COMPLETED', 'CANCELLED');
-  CREATE TYPE "public"."enum_orders_payment_source" AS ENUM('wallet', 'free');
-  CREATE TYPE "public"."enum_entitlements_status" AS ENUM('active', 'revoked', 'expired');
-  CREATE TYPE "public"."enum_download_events_status" AS ENUM('SUCCESS', 'DENIED', 'EXPIRED', 'FAILED');
+  -- 2. Create Phase 6 ENUMs
+  CREATE TYPE "public"."enum_seller_earnings_currency" AS ENUM('VND');
+  CREATE TYPE "public"."enum_seller_earnings_status" AS ENUM('PENDING', 'AVAILABLE', 'REVERSED', 'PAID');
+  CREATE TYPE "public"."enum_withdrawals_currency" AS ENUM('VND');
+  CREATE TYPE "public"."enum_withdrawals_status" AS ENUM('REQUESTED', 'UNDER_REVIEW', 'APPROVED', 'PROCESSING', 'PAID', 'REJECTED', 'CANCELLED', 'FAILED');
+  CREATE TYPE "public"."enum_refunds_currency" AS ENUM('VND');
+  CREATE TYPE "public"."enum_refunds_status" AS ENUM('COMPLETED', 'FAILED');
 
-  -- 3. Create Phase 5 Tables
-  CREATE TABLE "orders" (
-  	"id" serial PRIMARY KEY NOT NULL,
-  	"code" varchar NOT NULL,
-  	"buyer_id" integer NOT NULL,
-  	"total_amount" numeric DEFAULT 0 NOT NULL,
-  	"currency" "enum_orders_currency" DEFAULT 'VND' NOT NULL,
-  	"status" "enum_orders_status" DEFAULT 'PENDING' NOT NULL,
-  	"payment_source" "enum_orders_payment_source" DEFAULT 'wallet' NOT NULL,
-  	"paid_at" timestamp(3) with time zone,
-  	"notes" varchar,
-  	"updated_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
-  	"created_at" timestamp(3) with time zone DEFAULT now() NOT NULL
+  -- 3. Extend existing tables
+  ALTER TABLE "seller_profiles" ADD COLUMN IF NOT EXISTS "commission_rate" numeric;
+  ALTER TABLE "seller_profiles" ADD CONSTRAINT "seller_profiles_commission_rate_valid" CHECK ("commission_rate" IS NULL OR ("commission_rate" >= 0 AND "commission_rate" <= 1));
+
+  -- 4. Create Phase 6 Tables
+
+  -- 4.1 seller_earnings
+  CREATE TABLE "seller_earnings" (
+    "id" serial PRIMARY KEY NOT NULL,
+    "seller_id" integer NOT NULL,
+    "order_id" integer NOT NULL,
+    "order_item_id" integer NOT NULL,
+    "product_id" integer NOT NULL,
+    "sale_price" numeric DEFAULT 0 NOT NULL,
+    "platform_fee" numeric DEFAULT 0 NOT NULL,
+    "seller_amount" numeric DEFAULT 0 NOT NULL,
+    "commission_rate" numeric DEFAULT 0 NOT NULL,
+    "currency" "enum_seller_earnings_currency" DEFAULT 'VND' NOT NULL,
+    "status" "enum_seller_earnings_status" DEFAULT 'PENDING' NOT NULL,
+    "hold_period_days" numeric DEFAULT 7 NOT NULL,
+    "hold_until" timestamp(3) with time zone NOT NULL,
+    "available_at" timestamp(3) with time zone,
+    "paid_at" timestamp(3) with time zone,
+    "reversed_at" timestamp(3) with time zone,
+    "policy_version" varchar DEFAULT 'v1' NOT NULL,
+    "notes" varchar,
+    "updated_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+    "created_at" timestamp(3) with time zone DEFAULT now() NOT NULL
   );
 
-  CREATE TABLE "order_items" (
-  	"id" serial PRIMARY KEY NOT NULL,
-  	"order_id" integer NOT NULL,
-  	"product_id" integer NOT NULL,
-  	"seller_id" integer NOT NULL,
-  	"sale_price" numeric DEFAULT 0 NOT NULL,
-  	"platform_fee" numeric DEFAULT 0 NOT NULL,
-  	"seller_amount" numeric DEFAULT 0 NOT NULL,
-  	"tax" numeric DEFAULT 0 NOT NULL,
-  	"policy_version" varchar DEFAULT 'v1' NOT NULL,
-  	"updated_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
-  	"created_at" timestamp(3) with time zone DEFAULT now() NOT NULL
+  -- 4.2 withdrawals
+  CREATE TABLE "withdrawals" (
+    "id" serial PRIMARY KEY NOT NULL,
+    "code" varchar NOT NULL,
+    "seller_id" integer NOT NULL,
+    "amount" numeric NOT NULL,
+    "currency" "enum_withdrawals_currency" DEFAULT 'VND' NOT NULL,
+    "status" "enum_withdrawals_status" DEFAULT 'REQUESTED' NOT NULL,
+    "bank_info_bank_name" varchar NOT NULL,
+    "bank_info_account_number" varchar NOT NULL,
+    "bank_info_account_holder_name" varchar NOT NULL,
+    "requested_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+    "reviewed_at" timestamp(3) with time zone,
+    "reviewed_by_id" integer,
+    "paid_at" timestamp(3) with time zone,
+    "rejection_reason" varchar,
+    "failure_reason" varchar,
+    "notes" varchar,
+    "updated_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+    "created_at" timestamp(3) with time zone DEFAULT now() NOT NULL
   );
 
-  CREATE TABLE "entitlements" (
-  	"id" serial PRIMARY KEY NOT NULL,
-  	"user_id" integer NOT NULL,
-  	"product_id" integer NOT NULL,
-  	"order_id" integer,
-  	"order_item_id" integer,
-  	"status" "enum_entitlements_status" DEFAULT 'active' NOT NULL,
-  	"granted_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
-  	"download_count" numeric DEFAULT 0 NOT NULL,
-  	"max_downloads" numeric,
-  	"expires_at" timestamp(3) with time zone,
-  	"revoked_at" timestamp(3) with time zone,
-  	"reason" varchar,
-  	"updated_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
-  	"created_at" timestamp(3) with time zone DEFAULT now() NOT NULL
+  -- 4.3 withdrawal_events
+  CREATE TABLE "withdrawal_events" (
+    "id" serial PRIMARY KEY NOT NULL,
+    "withdrawal_id" integer NOT NULL,
+    "from_status" varchar NOT NULL,
+    "to_status" varchar NOT NULL,
+    "actor_id" integer,
+    "actor_role" varchar NOT NULL,
+    "reason" varchar,
+    "timestamp" timestamp(3) with time zone DEFAULT now() NOT NULL,
+    "metadata" jsonb,
+    "updated_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+    "created_at" timestamp(3) with time zone DEFAULT now() NOT NULL
   );
 
-  CREATE TABLE "download_events" (
-  	"id" serial PRIMARY KEY NOT NULL,
-  	"user_id" integer,
-  	"product_id" integer NOT NULL,
-  	"entitlement_id" integer,
-  	"ip_address" varchar,
-  	"user_agent" varchar,
-  	"downloaded_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
-  	"status" "enum_download_events_status" NOT NULL,
-  	"download_token_hash" varchar,
-  	"error_reason" varchar,
-  	"updated_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
-  	"created_at" timestamp(3) with time zone DEFAULT now() NOT NULL
+  -- 4.4 refunds
+  CREATE TABLE "refunds" (
+    "id" serial PRIMARY KEY NOT NULL,
+    "code" varchar NOT NULL,
+    "order_id" integer NOT NULL,
+    "order_item_id" integer NOT NULL,
+    "buyer_id" integer NOT NULL,
+    "seller_id" integer NOT NULL,
+    "amount" numeric NOT NULL,
+    "platform_fee_refunded" numeric DEFAULT 0 NOT NULL,
+    "seller_amount_refunded" numeric DEFAULT 0 NOT NULL,
+    "currency" "enum_refunds_currency" DEFAULT 'VND' NOT NULL,
+    "reason" varchar NOT NULL,
+    "status" "enum_refunds_status" DEFAULT 'COMPLETED' NOT NULL,
+    "processed_by_id" integer NOT NULL,
+    "ledger_transaction_id" integer,
+    "entitlement_revoked" boolean DEFAULT false NOT NULL,
+    "updated_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+    "created_at" timestamp(3) with time zone DEFAULT now() NOT NULL
   );
 
-  -- 4. Payload Locked Documents Relations
-  ALTER TABLE "payload_locked_documents_rels" ADD COLUMN IF NOT EXISTS "order_items_id" integer;
-  ALTER TABLE "payload_locked_documents_rels" ADD COLUMN IF NOT EXISTS "entitlements_id" integer;
-  ALTER TABLE "payload_locked_documents_rels" ADD COLUMN IF NOT EXISTS "download_events_id" integer;
+  -- 5. Payload Locked Documents Relations
+  ALTER TABLE "payload_locked_documents_rels" ADD COLUMN IF NOT EXISTS "seller_earnings_id" integer;
+  ALTER TABLE "payload_locked_documents_rels" ADD COLUMN IF NOT EXISTS "withdrawals_id" integer;
+  ALTER TABLE "payload_locked_documents_rels" ADD COLUMN IF NOT EXISTS "withdrawal_events_id" integer;
+  ALTER TABLE "payload_locked_documents_rels" ADD COLUMN IF NOT EXISTS "refunds_id" integer;
 
-  -- 5. Foreign Key Constraints
-  ALTER TABLE "orders" ADD CONSTRAINT "orders_buyer_id_users_id_fk" FOREIGN KEY ("buyer_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
+  ALTER TABLE "payload_locked_documents_rels" ADD CONSTRAINT "payload_locked_documents_rels_seller_earnings_fk" FOREIGN KEY ("seller_earnings_id") REFERENCES "public"."seller_earnings"("id") ON DELETE cascade ON UPDATE no action;
+  ALTER TABLE "payload_locked_documents_rels" ADD CONSTRAINT "payload_locked_documents_rels_withdrawals_fk" FOREIGN KEY ("withdrawals_id") REFERENCES "public"."withdrawals"("id") ON DELETE cascade ON UPDATE no action;
+  ALTER TABLE "payload_locked_documents_rels" ADD CONSTRAINT "payload_locked_documents_rels_withdrawal_events_fk" FOREIGN KEY ("withdrawal_events_id") REFERENCES "public"."withdrawal_events"("id") ON DELETE cascade ON UPDATE no action;
+  ALTER TABLE "payload_locked_documents_rels" ADD CONSTRAINT "payload_locked_documents_rels_refunds_fk" FOREIGN KEY ("refunds_id") REFERENCES "public"."refunds"("id") ON DELETE cascade ON UPDATE no action;
 
-  ALTER TABLE "order_items" ADD CONSTRAINT "order_items_order_id_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE cascade ON UPDATE no action;
-  ALTER TABLE "order_items" ADD CONSTRAINT "order_items_product_id_products_id_fk" FOREIGN KEY ("product_id") REFERENCES "public"."products"("id") ON DELETE set null ON UPDATE no action;
-  ALTER TABLE "order_items" ADD CONSTRAINT "order_items_seller_id_users_id_fk" FOREIGN KEY ("seller_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
+  CREATE INDEX IF NOT EXISTS "payload_locked_documents_rels_seller_earnings_id_idx" ON "payload_locked_documents_rels" USING btree ("seller_earnings_id");
+  CREATE INDEX IF NOT EXISTS "payload_locked_documents_rels_withdrawals_id_idx" ON "payload_locked_documents_rels" USING btree ("withdrawals_id");
+  CREATE INDEX IF NOT EXISTS "payload_locked_documents_rels_withdrawal_events_id_idx" ON "payload_locked_documents_rels" USING btree ("withdrawal_events_id");
+  CREATE INDEX IF NOT EXISTS "payload_locked_documents_rels_refunds_id_idx" ON "payload_locked_documents_rels" USING btree ("refunds_id");
 
-  ALTER TABLE "entitlements" ADD CONSTRAINT "entitlements_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
-  ALTER TABLE "entitlements" ADD CONSTRAINT "entitlements_product_id_products_id_fk" FOREIGN KEY ("product_id") REFERENCES "public"."products"("id") ON DELETE set null ON UPDATE no action;
-  ALTER TABLE "entitlements" ADD CONSTRAINT "entitlements_order_id_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE set null ON UPDATE no action;
-  ALTER TABLE "entitlements" ADD CONSTRAINT "entitlements_order_item_id_order_items_id_fk" FOREIGN KEY ("order_item_id") REFERENCES "public"."order_items"("id") ON DELETE set null ON UPDATE no action;
+  -- 6. Foreign Key Constraints
+  ALTER TABLE "seller_earnings" ADD CONSTRAINT "seller_earnings_seller_id_users_id_fk" FOREIGN KEY ("seller_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
+  ALTER TABLE "seller_earnings" ADD CONSTRAINT "seller_earnings_order_id_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE cascade ON UPDATE no action;
+  ALTER TABLE "seller_earnings" ADD CONSTRAINT "seller_earnings_order_item_id_order_items_id_fk" FOREIGN KEY ("order_item_id") REFERENCES "public"."order_items"("id") ON DELETE cascade ON UPDATE no action;
+  ALTER TABLE "seller_earnings" ADD CONSTRAINT "seller_earnings_product_id_products_id_fk" FOREIGN KEY ("product_id") REFERENCES "public"."products"("id") ON DELETE set null ON UPDATE no action;
 
-  ALTER TABLE "download_events" ADD CONSTRAINT "download_events_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
-  ALTER TABLE "download_events" ADD CONSTRAINT "download_events_product_id_products_id_fk" FOREIGN KEY ("product_id") REFERENCES "public"."products"("id") ON DELETE set null ON UPDATE no action;
-  ALTER TABLE "download_events" ADD CONSTRAINT "download_events_entitlement_id_entitlements_id_fk" FOREIGN KEY ("entitlement_id") REFERENCES "public"."entitlements"("id") ON DELETE set null ON UPDATE no action;
+  ALTER TABLE "withdrawals" ADD CONSTRAINT "withdrawals_seller_id_users_id_fk" FOREIGN KEY ("seller_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
+  ALTER TABLE "withdrawals" ADD CONSTRAINT "withdrawals_reviewed_by_id_users_id_fk" FOREIGN KEY ("reviewed_by_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
 
-  ALTER TABLE "payload_locked_documents_rels" ADD CONSTRAINT "payload_locked_documents_rels_orders_fk" FOREIGN KEY ("orders_id") REFERENCES "public"."orders"("id") ON DELETE cascade ON UPDATE no action;
-  ALTER TABLE "payload_locked_documents_rels" ADD CONSTRAINT "payload_locked_documents_rels_order_items_fk" FOREIGN KEY ("order_items_id") REFERENCES "public"."order_items"("id") ON DELETE cascade ON UPDATE no action;
-  ALTER TABLE "payload_locked_documents_rels" ADD CONSTRAINT "payload_locked_documents_rels_entitlements_fk" FOREIGN KEY ("entitlements_id") REFERENCES "public"."entitlements"("id") ON DELETE cascade ON UPDATE no action;
-  ALTER TABLE "payload_locked_documents_rels" ADD CONSTRAINT "payload_locked_documents_rels_download_events_fk" FOREIGN KEY ("download_events_id") REFERENCES "public"."download_events"("id") ON DELETE cascade ON UPDATE no action;
+  ALTER TABLE "withdrawal_events" ADD CONSTRAINT "withdrawal_events_withdrawal_id_withdrawals_id_fk" FOREIGN KEY ("withdrawal_id") REFERENCES "public"."withdrawals"("id") ON DELETE cascade ON UPDATE no action;
+  ALTER TABLE "withdrawal_events" ADD CONSTRAINT "withdrawal_events_actor_id_users_id_fk" FOREIGN KEY ("actor_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
 
-  ALTER TABLE "transactions" ADD CONSTRAINT "transactions_order_id_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE set null ON UPDATE no action;
+  ALTER TABLE "refunds" ADD CONSTRAINT "refunds_order_id_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE cascade ON UPDATE no action;
+  ALTER TABLE "refunds" ADD CONSTRAINT "refunds_order_item_id_order_items_id_fk" FOREIGN KEY ("order_item_id") REFERENCES "public"."order_items"("id") ON DELETE cascade ON UPDATE no action;
+  ALTER TABLE "refunds" ADD CONSTRAINT "refunds_buyer_id_users_id_fk" FOREIGN KEY ("buyer_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
+  ALTER TABLE "refunds" ADD CONSTRAINT "refunds_seller_id_users_id_fk" FOREIGN KEY ("seller_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
+  ALTER TABLE "refunds" ADD CONSTRAINT "refunds_processed_by_id_users_id_fk" FOREIGN KEY ("processed_by_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
+  ALTER TABLE "refunds" ADD CONSTRAINT "refunds_ledger_transaction_id_wallet_ledger_id_fk" FOREIGN KEY ("ledger_transaction_id") REFERENCES "public"."wallet_ledger"("id") ON DELETE set null ON UPDATE no action;
 
-  -- 6. Indexes
-  CREATE UNIQUE INDEX "orders_code_idx" ON "orders" USING btree ("code");
-  CREATE INDEX "orders_buyer_idx" ON "orders" USING btree ("buyer_id");
-  CREATE INDEX "orders_updated_at_idx" ON "orders" USING btree ("updated_at");
-  CREATE INDEX "orders_created_at_idx" ON "orders" USING btree ("created_at");
+  -- 7. Indices
+  CREATE UNIQUE INDEX "seller_earnings_order_item_idx" ON "seller_earnings" USING btree ("order_item_id");
+  CREATE INDEX "seller_earnings_seller_idx" ON "seller_earnings" USING btree ("seller_id");
+  CREATE INDEX "seller_earnings_order_idx" ON "seller_earnings" USING btree ("order_id");
+  CREATE INDEX "seller_earnings_product_idx" ON "seller_earnings" USING btree ("product_id");
+  CREATE INDEX "seller_earnings_status_idx" ON "seller_earnings" USING btree ("status");
+  CREATE INDEX "seller_earnings_hold_until_idx" ON "seller_earnings" USING btree ("hold_until");
+  CREATE INDEX "seller_earnings_updated_at_idx" ON "seller_earnings" USING btree ("updated_at");
+  CREATE INDEX "seller_earnings_created_at_idx" ON "seller_earnings" USING btree ("created_at");
 
-  CREATE INDEX "order_items_order_idx" ON "order_items" USING btree ("order_id");
-  CREATE INDEX "order_items_product_idx" ON "order_items" USING btree ("product_id");
-  CREATE INDEX "order_items_seller_idx" ON "order_items" USING btree ("seller_id");
-  CREATE INDEX "order_items_updated_at_idx" ON "order_items" USING btree ("updated_at");
-  CREATE INDEX "order_items_created_at_idx" ON "order_items" USING btree ("created_at");
+  CREATE UNIQUE INDEX "withdrawals_code_idx" ON "withdrawals" USING btree ("code");
+  CREATE INDEX "withdrawals_seller_idx" ON "withdrawals" USING btree ("seller_id");
+  CREATE INDEX "withdrawals_status_idx" ON "withdrawals" USING btree ("status");
+  CREATE INDEX "withdrawals_reviewed_by_idx" ON "withdrawals" USING btree ("reviewed_by_id");
+  CREATE INDEX "withdrawals_requested_at_idx" ON "withdrawals" USING btree ("requested_at");
+  CREATE INDEX "withdrawals_updated_at_idx" ON "withdrawals" USING btree ("updated_at");
+  CREATE INDEX "withdrawals_created_at_idx" ON "withdrawals" USING btree ("created_at");
 
-  CREATE INDEX "entitlements_user_idx" ON "entitlements" USING btree ("user_id");
-  CREATE INDEX "entitlements_product_idx" ON "entitlements" USING btree ("product_id");
-  CREATE INDEX "entitlements_order_idx" ON "entitlements" USING btree ("order_id");
-  CREATE INDEX "entitlements_order_item_idx" ON "entitlements" USING btree ("order_item_id");
-  CREATE INDEX "entitlements_updated_at_idx" ON "entitlements" USING btree ("updated_at");
-  CREATE INDEX "entitlements_created_at_idx" ON "entitlements" USING btree ("created_at");
+  CREATE INDEX "withdrawal_events_withdrawal_idx" ON "withdrawal_events" USING btree ("withdrawal_id");
+  CREATE INDEX "withdrawal_events_actor_idx" ON "withdrawal_events" USING btree ("actor_id");
+  CREATE INDEX "withdrawal_events_timestamp_idx" ON "withdrawal_events" USING btree ("timestamp");
+  CREATE INDEX "withdrawal_events_updated_at_idx" ON "withdrawal_events" USING btree ("updated_at");
+  CREATE INDEX "withdrawal_events_created_at_idx" ON "withdrawal_events" USING btree ("created_at");
 
-  CREATE INDEX "download_events_user_idx" ON "download_events" USING btree ("user_id");
-  CREATE INDEX "download_events_product_idx" ON "download_events" USING btree ("product_id");
-  CREATE INDEX "download_events_entitlement_idx" ON "download_events" USING btree ("entitlement_id");
-  CREATE INDEX "download_events_token_hash_idx" ON "download_events" USING btree ("download_token_hash");
-  CREATE INDEX "download_events_downloaded_at_idx" ON "download_events" USING btree ("downloaded_at");
-  CREATE INDEX "download_events_updated_at_idx" ON "download_events" USING btree ("updated_at");
-  CREATE INDEX "download_events_created_at_idx" ON "download_events" USING btree ("created_at");
+  CREATE UNIQUE INDEX "refunds_code_idx" ON "refunds" USING btree ("code");
+  CREATE INDEX "refunds_order_idx" ON "refunds" USING btree ("order_id");
+  CREATE INDEX "refunds_order_item_idx" ON "refunds" USING btree ("order_item_id");
+  CREATE INDEX "refunds_buyer_idx" ON "refunds" USING btree ("buyer_id");
+  CREATE INDEX "refunds_seller_idx" ON "refunds" USING btree ("seller_id");
+  CREATE INDEX "refunds_status_idx" ON "refunds" USING btree ("status");
+  CREATE INDEX "refunds_processed_by_idx" ON "refunds" USING btree ("processed_by_id");
+  CREATE INDEX "refunds_ledger_transaction_idx" ON "refunds" USING btree ("ledger_transaction_id");
+  CREATE INDEX "refunds_updated_at_idx" ON "refunds" USING btree ("updated_at");
+  CREATE INDEX "refunds_created_at_idx" ON "refunds" USING btree ("created_at");
 
-  CREATE INDEX IF NOT EXISTS "payload_locked_documents_rels_orders_id_idx" ON "payload_locked_documents_rels" USING btree ("orders_id");
-  CREATE INDEX "payload_locked_documents_rels_order_items_id_idx" ON "payload_locked_documents_rels" USING btree ("order_items_id");
-  CREATE INDEX "payload_locked_documents_rels_entitlements_id_idx" ON "payload_locked_documents_rels" USING btree ("entitlements_id");
-  CREATE INDEX "payload_locked_documents_rels_download_events_id_idx" ON "payload_locked_documents_rels" USING btree ("download_events_id");
+  -- 8. Business Rule & Integrity Check Constraints
+  ALTER TABLE "withdrawals" ADD CONSTRAINT "withdrawals_amount_limits" CHECK ("amount" >= 50000 AND "amount" <= 50000000);
 
-  -- 7. Special Constraints & Invariants
-  -- R2 Invariant: Partial Unique Index - A buyer can only hold ONE active entitlement per product
-  CREATE UNIQUE INDEX "entitlements_user_product_active_idx" ON "entitlements" ("user_id", "product_id") WHERE ("status" = 'active');
+  ALTER TABLE "seller_earnings" ADD CONSTRAINT "seller_earnings_sale_price_non_negative" CHECK ("sale_price" >= 0);
+  ALTER TABLE "seller_earnings" ADD CONSTRAINT "seller_earnings_platform_fee_non_negative" CHECK ("platform_fee" >= 0);
+  ALTER TABLE "seller_earnings" ADD CONSTRAINT "seller_earnings_seller_amount_non_negative" CHECK ("seller_amount" >= 0);
+  ALTER TABLE "seller_earnings" ADD CONSTRAINT "seller_earnings_commission_rate_valid" CHECK ("commission_rate" >= 0 AND "commission_rate" <= 1);
 
-  -- Non-negative monetary checks
-  ALTER TABLE "orders" ADD CONSTRAINT "orders_total_amount_non_negative" CHECK ("total_amount" >= 0);
-  ALTER TABLE "order_items" ADD CONSTRAINT "order_items_sale_price_non_negative" CHECK ("sale_price" >= 0);
-  ALTER TABLE "order_items" ADD CONSTRAINT "order_items_platform_fee_non_negative" CHECK ("platform_fee" >= 0);
-  ALTER TABLE "order_items" ADD CONSTRAINT "order_items_seller_amount_non_negative" CHECK ("seller_amount" >= 0);
-  ALTER TABLE "order_items" ADD CONSTRAINT "order_items_tax_non_negative" CHECK ("tax" >= 0);
-  ALTER TABLE "entitlements" ADD CONSTRAINT "entitlements_download_count_non_negative" CHECK ("download_count" >= 0);
-
-  -- BR-04 Invariant Database Trigger: Anti-Self-Purchase
-  CREATE OR REPLACE FUNCTION check_seller_self_purchase()
-  RETURNS trigger AS $$
-  DECLARE
-    order_buyer_id integer;
-  BEGIN
-    SELECT buyer_id INTO order_buyer_id FROM "orders" WHERE id = NEW.order_id;
-    IF order_buyer_id IS NOT NULL AND order_buyer_id = NEW.seller_id THEN
-      RAISE EXCEPTION 'BR-04 Invariant Violation: Seller (id=%) cannot purchase their own product (product_id=%)', NEW.seller_id, NEW.product_id;
-    END IF;
-    RETURN NEW;
-  END;
-  $$ LANGUAGE plpgsql;
-
-  CREATE TRIGGER enforce_br04_seller_anti_self_purchase
-  BEFORE INSERT OR UPDATE ON "order_items"
-  FOR EACH ROW EXECUTE FUNCTION check_seller_self_purchase();
+  ALTER TABLE "refunds" ADD CONSTRAINT "refunds_amount_non_negative" CHECK ("amount" >= 0);
+  ALTER TABLE "refunds" ADD CONSTRAINT "refunds_platform_fee_refunded_non_negative" CHECK ("platform_fee_refunded" >= 0);
+  ALTER TABLE "refunds" ADD CONSTRAINT "refunds_seller_amount_refunded_non_negative" CHECK ("seller_amount_refunded" >= 0);
   `)
 }
 
 export async function down({ db, payload, req }: MigrateDownArgs): Promise<void> {
   await db.execute(sql`
-  -- 1. Drop trigger and function
-  DROP TRIGGER IF EXISTS enforce_br04_seller_anti_self_purchase ON "order_items";
-  DROP FUNCTION IF EXISTS check_seller_self_purchase();
+  -- 1. Drop tables in reverse dependency order
+  DROP TABLE IF EXISTS "refunds" CASCADE;
+  DROP TABLE IF EXISTS "withdrawal_events" CASCADE;
+  DROP TABLE IF EXISTS "withdrawals" CASCADE;
+  DROP TABLE IF EXISTS "seller_earnings" CASCADE;
 
-  -- 2. Drop Phase 5 tables
-  DROP TABLE IF EXISTS "download_events" CASCADE;
-  DROP TABLE IF EXISTS "entitlements" CASCADE;
-  DROP TABLE IF EXISTS "order_items" CASCADE;
-  DROP TABLE IF EXISTS "orders" CASCADE;
+  -- 2. Drop columns and constraints from payload_locked_documents_rels
+  ALTER TABLE "payload_locked_documents_rels" DROP CONSTRAINT IF EXISTS "payload_locked_documents_rels_refunds_fk";
+  ALTER TABLE "payload_locked_documents_rels" DROP CONSTRAINT IF EXISTS "payload_locked_documents_rels_withdrawal_events_fk";
+  ALTER TABLE "payload_locked_documents_rels" DROP CONSTRAINT IF EXISTS "payload_locked_documents_rels_withdrawals_fk";
+  ALTER TABLE "payload_locked_documents_rels" DROP CONSTRAINT IF EXISTS "payload_locked_documents_rels_seller_earnings_fk";
 
-  -- 3. Drop locked documents relations added in Phase 5
-  ALTER TABLE "payload_locked_documents_rels" DROP CONSTRAINT IF EXISTS "payload_locked_documents_rels_download_events_fk";
-  ALTER TABLE "payload_locked_documents_rels" DROP CONSTRAINT IF EXISTS "payload_locked_documents_rels_entitlements_fk";
-  ALTER TABLE "payload_locked_documents_rels" DROP CONSTRAINT IF EXISTS "payload_locked_documents_rels_order_items_fk";
-  ALTER TABLE "payload_locked_documents_rels" DROP CONSTRAINT IF EXISTS "payload_locked_documents_rels_orders_fk";
+  DROP INDEX IF EXISTS "payload_locked_documents_rels_refunds_id_idx";
+  DROP INDEX IF EXISTS "payload_locked_documents_rels_withdrawal_events_id_idx";
+  DROP INDEX IF EXISTS "payload_locked_documents_rels_withdrawals_id_idx";
+  DROP INDEX IF EXISTS "payload_locked_documents_rels_seller_earnings_id_idx";
 
-  DROP INDEX IF EXISTS "payload_locked_documents_rels_download_events_id_idx";
-  DROP INDEX IF EXISTS "payload_locked_documents_rels_entitlements_id_idx";
-  DROP INDEX IF EXISTS "payload_locked_documents_rels_order_items_id_idx";
+  ALTER TABLE "payload_locked_documents_rels" DROP COLUMN IF EXISTS "refunds_id";
+  ALTER TABLE "payload_locked_documents_rels" DROP COLUMN IF EXISTS "withdrawal_events_id";
+  ALTER TABLE "payload_locked_documents_rels" DROP COLUMN IF EXISTS "withdrawals_id";
+  ALTER TABLE "payload_locked_documents_rels" DROP COLUMN IF EXISTS "seller_earnings_id";
 
-  ALTER TABLE "payload_locked_documents_rels" DROP COLUMN IF EXISTS "download_events_id";
-  ALTER TABLE "payload_locked_documents_rels" DROP COLUMN IF EXISTS "entitlements_id";
-  ALTER TABLE "payload_locked_documents_rels" DROP COLUMN IF EXISTS "order_items_id";
+  -- 3. Remove commission_rate from seller_profiles
+  ALTER TABLE "seller_profiles" DROP CONSTRAINT IF EXISTS "seller_profiles_commission_rate_valid";
+  ALTER TABLE "seller_profiles" DROP COLUMN IF EXISTS "commission_rate";
 
-  -- 4. Drop Phase 5 Enums
-  DROP TYPE IF EXISTS "public"."enum_download_events_status";
-  DROP TYPE IF EXISTS "public"."enum_entitlements_status";
-  DROP TYPE IF EXISTS "public"."enum_orders_payment_source";
-  DROP TYPE IF EXISTS "public"."enum_orders_status";
-  DROP TYPE IF EXISTS "public"."enum_orders_currency";
-
-  -- 5. Restore Batch 1 Template Tables, Enums, and Constraints
-  CREATE TYPE "public"."enum_orders_status" AS ENUM('processing', 'completed', 'cancelled', 'refunded');
-  CREATE TYPE "public"."enum_orders_currency" AS ENUM('USD');
-
-  CREATE TABLE "orders" (
-  	"id" serial PRIMARY KEY NOT NULL,
-  	"shipping_address_title" varchar,
-  	"shipping_address_first_name" varchar,
-  	"shipping_address_last_name" varchar,
-  	"shipping_address_company" varchar,
-  	"shipping_address_address_line1" varchar,
-  	"shipping_address_address_line2" varchar,
-  	"shipping_address_city" varchar,
-  	"shipping_address_state" varchar,
-  	"shipping_address_postal_code" varchar,
-  	"shipping_address_country" varchar,
-  	"shipping_address_phone" varchar,
-  	"customer_id" integer,
-  	"customer_email" varchar,
-  	"status" "enum_orders_status" DEFAULT 'processing',
-  	"amount" numeric,
-  	"currency" "enum_orders_currency" DEFAULT 'USD',
-  	"access_token" varchar,
-  	"updated_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
-  	"created_at" timestamp(3) with time zone DEFAULT now() NOT NULL
-  );
-
-  CREATE TABLE "orders_items" (
-  	"_order" integer NOT NULL,
-  	"_parent_id" integer NOT NULL,
-  	"id" varchar PRIMARY KEY NOT NULL,
-  	"product_id" integer,
-  	"quantity" numeric DEFAULT 1 NOT NULL
-  );
-
-  CREATE TABLE "orders_rels" (
-  	"id" serial PRIMARY KEY NOT NULL,
-  	"order" integer,
-  	"parent_id" integer NOT NULL,
-  	"path" varchar NOT NULL,
-  	"transactions_id" integer
-  );
-
-  ALTER TABLE "orders_items" ADD CONSTRAINT "orders_items_product_id_products_id_fk" FOREIGN KEY ("product_id") REFERENCES "public"."products"("id") ON DELETE set null ON UPDATE no action;
-  ALTER TABLE "orders_items" ADD CONSTRAINT "orders_items_parent_id_fk" FOREIGN KEY ("_parent_id") REFERENCES "public"."orders"("id") ON DELETE cascade ON UPDATE no action;
-  ALTER TABLE "orders" ADD CONSTRAINT "orders_customer_id_users_id_fk" FOREIGN KEY ("customer_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
-  ALTER TABLE "orders_rels" ADD CONSTRAINT "orders_rels_parent_fk" FOREIGN KEY ("parent_id") REFERENCES "public"."orders"("id") ON DELETE cascade ON UPDATE no action;
-  ALTER TABLE "orders_rels" ADD CONSTRAINT "orders_rels_transactions_fk" FOREIGN KEY ("transactions_id") REFERENCES "public"."transactions"("id") ON DELETE cascade ON UPDATE no action;
-  ALTER TABLE "payload_locked_documents_rels" ADD CONSTRAINT "payload_locked_documents_rels_orders_fk" FOREIGN KEY ("orders_id") REFERENCES "public"."orders"("id") ON DELETE cascade ON UPDATE no action;
-  ALTER TABLE "transactions" ADD CONSTRAINT "transactions_order_id_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE set null ON UPDATE no action;
-
-  CREATE INDEX "orders_items_order_idx" ON "orders_items" USING btree ("_order");
-  CREATE INDEX "orders_items_parent_id_idx" ON "orders_items" USING btree ("_parent_id");
-  CREATE INDEX "orders_items_product_idx" ON "orders_items" USING btree ("product_id");
-  CREATE INDEX "orders_customer_idx" ON "orders" USING btree ("customer_id");
-  CREATE UNIQUE INDEX "orders_access_token_idx" ON "orders" USING btree ("access_token");
-  CREATE INDEX "orders_updated_at_idx" ON "orders" USING btree ("updated_at");
-  CREATE INDEX "orders_created_at_idx" ON "orders" USING btree ("created_at");
-  CREATE INDEX "orders_rels_order_idx" ON "orders_rels" USING btree ("order");
-  CREATE INDEX "orders_rels_parent_idx" ON "orders_rels" USING btree ("parent_id");
-  CREATE INDEX "orders_rels_path_idx" ON "orders_rels" USING btree ("path");
-  CREATE INDEX "orders_rels_transactions_id_idx" ON "orders_rels" USING btree ("transactions_id");
+  -- 4. Drop Phase 6 ENUMs
+  DROP TYPE IF EXISTS "public"."enum_refunds_status";
+  DROP TYPE IF EXISTS "public"."enum_refunds_currency";
+  DROP TYPE IF EXISTS "public"."enum_withdrawals_status";
+  DROP TYPE IF EXISTS "public"."enum_withdrawals_currency";
+  DROP TYPE IF EXISTS "public"."enum_seller_earnings_status";
+  DROP TYPE IF EXISTS "public"."enum_seller_earnings_currency";
   `)
 }
 ```
 
-### 4.3 Registration in `web/src/migrations/index.ts`
+### 3.5 Migration Registry: `web/src/migrations/index.ts`
 
 ```typescript
 import * as migration_20260915_020514_initial from './20260915_020514_initial';
@@ -408,6 +707,7 @@ import * as migration_20260915_033625_phase2_digital_catalog from './20260915_03
 import * as migration_20260915_062953_phase3_seller_moderation from './20260915_062953_phase3_seller_moderation';
 import * as migration_20260915_064708_phase4_payment_wallet from './20260915_064708_phase4_payment_wallet';
 import * as migration_20260915_071500_phase5_purchase_download from './20260915_071500_phase5_purchase_download';
+import * as migration_20260915_100000_phase6_seller_revenue from './20260915_100000_phase6_seller_revenue';
 
 export const migrations = [
   {
@@ -440,61 +740,63 @@ export const migrations = [
     down: migration_20260915_071500_phase5_purchase_download.down,
     name: '20260915_071500_phase5_purchase_download',
   },
+  {
+    up: migration_20260915_100000_phase6_seller_revenue.up,
+    down: migration_20260915_100000_phase6_seller_revenue.down,
+    name: '20260915_100000_phase6_seller_revenue',
+  },
 ];
 ```
 
 ---
 
-## 5. Verification Method
+## 4. Caveats
+1. **PostgreSQL ENUM Value Removal**: In PostgreSQL, dropping specific values added via `ALTER TYPE ... ADD VALUE` is not natively supported in down migrations without recreating the entire ENUM type and remapping column types. In the down migration, newly added enum types (`enum_seller_earnings_*`, `enum_withdrawals_*`, `enum_refunds_*`) are dropped cleanly, while `enum_orders_status` retains the added `'REFUNDED'` value without adverse effect.
+2. **Immutability of Refunds**: Per BR-03 and FLOW-U15, refund records must never be deleted or modified. The Payload access control `canEditMoney` enforces this on the REST/GraphQL boundary. All refund operations must go through the internal refund service using local API inside a database transaction.
+3. **Database Drift (`push: false`)**: The repository configures `push: false` in `payload.config.ts`. Any new collections or fields added to collections must be preceded or accompanied by applying Migration Batch 7 via `pnpm --prefix web payload migrate`.
 
-To independently verify this migration design:
+---
 
-1. **Syntax & Constraint Verification against PostgreSQL 16**:
-   Execute the migration `up` and `down` statements in a transactional test block:
+## 5. Conclusion
+Focus Area 3 design is complete, rigorous, and verified against all Phase 6 specifications and existing codebase conventions:
+1. `Refunds` collection structure encapsulates all required financial audit snapshot fields, relationships, and autogenerated code hooks.
+2. `refundReadAccess` partitions access strictly between admins/finance admins and document stakeholders (buyer/seller), blocking unauthenticated or unrelated access.
+3. `payload.config.ts` registration integrates all four collections seamlessly.
+4. Migration Batch 7 DDL is fully drafted with exact types, foreign keys, unique indices, business rule check constraints, locked document relations, and down migration statements.
+
+---
+
+## 6. Verification Method
+
+### 6.1 Independent Verification Commands
+Once the implementation subagent writes the files:
+1. **Run Migration Batch 7**:
    ```bash
-   docker exec -i kientaohub-postgres psql -U payload -d kientaohub << 'EOF'
-   BEGIN;
-   -- [Paste up SQL]
-   -- Verify relations created:
-   \d orders
-   \d order_items
-   \d entitlements
-   \d download_events
-   -- [Paste down SQL]
-   -- Verify relations restored:
-   \d orders
-   \d orders_items
-   ROLLBACK;
-   EOF
+   pnpm --prefix web payload migrate
    ```
-   **Verification Result**: Tested directly in the live container and exited with 0 errors.
-
-2. **Check Invariant BR-04 Enforcement via Trigger**:
-   Within a transaction:
-   ```sql
-   INSERT INTO orders (id, code, buyer_id, total_amount, currency, status, payment_source)
-   VALUES (9999, 'ORD-TEST', 1, 100000, 'VND', 'COMPLETED', 'wallet');
-
-   -- Attempt to insert order item where seller_id == buyer_id (1)
-   INSERT INTO order_items (id, order_id, product_id, seller_id, sale_price, platform_fee, seller_amount, tax)
-   VALUES (9999, 9999, 1, 1, 100000, 10000, 90000, 0);
-   -- MUST FAIL: 'BR-04 Invariant Violation: Seller (id=1) cannot purchase their own product (product_id=1)'
+   *Expected result*: Migration `20260915_100000_phase6_seller_revenue` executes with 0 errors.
+2. **Generate Types**:
+   ```bash
+   pnpm --prefix web generate:types
    ```
-
-3. **Check Invariant R2 Partial Unique Index**:
-   Within a transaction:
-   ```sql
-   INSERT INTO entitlements (user_id, product_id, status) VALUES (1, 1, 'active');
-   -- Attempt duplicate active entitlement:
-   INSERT INTO entitlements (user_id, product_id, status) VALUES (1, 1, 'active');
-   -- MUST FAIL: duplicate key value violates unique constraint "entitlements_user_product_active_idx"
-
-   -- Revoked entitlement coexisting with active:
-   UPDATE entitlements SET status = 'revoked' WHERE user_id = 1 AND product_id = 1;
-   INSERT INTO entitlements (user_id, product_id, status) VALUES (1, 1, 'active');
-   -- MUST SUCCEED (allowed because previous row is revoked).
+   *Expected result*: `web/src/payload-types.ts` is updated with TypeScript interfaces for `Refund`, `SellerEarning`, `Withdrawal`, `WithdrawalEvent`.
+3. **Run Typecheck and Build**:
+   ```bash
+   pnpm --prefix web build
    ```
+   *Expected result*: Compiles cleanly with exit code 0.
+4. **Run Linter**:
+   ```bash
+   pnpm --prefix web lint
+   ```
+   *Expected result*: Exits with code 0 (0 errors).
+5. **Run Integration Tests**:
+   ```bash
+   pnpm --prefix web test:int
+   ```
+   *Expected result*: All existing 347 tests across 22 suites continue to pass without regression.
 
-4. **Invalidation Conditions**:
-   - If Payload collection definitions differ in column names (e.g. `orderItem` vs `order_item_id`).
-   - If `ecommercePlugin({ orders: false })` is not set, resulting in conflicting `orders` collection definitions in Payload CMS.
+### 6.2 Invalidation Conditions
+- Any REST mutation (`POST`, `PATCH`, `DELETE`) on `/api/refunds` returning HTTP 200/201 without internal local API authorization invalidates the security model.
+- Any withdrawal created with `amount < 50000` or `amount > 50000000` bypassing the database check constraint invalidates FR-32.
+- Any duplicate `orderItem` earning creation succeeding invalidates BR-07 and the unique index constraint.

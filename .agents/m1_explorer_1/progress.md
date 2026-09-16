@@ -1,20 +1,20 @@
-# Progress — Milestone 1: Orders & OrderItems Schema
+# Progress — Phase 6 Milestone 1: Seller Earnings & Orders Extension
 
 - Status: Completed
-- Last visited: 2026-09-15T07:18:30Z
-- Current step: Handoff delivered, notified parent
+- Last visited: 2026-09-15T11:00:00Z
+- Current step: Completed. Notified orchestrator.
 
 ## Checklist
-- [x] Read ORIGINAL_REQUEST.md
-- [x] Inspect `web/src/plugins/index.ts` and `@payloadcms/plugin-ecommerce` options (`orders: false`)
-- [x] Inspect existing collections (`Users`, `Products`, `Wallets`, `PaymentIntents`, etc.) and access patterns
-- [x] Design `Orders` collection (`web/src/collections/Orders/index.ts`)
-- [x] Design `orderAccess.ts` (`web/src/access/orderAccess.ts`)
-- [x] Design `OrderItems` collection (`web/src/collections/OrderItems/index.ts`)
-- [x] Design BR-04 invariant validation hooks (`buyer !== seller`)
-- [x] Design BR-07 immutability hook (`preventOrderItemMutation`)
-- [x] Design `Users` join alignment (`on: 'buyer'`)
-- [x] Design registration in `web/src/payload.config.ts`
+- [x] Read ORIGINAL_REQUEST.md (Phase 6 line 73+)
+- [x] Review `web/src/collections/Orders/index.ts` (status enum, hooks, access control)
+- [x] Review `web/src/collections/SellerProfiles.ts` (commissionRate override field, validation)
+- [x] Review access controls (`canEditMoney`, `financialAccess`, `sellerProfileAccess`)
+- [x] Review `web/src/collections/OrderItems/index.ts` (relationship, fields)
+- [x] Design `SellerEarnings` collection schema (`web/src/collections/SellerEarnings/index.ts`)
+- [x] Design `SellerEarnings` access control (`canEditMoney`, `sellerEarningsReadAccess`)
+- [x] Design `SellerEarnings` hooks & invariant validations (`calculateHoldUntil`, `validateEarningMath`, `preventEarningMutation`)
+- [x] Design `SellerEarnings` indices and constraints (unique `orderItem`, composite `status + holdUntil`, math check)
+- [x] Align with peer explorer handoffs (`m1_explorer_2` and `m1_explorer_3`)
 - [x] Write complete Handoff Report (`handoff.md`)
 - [x] Update `BRIEFING.md`
-- [x] Notify parent agent via `send_message`
+- [x] Notify parent orchestrator via `send_message`

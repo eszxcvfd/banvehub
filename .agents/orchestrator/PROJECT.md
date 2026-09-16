@@ -1,135 +1,205 @@
-# Project: KienTaoHub — Phase 5: Purchase & Download
+# Project: KienTaoHub — Phase 6: Seller Revenue
 
 ## Architecture
-- **Overview**: Delivers digital product checkout from internal wallet balance, snapshot-price order creation, entitlement granting, secure authenticated file streaming from private storage, and responsive buyer storefront/library interfaces per PLAN.md §27, Decision 0002, and Decision 0006.
+- **Overview**: Implements the monetization and payout layer of KienTaoHub: 3-tier commission calculation, snapshot line items, seller earnings with configurable hold period (7 days), withdrawal request & approval workflow with atomic balance reservation, compensating ledger entries for refunds (BR-03, FLOW-U15), Finance Admin operations, and responsive Seller Dashboard views.
 - **Module Boundaries**:
-  - `web/src/collections/`: Data schema for `Orders`, `OrderItems`, `Entitlements`, and `DownloadEvents`.
-  - `web/src/migrations/`: PostgreSQL Batch 6 migration with strict indices, constraints, and triggers.
-  - `web/src/services/purchase.ts`: Money Write Layer integration, coordinating `debitWallet`, order creation, and entitlement grant in a single atomic database transaction.
-  - `web/src/services/download.ts`: Token generation (JWT 5-min TTL) and authenticated private file streaming with audit logging.
-  - `web/src/app/api/v1/`: Next.js Route handlers for purchase (`/api/v1/orders/purchase`), download token (`/api/v1/downloads/token`), and file streaming (`/api/v1/downloads/[token]`).
-  - `web/src/components/product/`: Storefront purchase modal (`WalletPurchaseModal`), product CTA (`DigitalProductCTA`), and product description integration.
-  - `web/src/app/(app)/(account)/account/downloads/`: Buyer library page displaying acquired assets with instant download capabilities.
-  - `web/tests/int/`: Comprehensive test suites validating end-to-end flows, security boundaries, and financial invariants.
+  - `web/src/collections/`: Data schema definitions:
+    - `SellerEarnings` (`seller_earnings`): Earned seller revenue, status (`PENDING`, `AVAILABLE`, `REVERSED`, `PAID`), hold timestamps.
+    - `Withdrawals` (`withdrawals`): Bank payout requests, status (`REQUESTED`, `UNDER_REVIEW`, `APPROVED`, `PROCESSING`, `PAID`, `REJECTED`, `CANCELLED`, `FAILED`), bank details.
+    - `WithdrawalEvents` (`withdrawal_events`): Append-only audit trail for withdrawal state transitions.
+    - `Refunds` (`refunds`): Refund audit records linking orders, buyer refunds, and seller/platform fee reversals.
+    - `Orders` update: Extend `status` enum to include `REFUNDED`.
+    - `SellerProfiles` update: Support optional `commissionRate` override.
+  - `web/src/migrations/`: PostgreSQL Batch 7 migration with DDL, constraints (`CHECK (amount >= 50000)`, `CHECK (amount <= 50000000)`), and audit triggers.
+  - `web/src/services/`:
+    - `commission.ts`: 3-tier rate resolver (campaign -> seller override -> site default) and integer VND arithmetic.
+    - `purchase.ts`: Updated to atomically calculate commission, write snapshot line items, and create `seller_earnings` (`PENDING`) inside the purchase transaction.
+    - `earnings.ts`: Seller balance computation (`getSellerBalance`) and hold period maturation (`releaseMaturedEarnings`).
+    - `withdrawal.ts`: Atomic balance reservation, request submission, cancellation, review, approval, rejection (balance release), and payout finalization.
+    - `refund.ts`: Compensating ledger reversal (BR-03, FLOW-U15), buyer wallet credit, seller earning reversal, platform fee adjustment, order status update, entitlement revocation.
+  - `web/src/app/api/v1/`: Next.js REST API routes:
+    - Seller: `GET /api/v1/seller/earnings`, `POST /api/v1/seller/withdrawals`, `GET /api/v1/seller/withdrawals`.
+    - Admin: `GET /api/v1/admin/withdrawals`, `POST /api/v1/admin/withdrawals/[id]/approve`, `POST /api/v1/admin/withdrawals/[id]/reject`, `POST /api/v1/admin/refunds`.
+  - `web/src/app/(app)/seller/`: Seller dashboard with financial KPI cards (available, pending, total), withdrawal modal & history, per-product breakdown.
+  - `web/src/app/(app)/finance/`: Finance Admin operations portal for withdrawal approvals/rejections and refunds.
+  - `web/tests/int/`: Comprehensive integration test suites across Tiers 1–4.
 
 ## Feature Inventory
 | # | Feature | Description | Milestone | Source |
 |---|---------|-------------|-----------|--------|
-| 1 | Digital Orders Collection | `orders` schema with code, buyer, totalAmount, currency, status, paymentSource, paidAt | M1 | ORIGINAL_REQUEST R1, PLAN.md FR-15 |
-| 2 | Snapshot Order Items Collection | `order_items` schema with salePrice (BR-07), platformFee, sellerAmount, tax, policyVersion | M1 | ORIGINAL_REQUEST R1, Decision 0003 |
-| 3 | Entitlements Ledger Collection | `entitlements` schema with user, product, order, status, grantedAt, downloadCount, partial unique active index | M1 | ORIGINAL_REQUEST R2, Decision 0006, PLAN.md FR-16 |
-| 4 | Download Events Audit Collection | `download_events` append-only audit schema for tracking stream attempts, tokens, IPs, user agents, and status | M1 | ORIGINAL_REQUEST R3, Decision 0006, PLAN.md FR-17 |
-| 5 | PostgreSQL Migration Batch 6 | DDL migration creating digital orders, order_items, entitlements, download_events, indices, and constraints | M1 | ORIGINAL_REQUEST Acceptance Criteria |
-| 6 | Anti-Self-Purchase Invariant (BR-04) | Validation preventing sellers from buying their own products | M2 | ORIGINAL_REQUEST R1, PLAN.md BR-04 |
-| 7 | Atomic Wallet Purchase Transaction | Single DB transaction combining `debitWallet`, order creation (COMPLETED), order item snapshot, and entitlement grant | M2 | ORIGINAL_REQUEST R1, Decision 0002, PLAN.md FR-14 |
-| 8 | Free Product Instant Checkout | Zero-cost checkout granting active entitlement with 0 VND debit | M2 | ORIGINAL_REQUEST R1, PLAN.md FR-18 |
-| 9 | Purchase API Endpoint | `POST /api/v1/orders/purchase` handling digital purchases with typed error responses | M2 | ORIGINAL_REQUEST R1 |
-| 10 | Private Storage Boundary (BR-06) | Enforce `web/private/product_files` isolation with zero public URL exposure | M3 | ORIGINAL_REQUEST R3, Decision 0006, PLAN.md BR-06 |
-| 11 | Signed One-Time Download Token Rail | `POST /api/v1/downloads/token` issuing 5-minute cryptographically signed JWT token for active entitlement holders | M3 | ORIGINAL_REQUEST R3, Decision 0006, PLAN.md FR-17 |
-| 12 | Authenticated File Streaming Endpoint | `GET /api/v1/downloads/[token]` validating token/entitlement, logging audit event, and streaming file bytes | M3 | ORIGINAL_REQUEST R3, Decision 0006 |
-| 13 | Storefront "Mua ngay bằng ví" Modal | Modal performing live balance check, shortfall warning, top-up redirect, and purchase confirmation | M4 | ORIGINAL_REQUEST R4, PLAN.md FR-14 |
-| 14 | Storefront "Tải miễn phí ngay" CTA | Instant zero-cost entitlement claim and direct download trigger | M4 | ORIGINAL_REQUEST R4, PLAN.md FR-18 |
-| 15 | Buyer Library / Downloads Interface | `/account/downloads` page displaying purchased assets, technical specs, order receipts, and download buttons | M4 | ORIGINAL_REQUEST R4, PLAN.md FR-19 |
-| 16 | Account Navigation Integration | Update `AccountNav` to include `/account/downloads` link | M4 | ORIGINAL_REQUEST R4 |
-| 17 | Test Suite: Purchase Workflow | `tests/int/purchase-workflow.int.spec.ts` validating wallet debit, order creation, and entitlement grant | M5 / Test Track | ORIGINAL_REQUEST R5 |
-| 18 | Test Suite: Secure Download | `tests/int/secure-download.int.spec.ts` validating token generation, expiration rejection, entitlement checking, and private file streaming | M5 / Test Track | ORIGINAL_REQUEST R5 |
-| 19 | Test Suite: Purchase Invariants | `tests/int/purchase-invariants.int.spec.ts` validating BR-04 (self-purchase), BR-07 (snapshot pricing), and insufficient funds | M5 / Test Track | ORIGINAL_REQUEST R5 |
-| 20 | Final Quality Gates & Regression Verification | 100% pass across all 17 existing test suites (242 tests), challenger tests, stress tests, zero ESLint errors, clean build | M5 | ORIGINAL_REQUEST R5 |
+| 1 | 3-Tier Commission Hierarchy | Resolves commission rate: Campaign -> Seller Override -> Site Default (rate decided: 0.30 data-backed in CommissionSettings global, policyVersion: site-default-v1-0.30) | M2 | PLAN.md §6.3, ORIGINAL_REQUEST R1, ADR 0009 |
+| 2 | Integer VND Commission Arithmetic | `platformFee = Math.round(salePrice * rate)`, `sellerAmount = salePrice - platformFee` | M2 | PLAN.md §6.2, ORIGINAL_REQUEST R1 |
+| 3 | OrderItem Snapshot Line Items | Populates and freezes `salePrice`, `platformFee`, `sellerAmount`, `tax`, `policyVersion` in `order_items` | M2 | PLAN.md BR-07, ORIGINAL_REQUEST R1 |
+| 4 | Seller Earnings Collection & Record Creation | Schema `seller_earnings`, created atomically with status `PENDING` during purchase | M1, M2 | PLAN.md FR-31, ORIGINAL_REQUEST R1 |
+| 5 | Configurable Hold Period Maturation | Transitions `seller_earnings` from `PENDING` -> `AVAILABLE` when `NOW() >= holdUntil` (default 7 days) | M2 | PLAN.md FR-31, ORIGINAL_REQUEST R1 |
+| 6 | Seller Balance Aggregation Service | Computes `availableBalance`, `pendingBalance`, and `totalEarned` for a seller | M2 | PLAN.md FR-31, FR-32 |
+| 7 | Withdrawals Collection Schema | Schema `withdrawals` with code, seller, amount, bankInfo, status, timestamps | M1 | PLAN.md FR-32, ORIGINAL_REQUEST R2 |
+| 8 | Withdrawal Request Submission | Seller submits payout request to bank account with validation | M3 | PLAN.md FR-32, ORIGINAL_REQUEST R2 |
+| 9 | Withdrawal Min/Max Limits Validation | Enforces minimum (50,000 VND) and maximum (50,000,000 VND) limits | M3 | PLAN.md FR-32, ORIGINAL_REQUEST R2 |
+| 10 | Atomic Balance Reservation (Anti-Race T7) | Atomically reserves available balance upon request to prevent concurrent overdraft | M3 | PLAN.md BR-01, Threat T7 |
+| 11 | Withdrawal State Machine | 8 states: `REQUESTED -> UNDER_REVIEW -> APPROVED -> PROCESSING -> PAID`, `REJECTED`, `CANCELLED`, `FAILED` | M3 | PLAN.md FR-32, Decision 0005 |
+| 12 | Withdrawal Balance Release on Rejection/Cancellation | Releases reserved balance back to available on `REJECTED` or `CANCELLED` | M3 | PLAN.md FR-32, ORIGINAL_REQUEST R2 |
+| 13 | Withdrawal Events Audit Logging | Schema `withdrawal_events` tracking all state transitions, actor, timestamp, reason | M1, M3 | PLAN.md FR-32, ORIGINAL_REQUEST R2 |
+| 14 | Withdrawal RBAC Matrix | Only `financeAdmin` and `admin` can approve/reject; sellers only view/request own | M1, M3 | PLAN.md §5.5, §22, ORIGINAL_REQUEST R2 |
+| 15 | Compensating Ledger Refund (Buyer) | Reversal credit entry in `wallet_ledger` for buyer wallet without mutating original entries (BR-03) | M4 | PLAN.md BR-03, FLOW-U15, ORIGINAL_REQUEST R3 |
+| 16 | Seller Earning Reversal | Reverses seller earning: marks `REVERSED` if pending, or adjusts balance if available | M4 | PLAN.md FLOW-U15, ORIGINAL_REQUEST R3 |
+| 17 | Platform Fee Reversal | Reverses platform revenue associated with refunded order items | M4 | PLAN.md FLOW-U15, ORIGINAL_REQUEST R3 |
+| 18 | Order Status Update to REFUNDED | Updates order status to `REFUNDED` while preserving snapshot line items | M1, M4 | PLAN.md FLOW-U15, ORIGINAL_REQUEST R3 |
+| 19 | Entitlement Revocation Option | Revokes buyer entitlement (`status: 'revoked'`) upon refund when requested | M4 | PLAN.md FLOW-U15, ORIGINAL_REQUEST R3 |
+| 20 | Refunds Collection Schema & Audit Record | Schema `refunds` capturing order, buyer, seller, amounts, actor, reason, timestamps | M1, M4 | PLAN.md FLOW-U15, ORIGINAL_REQUEST R3 |
+| 21 | Seller Earnings API (`GET /api/v1/seller/earnings`) | Returns financial summary, pending hold, available balance, itemized list | M5 | PLAN.md §18, ORIGINAL_REQUEST R4 |
+| 22 | Seller Withdrawal API (`POST /api/v1/seller/withdrawals`) | Seller submits withdrawal request to bank account | M3, M5 | PLAN.md §18, ORIGINAL_REQUEST R4 |
+| 23 | Admin Withdrawals API (`GET /api/v1/admin/withdrawals`) | Finance Admin lists all withdrawal requests with filtering | M3, M5 | PLAN.md §18, §22, ORIGINAL_REQUEST R4 |
+| 24 | Admin Withdrawal Actions (`POST .../approve`, `.../reject`) | Finance Admin approves or rejects withdrawal with reason | M3, M5 | PLAN.md §18, §22, ORIGINAL_REQUEST R4 |
+| 25 | Admin Refund API (`POST /api/v1/admin/refunds`) | Finance Admin executes compensating refund with reason and revocation choice | M4, M5 | PLAN.md §18, §22, ORIGINAL_REQUEST R4 |
+| 26 | Seller Dashboard UI & Payout Portal | Extends `/seller` with financial KPI cards, withdrawal modal, history table, and product breakdown | M5 | ORIGINAL_REQUEST R4 |
+| 27 | PostgreSQL Migration Batch 7 | Versioned DDL migration for all new collections, status enum alter, constraints, triggers | M1 | ORIGINAL_REQUEST R5 |
+| 28 | Comprehensive Test Suite & Regression Verification | 100% pass across all 347 existing tests + new Phase 6 suites (Tiers 1–4), clean lint, clean build | TestTrack, M6 | ORIGINAL_REQUEST R5 |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| TestTrack | E2E Testing Track | Design & implement opaque-box test suites (Tiers 1-4) in `tests/int/` deriving from requirements, publish `TEST_READY.md` | none | DONE |
-| M1 | Schema & Migration Batch 6 | Collections `Orders`, `OrderItems`, `Entitlements`, `DownloadEvents`, Payload config, migration Batch 6, Drizzle indices & constraints | none | DONE |
-| M2 | Atomic Purchase & Wallet Transaction | `purchaseProduct` service, atomic DB transaction (`debitWallet` + order + entitlement), free product checkout, `POST /api/v1/orders/purchase` | M1 | PLANNED |
-| M3 | Secure Download Engine & Token Rail | `POST /api/v1/downloads/token` (5-min JWT), `GET /api/v1/downloads/[token]`, `download_events` audit logging, private file streaming | M1, M2 | PLANNED |
-| M4 | Storefront Purchase Flow & Buyer Library UI | `WalletPurchaseModal`, `DigitalProductCTA` enhancement, `ProductDescription`, `/account/downloads` Buyer Library, `AccountNav` link | M2, M3 | PLANNED |
-| M5 | Final Verification & Adversarial Hardening | Run all test suites against completed implementation, Phase 1 (100% E2E pass), Phase 2 (Adversarial coverage hardening Tier 5), ESLint, Next.js build | TestTrack, M1, M2, M3, M4 | PLANNED |
+| TestTrack | E2E & Integration Testing Track | Author 4 opaque-box integration test suites (`tests/int/`) covering Tiers 1-4 | none | DONE |
+| M1 | Data Models, Access Controls & Migration Batch 7 | Collections `seller_earnings`, `withdrawals`, `withdrawal_events`, `refunds`; update `orders` (`REFUNDED`) & `seller_profiles`; Payload config; Batch 7 migration; DDL constraints | none | DONE — gate closed 2026-09-15 on direct empirical verification (81/81 M1 suites, 0 tsc errors, 0 lint errors, audit script 6/6, live DB 21 cols / 7 constraints). The 5-agent gate panel was lost to a machine restart; `p6_m1_challenger_1` had reported APPROVE. Two M2-pending test guards were corrected and Defect 3 (withdrawal code width) was fixed. |
+| M2 | Commission Calculation & Seller Earnings Pipeline | 3-tier commission resolver, integer VND arithmetic, atomic `purchaseProduct` integration, `seller_earnings` creation (`PENDING`), 7-day hold period maturation (`AVAILABLE`), balance computation | M1 | DONE — gate passed 2026-09-16 (27/27 M2 tests pass, Batch 8 migration live, 0 tsc/lint errors, Auditor CLEAN) |
+| M3 | Withdrawal Request, Reservation & Approval Workflow | Withdrawal service (`web/src/services/withdrawal.ts`), atomic balance reservation (Threat T7), state machine transitions, rejection release, audit events, seller & admin withdrawal API routes | M1, M2 | DONE — gate passed 2026-09-16 (14/14 tests pass, Threat T7 mutex, 4 REST API routes live, Reviewer APPROVE, Auditor CLEAN) |
+| M4 | Compensating Refund Ledger & Reversal Flow | Refund service (`web/src/services/refund.ts`), BR-03 immutable ledger reversal, buyer wallet credit, seller earning reversal, platform fee adjustment, order status update, entitlement revocation, `POST /api/v1/admin/refunds` | M1, M2 | DONE — gate passed 2026-09-16 (10/10 tests pass, BR-03 immutable ledger reversal, Reviewer APPROVE, Auditor CLEAN) |
+| M5 | Seller Dashboard UI & Finance Admin Operations | `GET /api/v1/seller/earnings`, `/seller` dashboard financial KPIs, withdrawal modal, payout history, per-product breakdown, Finance Admin operations interface (`/finance`) | M2, M3, M4 | DONE — gate passed 2026-09-16 (169/169 tests pass, Next.js build exit 0, Reviewer APPROVE, Auditor CLEAN) |
+| M6 | Final Verification, Full Regression & Adversarial Hardening | Pass 100% of E2E suites (Tiers 1-4), Tier 5 adversarial coverage hardening, zero regressions on all 347 existing tests, 0 ESLint errors, clean Next.js build | TestTrack, M1, M2, M3, M4, M5 | DONE — 2026-09-16 (419/419 `tests/int/` tests pass, 347 prior regression tests pass with 0 regressions, tsc 0 errors, lint 0 errors, Next.js build exit 0; independent Victory Auditor `VICTORY CONFIRMED`. Note: no per-gate reviewer/auditor pair for M6, and the 419 figure excludes the separate challenger/stress/E2E suites) |
 
 ## Interface Contracts
 
-### Purchase Service & API
+### Commission & Earnings
 ```ts
-export interface PurchaseResult {
-  success: boolean
-  orderId: string
-  orderCode: string
-  entitlementId: number
-  productTitle: string
-  pricePaid: number
+export interface CommissionResolution {
+  commissionRate: number // e.g. 0.30
+  policyVersion: string  // e.g. 'v1-default-30'
+  source: 'campaign' | 'seller_override' | 'site_default'
 }
 
-export async function purchaseProduct(
+export function resolveCommissionRate(
   payload: Payload,
   params: {
-    buyerId: number
+    sellerId: number
     productId: number
-    req?: PayloadRequest
+    campaignId?: number
   }
-): Promise<PurchaseResult>
+): Promise<CommissionResolution>
+
+export function calculateRevenueSplit(
+  salePrice: number,
+  commissionRate: number,
+  tax = 0
+): {
+  platformFee: number
+  sellerAmount: number
+  tax: number
+}
+
+export interface SellerBalanceSummary {
+  totalEarned: number
+  pendingBalance: number
+  availableBalance: number
+  reservedBalance: number
+  withdrawnTotal: number
+}
+
+export function getSellerBalance(
+  payload: Payload,
+  sellerId: number
+): Promise<SellerBalanceSummary>
+
+export function releaseMaturedEarnings(
+  payload: Payload,
+  options?: { sellerId?: number; asOf?: Date }
+): Promise<{ releasedCount: number; totalReleasedAmount: number }>
 ```
 
-### Download Service & API
+### Withdrawal Service
 ```ts
-export interface DownloadTokenPayload {
-  userId: number
-  productId: number
-  entitlementId: number
-  jti: string
-  exp: number
+export interface WithdrawalRequestParams {
+  sellerId: number
+  amount: number
+  bankInfo: {
+    bankName: string
+    accountNumber: string
+    accountHolderName: string
+  }
 }
 
-export async function createDownloadToken(
-  payload: Payload,
-  params: {
-    userId: number
-    productId: number
-  }
-): Promise<{ token: string; downloadUrl: string; expiresAt: Date }>
+export interface WithdrawalResult {
+  id: number
+  code: string
+  amount: number
+  status: string
+  requestedAt: string
+}
 
-export async function verifyAndStreamDownload(
+export function requestWithdrawal(
   payload: Payload,
-  token: string,
-  clientMetadata: { ipAddress?: string; userAgent?: string }
-): Promise<{
-  stream: NodeJS.ReadableStream
-  filename: string
-  mimeType: string
-  filesize: number
-}>
+  params: WithdrawalRequestParams
+): Promise<WithdrawalResult>
+
+export function approveWithdrawal(
+  payload: Payload,
+  params: { withdrawalId: number; actorId: number; notes?: string }
+): Promise<WithdrawalResult>
+
+export function rejectWithdrawal(
+  payload: Payload,
+  params: { withdrawalId: number; actorId: number; reason: string }
+): Promise<WithdrawalResult>
+
+export function cancelWithdrawal(
+  payload: Payload,
+  params: { withdrawalId: number; sellerId: number }
+): Promise<WithdrawalResult>
+```
+
+### Refund Service
+```ts
+export interface RefundParams {
+  orderId: number
+  reason: string
+  actorId: number
+  revokeEntitlement?: boolean
+}
+
+export interface RefundResult {
+  refundId: number
+  orderId: number
+  buyerId: number
+  amountRefunded: number
+  reversalLedgerEntryId: number
+  entitlementRevoked: boolean
+}
+
+export function processRefund(
+  payload: Payload,
+  params: RefundParams
+): Promise<RefundResult>
 ```
 
 ## Code Layout
-- Collections:
-  - `web/src/collections/Orders/index.ts`
-  - `web/src/collections/OrderItems/index.ts`
-  - `web/src/collections/Entitlements/index.ts`
-  - `web/src/collections/DownloadEvents/index.ts`
-- Access Control:
-  - `web/src/access/orderAccess.ts`
-  - `web/src/access/entitlementAccess.ts`
-  - `web/src/access/downloadEventAccess.ts`
-- Migrations:
-  - `web/src/migrations/20260915_073000_phase5_purchase_download.ts`
-  - `web/src/migrations/20260915_073000_phase5_purchase_download.json`
-- Services:
-  - `web/src/services/purchase.ts`
-  - `web/src/services/download.ts`
-- API Routes:
-  - `web/src/app/api/v1/orders/purchase/route.ts`
-  - `web/src/app/api/v1/downloads/token/route.ts`
-  - `web/src/app/api/v1/downloads/[token]/route.ts`
-  - `web/src/app/api/v1/me/orders/route.ts`
-  - `web/src/app/api/v1/me/downloads/route.ts`
-- UI Components:
-  - `web/src/components/product/WalletPurchaseModal.tsx`
-  - `web/src/components/product/DigitalProductCTA.tsx` (enhanced)
-  - `web/src/components/product/ProductDescription.tsx` (enhanced)
-  - `web/src/components/product/DownloadAssetButton.tsx`
-  - `web/src/components/account/BuyerDownloadsClient.tsx`
-  - `web/src/components/AccountNav/index.tsx` (updated)
-  - `web/src/app/(app)/(account)/account/downloads/page.tsx`
-- Tests:
-  - `web/tests/int/purchase-workflow.int.spec.ts`
-  - `web/tests/int/secure-download.int.spec.ts`
-  - `web/tests/int/purchase-invariants.int.spec.ts`
+- `web/src/collections/SellerEarnings/index.ts`: Collection definition for `seller_earnings`
+- `web/src/collections/Withdrawals/index.ts`: Collection definition for `withdrawals`
+- `web/src/collections/WithdrawalEvents/index.ts`: Collection definition for `withdrawal_events`
+- `web/src/collections/Refunds/index.ts`: Collection definition for `refunds`
+- `web/src/migrations/20260915_100000_phase6_seller_revenue.ts`: Batch 7 migration
+- `web/src/services/commission.ts`: Commission rate resolution & arithmetic
+- `web/src/services/earnings.ts`: Seller balance calculation & hold period maturation
+- `web/src/services/withdrawal.ts`: Withdrawal lifecycle, balance reservation & events
+- `web/src/services/refund.ts`: Compensating refund flow, ledger reversal, entitlement revocation
+- `web/src/services/purchase.ts`: Updated checkout pipeline with commission & earnings creation
+- `web/src/app/api/v1/seller/earnings/route.ts`: Seller earnings & balance endpoint
+- `web/src/app/api/v1/seller/withdrawals/route.ts`: Seller withdrawal list & request endpoint
+- `web/src/app/api/v1/admin/withdrawals/route.ts`: Finance Admin list withdrawals
+- `web/src/app/api/v1/admin/withdrawals/[id]/approve/route.ts`: Finance Admin approve endpoint
+- `web/src/app/api/v1/admin/withdrawals/[id]/reject/route.ts`: Finance Admin reject endpoint
+- `web/src/app/api/v1/admin/refunds/route.ts`: Finance Admin refund endpoint
+- `web/src/app/(app)/seller/`: Updated Seller Dashboard with financial KPIs & withdrawal form
+- `web/src/app/(app)/finance/`: Finance Admin operations page
+- `web/tests/int/seller-earnings.int.spec.ts`: Commission, hold period, balance tests
+- `web/tests/int/seller-withdrawals.int.spec.ts`: Withdrawal lifecycle, reservations, boundaries
+- `web/tests/int/refund-ledger.int.spec.ts`: Compensating ledger reversal, refund invariants
+- `web/tests/int/seller-revenue-e2e.int.spec.ts`: End-to-end multi-actor flow & RBAC tests

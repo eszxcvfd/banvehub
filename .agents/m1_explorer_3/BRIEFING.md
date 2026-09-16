@@ -1,43 +1,54 @@
-# BRIEFING — 2026-09-15T07:17:00Z
+# BRIEFING — 2026-09-15T10:56:00Z
 
 ## Mission
-Investigate and design PostgreSQL Migration Batch 6 for Phase 5 (Digital Orders, Entitlements, Download Events).
+Explore requirements and exact implementation design for Phase 6 Focus Area 3: Refunds collection, Payload config registration, and PostgreSQL Migration Batch 7.
 
 ## 🔒 My Identity
 - Archetype: explorer
 - Roles: investigation, synthesis
 - Working directory: /home/trung/Documents/2026/project/test-v6/.agents/m1_explorer_3
-- Original parent: 902fae86-8610-4959-9027-f4a48d29b1e8
-- Milestone: Milestone 1 - Phase 5 PostgreSQL Migration Batch 6 Design
+- Original parent: 97815561-5c1e-4548-8e83-6acb89c4e2aa
+- Milestone: Milestone 1
 
 ## 🔒 Key Constraints
 - Read-only investigation — do NOT implement
-- Inspect existing migrations in web/src/migrations/
-- Verify orders/orders_items table state
-- Complete DDL and snapshot design for Phase 5
-- Safe rollback down function
+- No changes to repository source code files; generate plans, designs, schemas, and reports within .agents/m1_explorer_3
+- Follow 5-component handoff report standard
 
 ## Current Parent
-- Conversation ID: 902fae86-8610-4959-9027-f4a48d29b1e8
-- Updated: 2026-09-15T07:17:00Z
+- Conversation ID: 97815561-5c1e-4548-8e83-6acb89c4e2aa
+- Updated: 2026-09-15T10:56:00Z
 
 ## Investigation State
 - **Explored paths**:
-  - `web/src/migrations/` (Batch 1 through Batch 5 migrations, JSON snapshots, `index.ts`)
-  - Live PostgreSQL database via docker exec psql
-  - `web/src/plugins/index.ts`, `web/src/payload.config.ts`, `web/tests/int/purchase-workflow.int.spec.ts`
+  - `ORIGINAL_REQUEST.md` (lines 73–150, Phase 6 Seller Revenue requirements R1–R5)
+  - `PLAN.md` (§5.5, §6.3, §10 BR-01..BR-07, §11, §12, §18, §22 authorization matrix, FLOW-U15)
+  - `web/src/collections/Orders/index.ts` (status enum, code generator hook, relations)
+  - `web/src/collections/OrderItems/index.ts` (financial fields snapshot BR-07, relations)
+  - `web/src/collections/SellerProfiles.ts` (commissionRate field extension)
+  - `web/src/collections/WalletLedger.ts` (ledger immutability BR-03, reference types)
+  - `web/src/access/canEditMoney.ts`, `financialAccess.ts`, `orderAccess.ts`, `isFinanceAdmin.ts`
+  - `web/src/payload.config.ts` (collection registry, postgresAdapter push: false)
+  - `web/src/migrations/20260915_064708_phase4_payment_wallet.ts` (Batch 5 patterns)
+  - `web/src/migrations/20260915_071500_phase5_purchase_download.ts` (Batch 6 patterns)
+  - `web/src/migrations/index.ts` (migration registry)
+  - Peer focus areas 1 (`SellerEarnings`) and 2 (`Withdrawals`, `WithdrawalEvents`)
 - **Key findings**:
-  - `orders`, `orders_items`, `orders_rels` have exactly 0 rows in PostgreSQL.
-  - Dropping old template tables (`DROP TABLE IF EXISTS "orders_items", "orders", "orders_rels" CASCADE;`) and recreating digital tables is vastly cleaner, safer, and faster than ALTER TABLE.
-  - Complete DDL designed and verified with PostgreSQL 16: `orders`, `order_items`, `entitlements`, `download_events`.
-  - Invariants encoded: Partial unique index `entitlements_user_product_active_idx`, check constraints on non-negative balances/amounts, and trigger `enforce_br04_seller_anti_self_purchase` for anti-self-purchase.
-  - Full reversible `down()` function restores initial template tables with 0 data loss.
-- **Unexplored areas**: None. Complete migration ready for implementer.
+  - `Refunds` collection must strictly enforce `canEditMoney` for create/update/delete via REST.
+  - `refundReadAccess` allows `admin`, `financeAdmin`, or `buyer === user.id`, or `seller === user.id`.
+  - Auto-generated `code` hook: `REF-YYYYMMDD-XXXXX` using `crypto.randomBytes`.
+  - `payload.config.ts` imports and registers `SellerEarnings`, `Withdrawals`, `WithdrawalEvents`, `Refunds`.
+  - Batch 7 migration creates 4 tables, alters `seller_profiles` (`commission_rate`), alters `enum_orders_status` ('REFUNDED'), configures foreign keys, check constraints, locked document relations, and down migrations.
+- **Unexplored areas**: None for Focus Area 3 scope; all requirements investigated.
 
 ## Key Decisions Made
-- Batch 6 drops old 0-row template tables (`orders_items`, `orders`, `orders_rels`) and enums with CASCADE, recreating clean digital collections.
-- Migration name: `20260915_071500_phase5_purchase_download`.
-- Symmetrical rollback restores Batch 1 schema state.
+- `refundReadAccess` partitioned into dedicated file `web/src/access/refundAccess.ts` for clean unit-testability.
+- DDL strictly adheres to Payload PostgreSQL column naming conventions (`payout_info_bank_name`, `order_item_id`, etc.).
+- Complete DDL includes check constraints (`amount >= 50000 AND amount <= 50000000` for withdrawals; non-negative monetary checks for earnings and refunds).
+- Unique index on `order_item_id` in `seller_earnings` prevents duplicate earnings records.
 
 ## Artifact Index
-- handoff.md — Complete 5-component handoff report with production-ready DDL and verification method
+- DISPATCH.md — Dispatch log from orchestrator
+- BRIEFING.md — Persistent working memory and situational awareness
+- progress.md — Heartbeat and step tracking
+- handoff.md — Comprehensive 5-component handoff report

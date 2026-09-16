@@ -1,361 +1,202 @@
-# Milestone 1: Orders & OrderItems Schema — Implementation Design Report
+# Handoff Report: Phase 6 Milestone 1 — Focus Area 1 (`seller_earnings` Collection & `Orders` Status Extension)
 
-## Executive Summary
-This report provides the complete, production-ready implementation design for the digital `Orders` and `OrderItems` collections in KienTaoHub (Phase 5: Purchase & Download). It details how to disable the default physical-goods orders from `@payloadcms/plugin-ecommerce`, implement dedicated digital schema collections, enforce the anti-self-purchase invariant (BR-04) and immutable snapshot pricing (BR-07), configure atomic access control, and align relations with `Users` and `payload.config.ts`.
+**Author**: `m1_explorer_1` (teamwork_preview_explorer)  
+**Date**: 2026-09-15  
+**Target Milestone**: Milestone 1 (Focus Area 1: `seller_earnings` Collection, `Orders` Status Extension, and `SellerProfiles` Commission Override)  
+**Status**: Completed (Hard Handoff)  
+**Recipients**: Orchestrator (`97815561-5c1e-4548-8e83-6acb89c4e2aa`), `m1_worker_1`, Implementation Team
 
 ---
 
 ## 1. Observation
 
-### 1.1 `@payloadcms/plugin-ecommerce` Configuration & Conflicts
-In `web/src/plugins/index.ts` (lines 78–136), the ecommerce plugin is currently mounted with:
-```typescript
-ecommercePlugin({
-  access: { ... },
-  customers: { slug: 'users' },
-  carts: false,
-  products: false,
-  orders: {
-    ordersCollectionOverride: ({ defaultCollection }) => ({
-      ...defaultCollection,
-      fields: [
-        ...defaultCollection.fields,
-        {
-          name: 'accessToken',
-          type: 'text',
-          unique: true,
-          index: true,
-          ...
-        },
-      ],
-    }),
-  },
-  transactions: { ... },
-  payments: { ... },
-})
-```
-- **Line 91**: `orders` is currently enabled with an `ordersCollectionOverride`.
-- Inspecting `web/node_modules/@payloadcms/plugin-ecommerce/dist/types/index.d.ts` (line 716):
+Direct observations from the repository codebase, architecture documentation, and test suites:
+
+### 1.1 Requirements in `ORIGINAL_REQUEST.md` (lines 86-97, 110-118, 138-149)
+- **R1. Commission Calculation & Seller Earnings**:
+  - *"Platform fee = sale_price × commission_rate (configurable, not hard-coded per PLAN.md §6.3)"*
+  - *"Seller amount = sale_price - platform_fee"*
+  - *"Commission configuration must support: site-wide default rate, per-seller override rate, and per-campaign rate. Changes to commission rate must not affect existing orders (BR-07)."*
+  - *"Each OrderItem already stores snapshot fields (salePrice, platformFee, sellerAmount). The purchase service must populate these correctly."*
+  - *"A seller_earnings record is created with status PENDING upon order completion."*
+  - *"After the configurable hold period (default 7 days, per FR-31), status transitions PENDING → AVAILABLE."*
+  - *"The hold period exists to allow time for refund/fraud processing."*
+- **R3. Refund & Order Status**:
+  - *"Refund flow: create refund record → lock original transaction → credit buyer wallet via reversal entry → reverse seller earning → reverse platform revenue → update order status → optionally revoke entitlement → audit log."*
+  - *"Refunded orders must reflect the refunded state without altering the original purchase records."*
+
+### 1.2 Existing Orders Collection (`web/src/collections/Orders/index.ts:92-106`)
+- Verbatim field definition:
   ```typescript
-  orders?: boolean | OrdersConfig;
-  ```
-- Inspecting `web/node_modules/@payloadcms/plugin-ecommerce/dist/index.js` (line 116):
-  ```javascript
-  if (sanitizedPluginConfig.orders) {
-    const defaultOrdersCollection = createOrdersCollection({ ... });
-    ...
-    incomingConfig.collections.push(ordersCollection);
-  }
-  ```
-  Setting `orders: false` completely suppresses the generation and registration of the default ecommerce plugin `orders` collection into `incomingConfig.collections`.
-- Inspecting `web/src/plugins/index.ts` (lines 137–155):
-  ```typescript
-  (incomingConfig) => {
-    ...
-    incomingConfig.typescript.schema.push(({ jsonSchema }) => {
-      const collections = (jsonSchema?.properties?.ecommerce as any)?.properties?.collections
-      if (collections?.properties?.carts) {
-        delete collections.properties.carts
-      }
-      if (Array.isArray(collections?.required)) {
-        collections.required = collections.required.filter((s: string) => s !== 'carts')
-      }
-      return jsonSchema
-    })
-    return incomingConfig
-  }
-  ```
-  Because `carts: false` was set, `carts` was excised from `jsonSchema.properties.ecommerce.properties.collections`. Doing the same for `orders` ensures that the ecommerce plugin's schema definitions do not conflict with or enforce legacy physical-order properties.
-
-### 1.2 Existing Join in `web/src/collections/Users/index.ts`
-In `web/src/collections/Users/index.ts` (lines 71–79):
-```typescript
-{
-  name: 'orders',
-  type: 'join',
-  collection: 'orders',
-  on: 'customer',
-  admin: {
-    allowCreate: false,
-    defaultColumns: ['id', 'createdAt', 'total', 'currency', 'items'],
+  {
+    name: 'status',
+    type: 'select',
+    required: true,
+    defaultValue: 'PENDING',
+    index: true,
+    label: 'Trạng thái đơn hàng',
+    options: [
+      { label: 'Chờ xử lý (PENDING)', value: 'PENDING' },
+      { label: 'Hoàn thành (COMPLETED)', value: 'COMPLETED' },
+      { label: 'Đã hủy (CANCELLED)', value: 'CANCELLED' },
+    ],
+    admin: {
+      readOnly: true,
+    },
   },
-},
-```
-- In the legacy plugin `orders` collection, the relationship field to `users` was named `customer`.
-- For our dedicated digital `Orders` collection, the user relation field is named `buyer` per prompt specification and PLAN.md §11.
-- In Payload CMS 3.x, if a `join` field defines `on: 'customer'` but collection `orders` has no `customer` field, Payload schema initialization will throw a runtime relationship validation error. Therefore, `Users.fields.orders` must be updated to `on: 'buyer'`.
+  ```
+- Access control (`web/src/access/orderAccess.ts:10-33`):
+  - `orderReadAccess`: Authenticated user can read orders where `buyer === user.id`. Admin and financeAdmin can read all orders.
+  - `orderCreateAccess`: `() => false` (denies direct creation via REST).
+  - `orderUpdateAccess`: `() => false` (denies direct mutation via REST).
+  - `orderDeleteAccess`: `() => false` (denies direct deletion via REST).
+  - Orders are only created/updated via trusted server-side services (`purchaseProduct`, `refundOrder`) using `overrideAccess: true`.
+- Existing hooks (`web/src/collections/Orders/index.ts:45-56`):
+  - `beforeValidate`: Auto-generates unique order code `ORD-YYYYMMDD-XXXXXX` on create if not provided.
+- Consumer files observing `status`:
+  - `web/src/app/api/v1/me/orders/route.ts:39`:
+    `if (statusParam && ['PENDING', 'COMPLETED', 'CANCELLED'].includes(statusParam.toUpperCase()))`
+    Needs to include `'REFUNDED'`.
+  - `web/src/components/OrderStatus/index.tsx:17-21`:
+    Maps CSS badges for `PENDING`, `COMPLETED`, `CANCELLED`. Needs styling for `REFUNDED`.
 
-### 1.3 Money-Path & Access Patterns
-In `web/src/access/canEditMoney.ts`:
-```typescript
-export const canEditMoney: Access = () => false
-```
-In `web/src/access/financialAccess.ts`:
-```typescript
-export const walletLedgerReadAccess: Access = ({ req: { user } }) => {
-  if (!user) return false
-  if (checkRole(['admin', 'financeAdmin'], user)) return true
-  return { user: { equals: user.id } }
-}
-```
-Per Decision 0002 (`docs/decisions/0002-money-write-layer.md`):
-- All write paths (`create`, `update`, `delete`) on financial and transactional collections are blocked for all external principals (including admin) via access control returning `false`.
-- Writes only execute through internal server code (Payload Local API with `overrideAccess: true`) inside a PostgreSQL transaction (`payload.db.beginTransaction`).
+### 1.3 Existing SellerProfiles Collection (`web/src/collections/SellerProfiles.ts:94-133`)
+- Current fields:
+  - `user`: relationship to `users` (required, unique, sidebar).
+  - `displayName`: text (required).
+  - `bio`, `avatar`, `phone`.
+  - `payoutInfo`: group (`bankName`, `accountNumber`, `accountHolderName`).
+  - `sellerTermsAccepted`: checkbox (required).
+  - `status`: select (`pending`, `active`, `suspended`, `rejected`), access update: `adminOrModeratorFieldAccess`.
+  - `totalSales`, `rating`: number, access update: `adminOrModeratorFieldAccess`.
+- Observation on commission:
+  - Currently has no `commissionRate` field.
+  - Sits at collection-level access: `update: sellerProfileUpdateAccess` (allows authenticated seller to update own profile).
+  - Therefore, any new `commissionRate` field **MUST** have field-level access control restricting updates to `admin` and `financeAdmin`, preventing sellers from modifying their own commission rate.
+  - Public visitors (`sellerProfileReadAccess`) must not see internal contractual commission rates.
 
-### 1.4 Anti-Self-Purchase (BR-04) & Snapshot Price (BR-07)
-- `PLAN.md:1405-1412` defines **BR-04**: "Seller không tự mua sản phẩm của mình" to prevent fake sales, fake reviews, and commission washing.
-- `PLAN.md:1436-1439` defines **BR-07**: "Giá tại order là snapshot — Nếu seller đổi giá sau đó, order cũ không đổi."
-- `Products` collection (`web/src/collections/Products/index.ts:280`) defines `seller` as a relationship to `users`.
+### 1.4 Money Write Layer & Immutability Decisions
+- **`docs/decisions/0002-money-write-layer.md:39-53`**:
+  - *"Direct writes denied for every principal, including administrators. Money collections deny create, update, and delete through Payload access control for all roles and expose read only."*
+- **`web/src/access/canEditMoney.ts:15-21`**:
+  ```typescript
+  export const canEditMoney: Access = () => false
+  export const canEditMoneyField = (): boolean => false
+  ```
+- **`docs/decisions/0008-role-model.md` & `PLAN.md §22` (Authorization Matrix)**:
+  - Finance Admin (`financeAdmin`) & Super Admin (`admin`): Full read access to earnings, ledger, withdrawals, and refunds.
+  - Seller (`seller`): Read access restricted to own earnings (`seller === user.id`).
+  - Buyer / Guest: Zero access to seller earnings.
+
+### 1.5 Existing Integration Test Suite (`web/tests/int/seller-earnings.int.spec.ts`)
+- The test suite exists and tests:
+  - Rate resolution: site-wide default fallback (0.30 / 30%), seller override (0.20 / 20%), campaign override (0.10 / 10%).
+  - Integer VND arithmetic: `platformFee = Math.round(salePrice * rate)`, `sellerAmount = salePrice - platformFee`, `platformFee + sellerAmount === salePrice`. Zero remainder across odd amounts (e.g. 199,000 VND, 100,001 VND, 7 VND, 1 VND).
+  - Collection creation: Creates `seller_earnings` with `status: 'PENDING'`, `seller`, `order`, `salePrice`, `platformFee`, `sellerAmount`, `holdUntil` (now + 7 days ± 5 minutes).
+  - Hold period maturation: transitions `PENDING → AVAILABLE` when `asOf >= holdUntil`.
+  - Balance aggregation: `totalEarned`, `pendingBalance`, `availableBalance`, `reservedBalance`, `withdrawnTotal`.
 
 ---
 
 ## 2. Logic Chain
 
-### Step 1: Disabling Plugin Orders
-1. Setting `orders: false` in `ecommercePlugin(...)` inside `web/src/plugins/index.ts` causes `sanitizedPluginConfig.orders` to be `false`.
-2. As observed in `node_modules/@payloadcms/plugin-ecommerce/dist/index.js:116`, the plugin will skip `incomingConfig.collections.push(ordersCollection)`.
-3. Cleaning up `collections.properties.orders` in `incomingConfig.typescript.schema` mirroring `carts` prevents type generation issues and removes legacy ecommerce order references.
+From the direct observations above, we establish the following step-by-step reasoning:
 
-### Step 2: Designing Digital `Orders` Collection (`slug: 'orders'`)
-1. Required fields:
-   - `code`: unique string identifier, indexed. Must be generated or defaulted if not supplied.
-   - `buyer`: relationship to `users` (required, indexed).
-   - `totalAmount`: non-negative integer representing VND (min 0).
-   - `currency`: select `['VND']`, default `'VND'`, required.
-   - `status`: select `['PENDING', 'COMPLETED', 'CANCELLED']`, default `'PENDING'`, indexed.
-   - `paymentSource`: select `['wallet', 'free']`, default `'wallet'`.
-   - `paidAt`: date field recording timestamp of successful debit/checkout.
-   - `notes`: textarea for notes.
-   - `items`: join field to `order_items` `on: 'order'` for admin UI inspection.
-2. Access Control (`orderAccess.ts`):
-   - `read`: Allows `admin` and `financeAdmin` unrestricted access. Allows authenticated users to view only their own orders (`{ buyer: { equals: user.id } }`). Denies unauthenticated access.
-   - `create`: Denied (`() => false`) via REST; creations occur via internal purchase service.
-   - `update`: Denied (`() => false`) via REST.
-   - `delete`: Denied (`() => false`) via REST; immutable records.
+1. **Orders Status Extension Requirement**:
+   - Observation 1.1 & 1.2 demonstrate that `Orders` currently defines `enum_orders_status` with `['PENDING', 'COMPLETED', 'CANCELLED']`.
+   - Flow FLOW-U15 and R3 mandate that when a refund occurs, the order status must transition to `REFUNDED` to indicate that the purchase contract was reversed.
+   - Adding `'REFUNDED'` to `Orders.status` options in `web/src/collections/Orders/index.ts` extends the collection schema.
+   - `orderAccess.ts` already sets `orderUpdateAccess: () => false`, guaranteeing that client-side REST calls cannot tamper with order statuses.
+   - The PostgreSQL migration must issue `ALTER TYPE "public"."enum_orders_status" ADD VALUE 'REFUNDED';`.
+   - `web/src/app/api/v1/me/orders/route.ts` must allow filtering by `'REFUNDED'` so buyers and sellers can query refunded orders.
 
-### Step 3: Designing Digital `OrderItems` Collection (`slug: 'order_items'`)
-1. Required fields:
-   - `order`: relationship to `orders` (required, indexed).
-   - `product`: relationship to `products` (required, indexed).
-   - `seller`: relationship to `users` (required, indexed).
-   - `salePrice`: number (min 0, snapshot price at purchase time, BR-07).
-   - `platformFee`: number (min 0, fee deducted by platform, VND).
-   - `sellerAmount`: number (min 0, net amount credited to seller, VND).
-   - `tax`: number (min 0, tax applied, default 0, VND).
-   - `policyVersion`: text (default `'v1'`, tracking fee structure).
-2. Access Control:
-   - `read`: Allows `admin` and `financeAdmin`. Allows order buyer and product seller:
-     ```typescript
-     {
-       or: [
-         { seller: { equals: user.id } },
-         { 'order.buyer': { equals: user.id } }
-       ]
-     }
-     ```
-   - `create`: Denied (`() => false`) via REST.
-   - `update`: Denied (`() => false`) via REST.
-   - `delete`: Denied (`() => false`) via REST.
+2. **SellerProfiles Commission Rate Override**:
+   - Observation 1.1 mandates supporting a per-seller commission override rate that takes precedence over the site-wide default (PLAN.md §6.3).
+   - In `web/src/collections/SellerProfiles.ts`, adding an optional `commissionRate` field (`type: 'number'`, `min: 0`, `max: 1`, `step: 0.01`) represents the percentage as a decimal (e.g., `0.25` for 25%).
+   - Because `SellerProfiles` allows seller profile owners to edit their profile (`displayName`, `bio`, `payoutInfo`), `commissionRate` **must** have strict field-level access:
+     - `update: adminOrFinanceAdminFieldAccess` (only `admin` and `financeAdmin` can modify).
+     - `read`: only `admin`, `financeAdmin`, or the profile's owner (`seller`). Public visitors browsing `/sellers/[slug]` must never see private commission rates.
+   - In PostgreSQL, `commission_rate numeric` with check constraint `CHECK (commission_rate IS NULL OR (commission_rate >= 0 AND commission_rate <= 1))` ensures database integrity.
 
-### Step 4: Enforcing Invariants
-1. **BR-04 (Anti-Self-Purchase)**:
-   - Implemented as a `beforeValidate` hook `validateAntiSelfPurchase` on `order_items`.
-   - The hook queries `product.seller` from the database to ensure the seller ID cannot be spoofed.
-   - It checks `buyerId` from the linked order (or `req.user`).
-   - If `String(buyerId) === String(productSellerId)`, it throws a `ValidationError` / `APIError`: `"Anti-self-purchase invariant violated (BR-04): Sellers cannot purchase their own products."`
-2. **BR-07 (Immutability of Snapshot Prices)**:
-   - Implemented as a `beforeChange` hook `preventOrderItemMutation` on `order_items`.
-   - If `operation === 'update'`, it throws an Error: `"Order items are immutable (BR-07). Updating an existing order item is strictly prohibited."`
+3. **`seller_earnings` Collection Architecture & Field Specification**:
+   - Under FR-31, BR-07, and Decision 0002, seller revenue must be recorded in an immutable ledger collection named `seller_earnings`.
+   - Each purchased `order_item` corresponds to exactly one `seller_earnings` record. Therefore, `orderItem` relationship field has `unique: true` and `index: true`, enforcing a strict 1-to-1 invariant.
+   - Fields required:
+     - `seller` (`relationship` to `users`, required, indexed).
+     - `order` (`relationship` to `orders`, required, indexed).
+     - `orderItem` (`relationship` to `order_items`, required, unique, indexed).
+     - `product` (`relationship` to `products`, required, indexed).
+     - `salePrice` (`number`, min 0, integer VND, snapshot of sale price).
+     - `platformFee` (`number`, min 0, integer VND, snapshot of platform fee).
+     - `sellerAmount` (`number`, min 0, integer VND, snapshot of seller net amount).
+     - `commissionRate` (`number`, min 0, max 1, snapshot of applied commission rate).
+     - `currency` (`select`, options `['VND']`, default `'VND'`).
+     - `status` (`select`, options `['PENDING', 'AVAILABLE', 'REVERSED', 'PAID']`, default `'PENDING'`, indexed).
+     - `holdPeriodDays` (`number`, default 7, min 0).
+     - `holdUntil` (`date`, required, indexed).
+     - `availableAt` (`date`, optional, populated upon hold release).
+     - `paidAt` (`date`, optional, populated upon withdrawal payout).
+     - `reversedAt` (`date`, optional, populated upon refund reversal).
+     - `policyVersion` (`text`, required, default `'v1'`).
+     - `notes` (`textarea`, optional).
 
-### Step 5: Integration and Registration
-1. `Users` collection join field updated to `on: 'buyer'`.
-2. Both `Orders` and `OrderItems` imported and registered in `web/src/payload.config.ts` under `collections`.
+4. **Access Control Layer**:
+   - Following Decision 0002 (`docs/decisions/0002-money-write-layer.md`), `create`, `update`, and `delete` on `seller_earnings` must use `canEditMoney` (`() => false`).
+   - Read access (`sellerEarningsReadAccess`):
+     - `admin` and `financeAdmin`: `return true` (unrestricted read).
+     - Authenticated users: `{ seller: { equals: user.id } }` (read own earnings only).
+     - Unauthenticated guests and buyers: `return false`.
+
+5. **Invariants & Lifecycle Hooks**:
+   - **`calculateHoldUntil` (`beforeValidate`)**: If `holdUntil` is not set on creation, compute `holdUntil = new Date(Date.now() + (holdPeriodDays ?? 7) * 86400000).toISOString()`. If `holdPeriodDays === 0`, immediately set `status = 'AVAILABLE'` and `availableAt = new Date().toISOString()`.
+   - **`validateEarningMath` (`beforeValidate`)**: Enforce integer arithmetic and exact balance equation:
+     `salePrice === platformFee + sellerAmount`. Reject any drift or phantom currency.
+   - **`preventEarningMutation` (`beforeChange`)**:
+     - Snapshot fields (`seller`, `order`, `orderItem`, `product`, `salePrice`, `platformFee`, `sellerAmount`, `commissionRate`, `currency`, `holdPeriodDays`, `policyVersion`) are immutable once created.
+     - Status state machine validation:
+       - Allowed: `PENDING → AVAILABLE`, `PENDING → REVERSED`, `AVAILABLE → PAID`, `AVAILABLE → REVERSED`.
+       - Terminal states: `PAID` and `REVERSED` can never change status.
+       - Backward transitions (e.g. `AVAILABLE → PENDING`) are strictly forbidden.
+     - Timestamp stamping: Automatically set `availableAt`, `paidAt`, or `reversedAt` when transitioning into corresponding statuses.
+
+6. **PostgreSQL Database Indices & Constraints**:
+   - Unique btree index: `CREATE UNIQUE INDEX "seller_earnings_order_item_idx" ON "seller_earnings" ("order_item_id");`
+     Guarantees idempotency — no duplicate earning records can ever be created for the same order item.
+   - Composite index for the release cron job:
+     `CREATE INDEX "seller_earnings_status_hold_until_idx" ON "seller_earnings" ("status", "hold_until");`
+     Enables sub-millisecond execution of `SELECT ... WHERE status = 'PENDING' AND hold_until <= NOW()`.
+   - Database check constraints:
+     - `CHECK ("sale_price" >= 0)`
+     - `CHECK ("platform_fee" >= 0)`
+     - `CHECK ("seller_amount" >= 0)`
+     - `CHECK ("commission_rate" >= 0 AND "commission_rate" <= 1)`
+     - `CHECK ("hold_period_days" >= 0)`
+     - `CHECK ("seller_amount" + "platform_fee" = "sale_price")`
 
 ---
 
-## 3. Implementation Code Specifications
+## 3. Caveats
 
-### 3.1 Plugin Configuration Update: `web/src/plugins/index.ts`
+1. **Zero Tax Assumption in Current Phase**:
+   Vietnamese digital marketplace platform fees currently operate under net revenue split without separate VAT deduction in `seller_earnings` (`tax = 0`). The `OrderItem` collection already includes a `tax` field (default 0), and if taxation policy changes in the future, the conservation equation would adapt to `salePrice = platformFee + sellerAmount + tax`.
+2. **Reverse Refund after Payout**:
+   If an order is refunded after its earning has already been transitioned to `PAID` (i.e., seller has already withdrawn funds to their bank), a reversal of the earning creates a negative balance / clawback obligation on the seller's wallet balance (handled in Milestone 2/3 via compensating ledger entries per FLOW-U15 and BR-03).
+3. **Database Migration Dependencies**:
+   The migration for `seller_earnings` relies on foreign keys to `users`, `orders`, `order_items`, and `products`. Since Phase 5 created `orders` and `order_items`, Batch 7 migrations can safely reference them.
+
+---
+
+## 4. Conclusion & Concrete Implementation Code
+
+The exact code designs for all Focus Area 1 files are specified below.
+
+### 4.1 `web/src/collections/Orders/index.ts` (Modified)
+Add `{ label: 'Đã hoàn tiền (REFUNDED)', value: 'REFUNDED' }` to `status.options`:
+
 ```typescript
-// Replace lines 91-118 with:
-    orders: false,
+// Target file: web/src/collections/Orders/index.ts
+// Lines 92-106 updated to:
 
-// Update lines 144-153 to also prune orders from ecommerce schema:
-    incomingConfig.typescript.schema.push(({ jsonSchema }) => {
-      const collections = (jsonSchema?.properties?.ecommerce as any)?.properties?.collections
-      if (collections?.properties?.carts) {
-        delete collections.properties.carts
-      }
-      if (Array.isArray(collections?.required)) {
-        collections.required = collections.required.filter((s: string) => s !== 'carts')
-      }
-      if (collections?.properties?.orders) {
-        delete collections.properties.orders
-      }
-      if (Array.isArray(collections?.required)) {
-        collections.required = collections.required.filter((s: string) => s !== 'orders')
-      }
-      return jsonSchema
-    })
-```
-
-### 3.2 Access Control: `web/src/access/orderAccess.ts`
-```typescript
-import type { Access, Where } from 'payload'
-import { checkRole } from '@/access/utilities'
-
-/**
- * Read access for orders:
- * - Admin and FinanceAdmin can view all orders.
- * - Authenticated users can only view orders where they are the buyer.
- * - Unauthenticated users are denied.
- */
-export const orderReadAccess: Access = ({ req: { user } }) => {
-  if (!user) return false
-
-  if (checkRole(['admin', 'financeAdmin'], user)) {
-    return true
-  }
-
-  const query: Where = {
-    buyer: {
-      equals: user.id,
-    },
-  }
-
-  return query
-}
-
-/**
- * Direct create, update, delete on orders are denied for all principals via REST/GraphQL.
- * All state transitions and creation must go through the dedicated purchase/order service.
- */
-export const orderCreateAccess: Access = () => false
-export const orderUpdateAccess: Access = () => false
-export const orderDeleteAccess: Access = () => false
-
-/**
- * Read access for order items:
- * - Admin and FinanceAdmin can view all order items.
- * - Sellers can view order items for their products.
- * - Buyers can view order items for their orders.
- * - Unauthenticated users are denied.
- */
-export const orderItemReadAccess: Access = ({ req: { user } }) => {
-  if (!user) return false
-
-  if (checkRole(['admin', 'financeAdmin'], user)) {
-    return true
-  }
-
-  const query: Where = {
-    or: [
-      {
-        seller: {
-          equals: user.id,
-        },
-      },
-      {
-        'order.buyer': {
-          equals: user.id,
-        },
-      },
-    ],
-  }
-
-  return query
-}
-
-export const orderItemCreateAccess: Access = () => false
-export const orderItemUpdateAccess: Access = () => false
-export const orderItemDeleteAccess: Access = () => false
-```
-
-### 3.3 Orders Collection: `web/src/collections/Orders/index.ts`
-```typescript
-import type { CollectionConfig } from 'payload'
-import crypto from 'crypto'
-import {
-  orderCreateAccess,
-  orderDeleteAccess,
-  orderReadAccess,
-  orderUpdateAccess,
-} from '@/access/orderAccess'
-
-export const Orders: CollectionConfig = {
-  slug: 'orders',
-  access: {
-    create: orderCreateAccess,
-    delete: orderDeleteAccess,
-    read: orderReadAccess,
-    update: orderUpdateAccess,
-  },
-  admin: {
-    defaultColumns: ['code', 'buyer', 'totalAmount', 'currency', 'status', 'paymentSource', 'paidAt', 'createdAt'],
-    group: 'Commerce',
-    useAsTitle: 'code',
-    description: 'Đơn hàng kỹ thuật số (Digital Orders - Immutable Snapshot Price)',
-  },
-  fields: [
-    {
-      name: 'code',
-      type: 'text',
-      required: true,
-      unique: true,
-      index: true,
-      label: 'Mã đơn hàng',
-      admin: {
-        readOnly: true,
-        description: 'Mã định danh duy nhất của đơn hàng (VD: ORD-20260915-XXXXX)',
-      },
-      hooks: {
-        beforeValidate: [
-          ({ value, operation }) => {
-            if (operation === 'create' && !value) {
-              const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-              const randomSuffix = crypto.randomBytes(3).toString('hex').toUpperCase()
-              return `ORD-${dateStr}-${randomSuffix}`
-            }
-            return value
-          },
-        ],
-      },
-    },
-    {
-      name: 'buyer',
-      type: 'relationship',
-      relationTo: 'users',
-      required: true,
-      index: true,
-      label: 'Người mua',
-      admin: {
-        readOnly: true,
-      },
-    },
-    {
-      name: 'totalAmount',
-      type: 'number',
-      required: true,
-      min: 0,
-      label: 'Tổng tiền (VND)',
-      admin: {
-        readOnly: true,
-        step: 1,
-        description: 'Tổng giá trị đơn hàng tính theo VND',
-      },
-    },
-    {
-      name: 'currency',
-      type: 'select',
-      required: true,
-      defaultValue: 'VND',
-      options: [
-        { label: 'VND (Việt Nam Đồng)', value: 'VND' },
-      ],
-      admin: {
-        readOnly: true,
-      },
-    },
     {
       name: 'status',
       type: 'select',
@@ -367,40 +208,10 @@ export const Orders: CollectionConfig = {
         { label: 'Chờ xử lý (PENDING)', value: 'PENDING' },
         { label: 'Hoàn thành (COMPLETED)', value: 'COMPLETED' },
         { label: 'Đã hủy (CANCELLED)', value: 'CANCELLED' },
+        { label: 'Đã hoàn tiền (REFUNDED)', value: 'REFUNDED' },
       ],
       admin: {
         readOnly: true,
-      },
-    },
-    {
-      name: 'paymentSource',
-      type: 'select',
-      required: true,
-      defaultValue: 'wallet',
-      label: 'Nguồn thanh toán',
-      options: [
-        { label: 'Ví nội bộ (Internal Wallet)', value: 'wallet' },
-        { label: 'Tải miễn phí (Free Asset)', value: 'free' },
-      ],
-      admin: {
-        readOnly: true,
-      },
-    },
-    {
-      name: 'paidAt',
-      type: 'date',
-      label: 'Thời điểm thanh toán',
-      admin: {
-        readOnly: true,
-        description: 'Thời điểm hoàn tất thanh toán và cấp quyền sở hữu',
-      },
-    },
-    {
-      name: 'notes',
-      type: 'textarea',
-      label: 'Ghi chú',
-      admin: {
-        description: 'Ghi chú nội bộ hoặc thông tin bổ sung về đơn hàng',
       },
     },
     {
@@ -414,145 +225,307 @@ export const Orders: CollectionConfig = {
         defaultColumns: ['product', 'seller', 'salePrice', 'platformFee', 'sellerAmount'],
       },
     },
-  ],
+    {
+      name: 'earnings',
+      type: 'join',
+      collection: 'seller_earnings',
+      on: 'order',
+      label: 'Thu nhập người bán từ đơn hàng',
+      admin: {
+        allowCreate: false,
+      },
+    },
+```
+
+### 4.2 `web/src/access/sellerProfileAccess.ts` (Updated)
+Add `adminOrFinanceAdminFieldAccess` and update read protection for private commission rates:
+
+```typescript
+// Target file: web/src/access/sellerProfileAccess.ts
+import type { Access, FieldAccess, Where } from 'payload'
+import { checkRole } from '@/access/utilities'
+
+// ... (existing sellerProfileReadAccess, sellerProfileUpdateAccess, adminOrModeratorFieldAccess) ...
+
+/**
+ * Field-level access for financial administrative fields (e.g. commissionRate):
+ * Only Admin and FinanceAdmin can update this field.
+ */
+export const adminOrFinanceAdminFieldAccess: FieldAccess = ({ req: { user } }) => {
+  if (user) {
+    return checkRole(['admin', 'financeAdmin'], user)
+  }
+  return false
+}
+
+/**
+ * Field-level read access for commissionRate:
+ * Admin, FinanceAdmin, and the profile owner (seller) can read.
+ * Public visitors cannot view internal commission rates.
+ */
+export const commissionRateReadAccess: FieldAccess = ({ req: { user }, doc }) => {
+  if (!user) return false
+  if (checkRole(['admin', 'financeAdmin'], user)) return true
+  const profileUserId = typeof doc?.user === 'object' ? doc?.user?.id : doc?.user
+  return user.id === profileUserId
 }
 ```
 
-### 3.4 Invariants Hook: `web/src/collections/OrderItems/hooks/validateAntiSelfPurchase.ts`
+### 4.3 `web/src/collections/SellerProfiles.ts` (Modified)
+Add `commissionRate` field definition with access control:
+
 ```typescript
-import type { CollectionBeforeValidateHook } from 'payload'
-import { ValidationError } from 'payload'
+// Target file: web/src/collections/SellerProfiles.ts
+// Add after 'payoutInfo' or before 'status':
+
+    {
+      name: 'commissionRate',
+      type: 'number',
+      label: 'Tỷ lệ hoa hồng sàn riêng (Commission Rate Override)',
+      min: 0,
+      max: 1,
+      admin: {
+        position: 'sidebar',
+        step: 0.01,
+        description:
+          'Tỷ lệ hoa hồng sàn áp dụng riêng cho người bán (0.00 - 1.00, VD: 0.20 = 20%). Nếu để trống sẽ sử dụng tỷ lệ mặc định toàn sàn (30%).',
+      },
+      access: {
+        read: commissionRateReadAccess,
+        update: adminOrFinanceAdminFieldAccess,
+      },
+    },
+```
+
+### 4.4 `web/src/access/sellerEarningsAccess.ts` (New File)
+Dedicated access control for `SellerEarnings`:
+
+```typescript
+// Target file: web/src/access/sellerEarningsAccess.ts
+import type { Access, Where } from 'payload'
+import { checkRole } from '@/access/utilities'
 
 /**
- * Enforces BR-04: Sellers are strictly prohibited from purchasing their own products.
- *
- * Checks authoritative seller on the referenced product against the order buyer.
- * If buyer === seller, throws ValidationError to reject creation.
+ * Read access for seller earnings:
+ * - Admin and FinanceAdmin can view all earnings across the platform (PLAN.md §5.5, §22).
+ * - Authenticated sellers can only view their own earnings.
+ * - Buyers and unauthenticated guests are denied.
  */
-export const validateAntiSelfPurchase: CollectionBeforeValidateHook = async ({
-  data,
-  req,
-  operation,
-}) => {
-  if (operation !== 'create' || !data) return data
+export const sellerEarningsReadAccess: Access = ({ req: { user } }) => {
+  if (!user) return false
 
-  const productId = typeof data.product === 'object' ? data.product?.id : data.product
-  if (!productId) {
-    return data
+  if (checkRole(['admin', 'financeAdmin'], user)) {
+    return true
   }
 
-  // 1. Fetch product to obtain authoritative seller ID
-  const product = await req.payload.findByID({
-    collection: 'products',
-    id: productId,
-    depth: 0,
-    req,
-  })
-
-  if (!product) {
-    throw new ValidationError({
-      errors: [{ field: 'product', message: `Product ${productId} does not exist.` }],
-    })
+  const query: Where = {
+    seller: {
+      equals: user.id,
+    },
   }
 
-  const sellerId = typeof product.seller === 'object' ? product.seller?.id : product.seller
-  if (!sellerId) {
-    throw new ValidationError({
-      errors: [{ field: 'seller', message: `Product ${productId} has no assigned seller.` }],
-    })
-  }
+  return query
+}
+```
 
-  // Ensure data.seller matches the authoritative product seller
-  data.seller = sellerId
+### 4.5 `web/src/collections/SellerEarnings/hooks/calculateHoldUntil.ts` (New File)
+Automates hold period date calculation on creation:
 
-  // 2. Resolve buyer ID from order or req.user
-  let buyerId: string | number | undefined
+```typescript
+// Target file: web/src/collections/SellerEarnings/hooks/calculateHoldUntil.ts
+import type { CollectionBeforeValidateHook } from 'payload'
 
-  if (data.order) {
-    if (typeof data.order === 'object' && (data.order as any).buyer) {
-      const orderBuyer = (data.order as any).buyer
-      buyerId = typeof orderBuyer === 'object' ? orderBuyer?.id : orderBuyer
-    } else {
-      const orderId = typeof data.order === 'object' ? data.order?.id : data.order
-      if (orderId) {
-        const order = await req.payload.findByID({
-          collection: 'orders',
-          id: orderId,
-          depth: 0,
-          req,
-        })
-        if (order) {
-          buyerId = typeof order.buyer === 'object' ? order.buyer?.id : order.buyer
-        }
-      }
+export const calculateHoldUntil: CollectionBeforeValidateHook = ({ data, operation }) => {
+  if (!data) return data
+
+  if (operation === 'create') {
+    const holdDays = typeof data.holdPeriodDays === 'number' ? data.holdPeriodDays : 7
+
+    if (!data.holdUntil) {
+      const now = Date.now()
+      const holdMs = holdDays * 24 * 60 * 60 * 1000
+      data.holdUntil = new Date(now + holdMs).toISOString()
     }
-  }
 
-  if (!buyerId && req.user) {
-    buyerId = req.user.id
-  }
-
-  // 3. Enforce BR-04
-  if (buyerId && String(buyerId) === String(sellerId)) {
-    throw new ValidationError({
-      errors: [
-        {
-          field: 'product',
-          message: 'Anti-self-purchase invariant violated (BR-04): Sellers cannot purchase their own products.',
-        },
-      ],
-    })
+    if (holdDays === 0) {
+      data.status = 'AVAILABLE'
+      data.availableAt = new Date().toISOString()
+    }
   }
 
   return data
 }
 ```
 
-### 3.5 Immutability Hook: `web/src/collections/OrderItems/hooks/preventOrderItemMutation.ts`
-```typescript
-import type { CollectionBeforeChangeHook } from 'payload'
+### 4.6 `web/src/collections/SellerEarnings/hooks/validateEarningMath.ts` (New File)
+Enforces financial conservation and non-negativity:
 
-/**
- * Enforces BR-07: Snapshot price and order items are strictly immutable once created.
- */
-export const preventOrderItemMutation: CollectionBeforeChangeHook = ({ operation }) => {
-  if (operation === 'update') {
-    throw new Error('Order items are immutable (BR-07). Modifying an existing order item is strictly prohibited.')
+```typescript
+// Target file: web/src/collections/SellerEarnings/hooks/validateEarningMath.ts
+import type { CollectionBeforeValidateHook } from 'payload'
+
+export const validateEarningMath: CollectionBeforeValidateHook = ({ data, operation }) => {
+  if (!data) return data
+
+  if (operation === 'create') {
+    const salePrice = Number(data.salePrice ?? 0)
+    const platformFee = Number(data.platformFee ?? 0)
+    const sellerAmount = Number(data.sellerAmount ?? 0)
+    const rate = Number(data.commissionRate ?? 0)
+
+    if (salePrice < 0 || platformFee < 0 || sellerAmount < 0) {
+      throw new Error('Financial amounts in seller earnings must be non-negative integers.')
+    }
+
+    if (rate < 0 || rate > 1) {
+      throw new Error(`Commission rate must be between 0 and 1. Received: ${rate}`)
+    }
+
+    // Arithmetic conservation: platformFee + sellerAmount === salePrice
+    if (platformFee + sellerAmount !== salePrice) {
+      throw new Error(
+        `Financial invariant violation: platformFee (${platformFee}) + sellerAmount (${sellerAmount}) does not equal salePrice (${salePrice}).`,
+      )
+    }
   }
+
+  return data
 }
 ```
 
-### 3.6 OrderItems Collection: `web/src/collections/OrderItems/index.ts`
-```typescript
-import type { CollectionConfig } from 'payload'
-import {
-  orderItemCreateAccess,
-  orderItemDeleteAccess,
-  orderItemReadAccess,
-  orderItemUpdateAccess,
-} from '@/access/orderAccess'
-import { validateAntiSelfPurchase } from './hooks/validateAntiSelfPurchase'
-import { preventOrderItemMutation } from './hooks/preventOrderItemMutation'
+### 4.7 `web/src/collections/SellerEarnings/hooks/preventEarningMutation.ts` (New File)
+Protects snapshot fields and controls status lifecycle:
 
-export const OrderItems: CollectionConfig = {
-  slug: 'order_items',
+```typescript
+// Target file: web/src/collections/SellerEarnings/hooks/preventEarningMutation.ts
+import type { CollectionBeforeChangeHook } from 'payload'
+
+export const preventEarningMutation: CollectionBeforeChangeHook = ({
+  data,
+  originalDoc,
+  operation,
+}) => {
+  if (operation === 'update' && originalDoc) {
+    // 1. Immutable snapshot fields (BR-07)
+    const immutableFields = [
+      'seller',
+      'order',
+      'orderItem',
+      'product',
+      'salePrice',
+      'platformFee',
+      'sellerAmount',
+      'commissionRate',
+      'currency',
+      'holdPeriodDays',
+      'policyVersion',
+    ]
+
+    for (const field of immutableFields) {
+      const origVal = typeof originalDoc[field] === 'object' && originalDoc[field] !== null
+        ? originalDoc[field].id
+        : originalDoc[field]
+      const newVal = typeof data[field] === 'object' && data[field] !== null
+        ? data[field].id
+        : data[field]
+
+      if (newVal !== undefined && String(origVal) !== String(newVal)) {
+        throw new Error(
+          `Snapshot field "${field}" is immutable and cannot be altered after creation (BR-07).`,
+        )
+      }
+    }
+
+    // 2. State machine transitions
+    const prevStatus = originalDoc.status
+    const nextStatus = data.status
+
+    if (nextStatus && nextStatus !== prevStatus) {
+      const allowedTransitions: Record<string, string[]> = {
+        PENDING: ['AVAILABLE', 'REVERSED'],
+        AVAILABLE: ['PAID', 'REVERSED'],
+        REVERSED: [], // terminal
+        PAID: ['REVERSED'], // reversal under refund policy
+      }
+
+      const validNext = allowedTransitions[prevStatus] || []
+      if (!validNext.includes(nextStatus)) {
+        throw new Error(
+          `Invalid seller earning state transition from ${prevStatus} to ${nextStatus}.`,
+        )
+      }
+
+      // 3. Automated timestamp stamping
+      const nowIso = new Date().toISOString()
+      if (nextStatus === 'AVAILABLE' && !data.availableAt) {
+        data.availableAt = nowIso
+      } else if (nextStatus === 'PAID' && !data.paidAt) {
+        data.paidAt = nowIso
+      } else if (nextStatus === 'REVERSED' && !data.reversedAt) {
+        data.reversedAt = nowIso
+      }
+    }
+  }
+
+  return data
+}
+```
+
+### 4.8 `web/src/collections/SellerEarnings/index.ts` (New File)
+Main collection config:
+
+```typescript
+// Target file: web/src/collections/SellerEarnings/index.ts
+import type { CollectionConfig } from 'payload'
+import { canEditMoney } from '@/access/canEditMoney'
+import { sellerEarningsReadAccess } from '@/access/sellerEarningsAccess'
+import { calculateHoldUntil } from './hooks/calculateHoldUntil'
+import { preventEarningMutation } from './hooks/preventEarningMutation'
+import { validateEarningMath } from './hooks/validateEarningMath'
+
+export const SellerEarnings: CollectionConfig = {
+  slug: 'seller_earnings',
   access: {
-    create: orderItemCreateAccess,
-    delete: orderItemDeleteAccess,
-    read: orderItemReadAccess,
-    update: orderItemUpdateAccess,
+    create: canEditMoney,
+    delete: canEditMoney,
+    read: sellerEarningsReadAccess,
+    update: canEditMoney,
   },
   admin: {
-    defaultColumns: ['order', 'product', 'seller', 'salePrice', 'platformFee', 'sellerAmount', 'tax', 'createdAt'],
-    group: 'Commerce',
+    defaultColumns: [
+      'id',
+      'seller',
+      'order',
+      'product',
+      'salePrice',
+      'platformFee',
+      'sellerAmount',
+      'status',
+      'holdUntil',
+      'createdAt',
+    ],
+    group: 'Finance',
     useAsTitle: 'id',
-    description: 'Chi tiết sản phẩm đơn hàng snapshot bất biến (BR-07)',
+    description:
+      'Sổ cái doanh thu người bán và chính sách giữ tiền (Seller Earnings - PLAN.md FR-31, BR-03)',
   },
   hooks: {
-    beforeValidate: [validateAntiSelfPurchase],
-    beforeChange: [preventOrderItemMutation],
+    beforeValidate: [calculateHoldUntil, validateEarningMath],
+    beforeChange: [preventEarningMutation],
   },
   fields: [
+    {
+      name: 'seller',
+      type: 'relationship',
+      relationTo: 'users',
+      required: true,
+      index: true,
+      label: 'Người bán',
+      admin: {
+        readOnly: true,
+        position: 'sidebar',
+      },
+    },
     {
       name: 'order',
       type: 'relationship',
@@ -562,6 +535,21 @@ export const OrderItems: CollectionConfig = {
       label: 'Đơn hàng',
       admin: {
         readOnly: true,
+        position: 'sidebar',
+      },
+    },
+    {
+      name: 'orderItem',
+      type: 'relationship',
+      relationTo: 'order_items',
+      required: true,
+      unique: true,
+      index: true,
+      label: 'Chi tiết mục đơn hàng (1-1)',
+      admin: {
+        readOnly: true,
+        position: 'sidebar',
+        description: 'Mục đơn hàng tương ứng (đảm bảo tính duy nhất 1-1, tránh trùng lặp doanh thu)',
       },
     },
     {
@@ -573,17 +561,7 @@ export const OrderItems: CollectionConfig = {
       label: 'Sản phẩm',
       admin: {
         readOnly: true,
-      },
-    },
-    {
-      name: 'seller',
-      type: 'relationship',
-      relationTo: 'users',
-      required: true,
-      index: true,
-      label: 'Người bán',
-      admin: {
-        readOnly: true,
+        position: 'sidebar',
       },
     },
     {
@@ -595,7 +573,7 @@ export const OrderItems: CollectionConfig = {
       admin: {
         readOnly: true,
         step: 1,
-        description: 'Giá bán snapshot tại thời điểm đặt hàng (BR-07)',
+        description: 'Giá bán của sản phẩm tại thời điểm giao dịch (snapshot)',
       },
     },
     {
@@ -603,12 +581,11 @@ export const OrderItems: CollectionConfig = {
       type: 'number',
       required: true,
       min: 0,
-      defaultValue: 0,
-      label: 'Phí sàn (VND)',
+      label: 'Phí sàn thu (VND)',
       admin: {
         readOnly: true,
         step: 1,
-        description: 'Phí hoa hồng sàn thu',
+        description: 'Phí hoa hồng nền tảng (salePrice * commissionRate)',
       },
     },
     {
@@ -616,24 +593,110 @@ export const OrderItems: CollectionConfig = {
       type: 'number',
       required: true,
       min: 0,
-      label: 'Doanh thu người bán (VND)',
+      label: 'Thu nhập người bán thực nhận (VND)',
       admin: {
         readOnly: true,
         step: 1,
-        description: 'Số tiền thực nhận của người bán (salePrice - platformFee - tax)',
+        description: 'Doanh thu chuyển cho người bán (salePrice - platformFee)',
       },
     },
     {
-      name: 'tax',
+      name: 'commissionRate',
       type: 'number',
       required: true,
       min: 0,
-      defaultValue: 0,
-      label: 'Thuế (VND)',
+      max: 1,
+      label: 'Tỷ lệ hoa hồng áp dụng',
       admin: {
         readOnly: true,
+        step: 0.0001,
+        description: 'Tỷ lệ chiết khấu snapshot tại thời điểm giao dịch (BR-07)',
+      },
+    },
+    {
+      name: 'currency',
+      type: 'select',
+      required: true,
+      defaultValue: 'VND',
+      label: 'Loại tiền tệ',
+      options: [{ label: 'VND (Việt Nam Đồng)', value: 'VND' }],
+      admin: {
+        readOnly: true,
+        position: 'sidebar',
+      },
+    },
+    {
+      name: 'status',
+      type: 'select',
+      required: true,
+      defaultValue: 'PENDING',
+      index: true,
+      label: 'Trạng thái thu nhập',
+      options: [
+        { label: 'Chờ đối soát (PENDING)', value: 'PENDING' },
+        { label: 'Khả dụng (AVAILABLE)', value: 'AVAILABLE' },
+        { label: 'Đã hoàn tiền / Đảo ngược (REVERSED)', value: 'REVERSED' },
+        { label: 'Đã thanh toán (PAID)', value: 'PAID' },
+      ],
+      admin: {
+        position: 'sidebar',
+        description: 'Vòng đời: PENDING -> AVAILABLE -> PAID (hoặc REVERSED nếu hoàn tiền)',
+      },
+    },
+    {
+      name: 'holdPeriodDays',
+      type: 'number',
+      required: true,
+      defaultValue: 7,
+      min: 0,
+      label: 'Thời gian giữ tiền (ngày)',
+      admin: {
+        readOnly: true,
+        position: 'sidebar',
         step: 1,
-        description: 'Thuế áp dụng',
+        description: 'Số ngày giữ tiền tạm thời trước khi chuyển thành khả dụng (mặc định 7 ngày)',
+      },
+    },
+    {
+      name: 'holdUntil',
+      type: 'date',
+      required: true,
+      index: true,
+      label: 'Thời điểm hết hạn giữ tiền',
+      admin: {
+        readOnly: true,
+        position: 'sidebar',
+        description: 'Thời điểm thu nhập tự động chuyển sang AVAILABLE (createdAt + holdPeriodDays)',
+      },
+    },
+    {
+      name: 'availableAt',
+      type: 'date',
+      label: 'Thời điểm chuyển khả dụng',
+      admin: {
+        readOnly: true,
+        position: 'sidebar',
+        description: 'Thời điểm thu nhập thực tế chuyển sang trạng thái AVAILABLE',
+      },
+    },
+    {
+      name: 'paidAt',
+      type: 'date',
+      label: 'Thời điểm thanh toán',
+      admin: {
+        readOnly: true,
+        position: 'sidebar',
+        description: 'Thời điểm hoàn tất chi trả tiền cho người bán qua yêu cầu rút tiền',
+      },
+    },
+    {
+      name: 'reversedAt',
+      type: 'date',
+      label: 'Thời điểm đảo ngược',
+      admin: {
+        readOnly: true,
+        position: 'sidebar',
+        description: 'Thời điểm đơn hàng bị hoàn trả và thu nhập bị đảo ngược',
       },
     },
     {
@@ -641,107 +704,201 @@ export const OrderItems: CollectionConfig = {
       type: 'text',
       required: true,
       defaultValue: 'v1',
-      label: 'Phiên bản chính sách phí',
+      label: 'Phiên bản chính sách',
       admin: {
         readOnly: true,
-        description: 'Phiên bản chính sách phân chia doanh thu áp dụng tại thời điểm giao dịch',
+        position: 'sidebar',
+        description: 'Phiên bản chính sách chiết khấu hoa hồng snapshot',
+      },
+    },
+    {
+      name: 'notes',
+      type: 'textarea',
+      label: 'Ghi chú / Diễn giải',
+      admin: {
+        description: 'Ghi chú nội bộ, lý do hoàn trả hoặc mã đối soát',
       },
     },
   ],
 }
 ```
 
-### 3.7 Alignment in `web/src/collections/Users/index.ts`
-```typescript
-// Update lines 71-79:
-    {
-      name: 'orders',
-      type: 'join',
-      collection: 'orders',
-      on: 'buyer', // Changed from 'customer' to match Orders.buyer
-      admin: {
-        allowCreate: false,
-        defaultColumns: ['id', 'code', 'createdAt', 'totalAmount', 'status'],
-      },
-    },
-```
+### 4.9 Consumer Updates
+1. `web/src/app/api/v1/me/orders/route.ts:39`:
+   ```typescript
+   if (statusParam && ['PENDING', 'COMPLETED', 'CANCELLED', 'REFUNDED'].includes(statusParam.toUpperCase())) {
+     where.status = {
+       equals: statusParam.toUpperCase(),
+     }
+   }
+   ```
+2. `web/src/components/OrderStatus/index.tsx:17-22`:
+   ```typescript
+   className={cn(
+     'text-xs tracking-widest font-mono uppercase py-0.5 px-2.5 rounded-full w-fit font-semibold border',
+     className,
+     {
+       'bg-amber-500/10 text-amber-600 border-amber-500/20': status === 'PENDING',
+       'bg-emerald-500/10 text-emerald-600 border-emerald-500/20': status === 'COMPLETED',
+       'bg-destructive/10 text-destructive border-destructive/20': status === 'CANCELLED',
+       'bg-purple-500/10 text-purple-600 border-purple-500/20': status === 'REFUNDED',
+     },
+   )}
+   ```
 
-### 3.8 Config Registration: `web/src/payload.config.ts`
-```typescript
-// Import Orders and OrderItems:
-import { Orders } from '@/collections/Orders'
-import { OrderItems } from '@/collections/OrderItems'
+### 4.10 PostgreSQL DDL Requirements for Batch 7 Migration
+To be included in `20260915_100000_phase6_seller_revenue.ts`:
 
-// Add to collections array:
-  collections: [
-    Users,
-    Pages,
-    Categories,
-    Media,
-    SoftwareTypes,
-    Tags,
-    ProductPreviews,
-    ProductFiles,
-    Products,
-    SellerProfiles,
-    Wallets,
-    WalletLedger,
-    PaymentIntents,
-    PaymentTransactions,
-    PaymentWebhookEvents,
-    Orders,
-    OrderItems,
-  ],
+```sql
+-- 1. Orders status ENUM expansion
+ALTER TYPE "public"."enum_orders_status" ADD VALUE IF NOT EXISTS 'REFUNDED';
+
+-- 2. Seller profiles commission rate column
+ALTER TABLE "seller_profiles" ADD COLUMN IF NOT EXISTS "commission_rate" numeric;
+ALTER TABLE "seller_profiles" DROP CONSTRAINT IF EXISTS "seller_profiles_commission_rate_range";
+ALTER TABLE "seller_profiles" ADD CONSTRAINT "seller_profiles_commission_rate_range"
+  CHECK ("commission_rate" IS NULL OR ("commission_rate" >= 0 AND "commission_rate" <= 1));
+
+-- 3. Seller earnings ENUMs
+DO $$ BEGIN
+  CREATE TYPE "public"."enum_seller_earnings_currency" AS ENUM('VND');
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE "public"."enum_seller_earnings_status" AS ENUM('PENDING', 'AVAILABLE', 'REVERSED', 'PAID');
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
+
+-- 4. Seller earnings table
+CREATE TABLE IF NOT EXISTS "seller_earnings" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "seller_id" integer NOT NULL,
+  "order_id" integer NOT NULL,
+  "order_item_id" integer NOT NULL,
+  "product_id" integer NOT NULL,
+  "sale_price" numeric DEFAULT 0 NOT NULL,
+  "platform_fee" numeric DEFAULT 0 NOT NULL,
+  "seller_amount" numeric DEFAULT 0 NOT NULL,
+  "commission_rate" numeric NOT NULL,
+  "currency" "enum_seller_earnings_currency" DEFAULT 'VND' NOT NULL,
+  "status" "enum_seller_earnings_status" DEFAULT 'PENDING' NOT NULL,
+  "hold_period_days" numeric DEFAULT 7 NOT NULL,
+  "hold_until" timestamp(3) with time zone NOT NULL,
+  "available_at" timestamp(3) with time zone,
+  "paid_at" timestamp(3) with time zone,
+  "reversed_at" timestamp(3) with time zone,
+  "policy_version" varchar DEFAULT 'v1' NOT NULL,
+  "notes" varchar,
+  "updated_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+  "created_at" timestamp(3) with time zone DEFAULT now() NOT NULL
+);
+
+-- 5. Foreign keys
+ALTER TABLE "seller_earnings" DROP CONSTRAINT IF EXISTS "seller_earnings_seller_id_users_id_fk";
+ALTER TABLE "seller_earnings" ADD CONSTRAINT "seller_earnings_seller_id_users_id_fk"
+  FOREIGN KEY ("seller_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
+
+ALTER TABLE "seller_earnings" DROP CONSTRAINT IF EXISTS "seller_earnings_order_id_orders_id_fk";
+ALTER TABLE "seller_earnings" ADD CONSTRAINT "seller_earnings_order_id_orders_id_fk"
+  FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE set null ON UPDATE no action;
+
+ALTER TABLE "seller_earnings" DROP CONSTRAINT IF EXISTS "seller_earnings_order_item_id_order_items_id_fk";
+ALTER TABLE "seller_earnings" ADD CONSTRAINT "seller_earnings_order_item_id_order_items_id_fk"
+  FOREIGN KEY ("order_item_id") REFERENCES "public"."order_items"("id") ON DELETE set null ON UPDATE no action;
+
+ALTER TABLE "seller_earnings" DROP CONSTRAINT IF EXISTS "seller_earnings_product_id_products_id_fk";
+ALTER TABLE "seller_earnings" ADD CONSTRAINT "seller_earnings_product_id_products_id_fk"
+  FOREIGN KEY ("product_id") REFERENCES "public"."products"("id") ON DELETE set null ON UPDATE no action;
+
+-- 6. Indices
+CREATE UNIQUE INDEX IF NOT EXISTS "seller_earnings_order_item_idx" ON "seller_earnings" USING btree ("order_item_id");
+CREATE INDEX IF NOT EXISTS "seller_earnings_seller_idx" ON "seller_earnings" USING btree ("seller_id");
+CREATE INDEX IF NOT EXISTS "seller_earnings_order_idx" ON "seller_earnings" USING btree ("order_id");
+CREATE INDEX IF NOT EXISTS "seller_earnings_product_idx" ON "seller_earnings" USING btree ("product_id");
+CREATE INDEX IF NOT EXISTS "seller_earnings_status_idx" ON "seller_earnings" USING btree ("status");
+CREATE INDEX IF NOT EXISTS "seller_earnings_hold_until_idx" ON "seller_earnings" USING btree ("hold_until");
+CREATE INDEX IF NOT EXISTS "seller_earnings_status_hold_until_idx" ON "seller_earnings" ("status", "hold_until");
+CREATE INDEX IF NOT EXISTS "seller_earnings_created_at_idx" ON "seller_earnings" USING btree ("created_at");
+CREATE INDEX IF NOT EXISTS "seller_earnings_updated_at_idx" ON "seller_earnings" USING btree ("updated_at");
+
+-- 7. Locked documents relation for Payload 3.x
+ALTER TABLE "payload_locked_documents_rels" ADD COLUMN IF NOT EXISTS "seller_earnings_id" integer;
+ALTER TABLE "payload_locked_documents_rels" DROP CONSTRAINT IF EXISTS "payload_locked_documents_rels_seller_earnings_fk";
+ALTER TABLE "payload_locked_documents_rels" ADD CONSTRAINT "payload_locked_documents_rels_seller_earnings_fk"
+  FOREIGN KEY ("seller_earnings_id") REFERENCES "public"."seller_earnings"("id") ON DELETE cascade ON UPDATE no action;
+CREATE INDEX IF NOT EXISTS "payload_locked_documents_rels_seller_earnings_id_idx" ON "payload_locked_documents_rels" USING btree ("seller_earnings_id");
+
+-- 8. Check constraints
+ALTER TABLE "seller_earnings" DROP CONSTRAINT IF EXISTS "seller_earnings_sale_price_non_negative";
+ALTER TABLE "seller_earnings" ADD CONSTRAINT "seller_earnings_sale_price_non_negative" CHECK ("sale_price" >= 0);
+
+ALTER TABLE "seller_earnings" DROP CONSTRAINT IF EXISTS "seller_earnings_platform_fee_non_negative";
+ALTER TABLE "seller_earnings" ADD CONSTRAINT "seller_earnings_platform_fee_non_negative" CHECK ("platform_fee" >= 0);
+
+ALTER TABLE "seller_earnings" DROP CONSTRAINT IF EXISTS "seller_earnings_seller_amount_non_negative";
+ALTER TABLE "seller_earnings" ADD CONSTRAINT "seller_earnings_seller_amount_non_negative" CHECK ("seller_amount" >= 0);
+
+ALTER TABLE "seller_earnings" DROP CONSTRAINT IF EXISTS "seller_earnings_commission_rate_range";
+ALTER TABLE "seller_earnings" ADD CONSTRAINT "seller_earnings_commission_rate_range" CHECK ("commission_rate" >= 0 AND "commission_rate" <= 1);
+
+ALTER TABLE "seller_earnings" DROP CONSTRAINT IF EXISTS "seller_earnings_hold_period_days_non_negative";
+ALTER TABLE "seller_earnings" ADD CONSTRAINT "seller_earnings_hold_period_days_non_negative" CHECK ("hold_period_days" >= 0);
+
+ALTER TABLE "seller_earnings" DROP CONSTRAINT IF EXISTS "seller_earnings_math_check";
+ALTER TABLE "seller_earnings" ADD CONSTRAINT "seller_earnings_math_check" CHECK ("seller_amount" + "platform_fee" = "sale_price");
 ```
 
 ---
 
-## 4. Caveats
+## 5. Verification Method
 
-1. **Database Schema Replacement (Batch 6 DDL)**:
-   In initial migration Batch 1 (`20260915_020514_initial.ts`), old ecommerce template tables `orders` and `orders_items` were created with 0 records. As m1_explorer_3 investigates Batch 6 migration, those empty legacy tables should be dropped (`DROP TABLE IF EXISTS "orders_items", "orders" CASCADE;`) and recreated with our exact columns (`buyer_id`, `total_amount`, `sale_price`, `seller_id`, etc.).
-2. **Storefront Orders Page Refactor (Phase 5 UI / Milestone 4)**:
-   `web/src/app/(app)/(account)/orders/page.tsx` and `web/src/app/(app)/(account)/orders/[id]/page.tsx` currently query `where: { customer: { equals: user.id } }`. When Milestone 4 updates the UI, these queries will use `buyer: { equals: user.id }` and read the snapshot fields (`totalAmount`, `items`).
-3. **Double Verification of Invariant BR-04**:
-   The `validateAntiSelfPurchase` hook enforces BR-04 inside Payload. The purchase service in `src/services/purchase.ts` (Milestone 2) should also validate `user.id !== product.seller` before initiating the wallet debit transaction, providing defensive validation at both layers.
+Once implemented by `m1_worker_1`, the implementation can be independently verified using the following concrete steps:
 
----
+1. **Schema & Migration Verification**:
+   ```bash
+   pnpm --prefix web payload migrate
+   ```
+   Must apply Batch 7 without syntax or constraint errors.
+   Direct SQL verification:
+   ```sql
+   -- Verify ENUM contains REFUNDED
+   SELECT enumlabel FROM pg_enum WHERE enumtypid = 'enum_orders_status'::regtype;
+   -- Expected: PENDING, COMPLETED, CANCELLED, REFUNDED
 
-## 5. Conclusion
-- `@payloadcms/plugin-ecommerce` orders can be cleanly disabled by specifying `orders: false` in `plugins/index.ts` and removing `orders` from the typescript JSON schema, without impacting `transactions` or Stripe adapter features.
-- Dedicated `Orders` (`slug: 'orders'`) and `OrderItems` (`slug: 'order_items'`) collections completely satisfy all business rules:
-  - Atomic access control denies direct REST CRUD while allowing buyer and seller read access.
-  - Snapshot pricing is locked and immutable (BR-07).
-  - BR-04 is mechanically enforced via authoritative seller verification and comparison in `validateAntiSelfPurchase`.
-  - Updating `Users` join `on: 'buyer'` eliminates relationship schema conflicts.
+   -- Verify unique index on orderItem
+   SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'seller_earnings';
+   -- Expected: seller_earnings_order_item_idx (UNIQUE)
+   ```
 
----
+2. **Integration Test Suite**:
+   ```bash
+   pnpm --prefix web test:int tests/int/seller-earnings.int.spec.ts
+   ```
+   Verifies:
+   - Rate resolution hierarchy (default 30%, seller override 20%, campaign 10%).
+   - Arithmetic conservation and zero rounding error across prices.
+   - `seller_earnings` creation with `PENDING` status and correct `holdUntil`.
+   - Hold period maturation after 7 days transitioning to `AVAILABLE`.
 
-## 6. Verification Method
+3. **Type Checking & Linting**:
+   ```bash
+   pnpm --prefix web generate:types
+   pnpm --prefix web lint
+   ```
+   Must complete with exit code 0 and 0 ESLint errors.
 
-### 6.1 Type Generation Verification
-Run:
-```bash
-pnpm --prefix web generate:types
-```
-Verify that `Order` in `web/src/payload-types.ts` contains `buyer: (number | null) | User`, `totalAmount: number`, `status: 'PENDING' | 'COMPLETED' | 'CANCELLED'`, and `OrderItem` contains `salePrice: number`, `seller: (number | null) | User`, etc.
+4. **Negative Security Verification (Access Control)**:
+   - Attempting `POST /api/seller_earnings` as seller, buyer, or guest must return `403 Forbidden` (`canEditMoney`).
+   - Attempting `PATCH /api/seller_earnings/:id` as seller or admin must return `403 Forbidden` (`canEditMoney`).
+   - Attempting `GET /api/seller_earnings` as buyer must return 0 documents.
+   - Attempting `PATCH /api/seller_profiles/:id` with `commissionRate` as seller must be rejected or ignored.
 
-### 6.2 Lint & Build Check
-Run:
-```bash
-pnpm --prefix web lint
-pnpm --prefix web build
-```
-Verify 0 lint errors and successful Next.js compile.
-
-### 6.3 Unit / Integration Verification
-When tests are added in `tests/int/purchase-invariants.int.spec.ts`:
-1. **BR-04 Anti-Self-Purchase**:
-   Attempt to create an `order_item` where buyer and product seller are the same user.
-   *Expected result*: Error thrown (`Anti-self-purchase invariant violated (BR-04)`).
-2. **BR-07 Immutability**:
-   Attempt to call `payload.update({ collection: 'order_items', id, data: { salePrice: 999999 } })`.
-   *Expected result*: Error thrown (`Order items are immutable (BR-07)`).
-3. **Access Control**:
-   Attempt `fetch('/api/orders', { method: 'POST', body: ... })` with user JWT.
-   *Expected result*: HTTP 403 Forbidden.
+5. **Invalidation Conditions**:
+   - The design is invalidated if:
+     - `seller_earnings` allows duplicate records for the same `orderItem` (breaks 1-to-1 invariant).
+     - Floating point arithmetic produces unbacked or uncollected VND (`platformFee + sellerAmount !== salePrice`).
+     - A seller is able to set or modify their own `commissionRate`.
+     - Direct REST clients can mutate `seller_earnings` without server-side business logic.

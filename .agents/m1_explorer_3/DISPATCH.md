@@ -1,13 +1,27 @@
-## 2026-09-15T07:11:00Z
-Investigate and design PostgreSQL Migration Batch 6 for Phase 5:
-1. Inspect existing migrations in `web/src/migrations/` (especially Batch 1 `20260915_020514_initial.ts` and Batch 5 `20260915_064708_phase4_payment_wallet.ts`).
-2. Inspect current database state for tables `orders` and `orders_items` (created in Batch 1 with 0 rows). Determine whether Batch 6 should drop the old template tables (`DROP TABLE IF EXISTS "orders_items", "orders" CASCADE;`) and recreate them with the exact digital columns, or alter them.
-3. Design complete DDL for:
-   - `orders`: `id`, `code`, `buyer_id`, `total_amount`, `currency`, `status`, `payment_source`, `paid_at`, `notes`, `updated_at`, `created_at`. Unique index on `code`.
-   - `order_items`: `id`, `order_id`, `product_id`, `seller_id`, `sale_price`, `platform_fee`, `seller_amount`, `tax`, `policy_version`, `updated_at`, `created_at`.
-   - `entitlements`: `id`, `user_id`, `product_id`, `order_id`, `order_item_id`, `status`, `granted_at`, `download_count`, `max_downloads`, `expires_at`, `revoked_at`, `reason`, `updated_at`, `created_at`.
-   - Partial unique index on entitlements:
-     `CREATE UNIQUE INDEX "entitlements_user_product_active_idx" ON "entitlements" ("user_id", "product_id") WHERE ("status" = 'active');`
-   - `download_events`: `id`, `user_id`, `product_id`, `entitlement_id`, `ip_address`, `user_agent`, `downloaded_at`, `status`, `download_token_hash`, `error_reason`, `updated_at`, `created_at`.
-4. Migration naming, snapshot json file generation, and registration in `web/src/migrations/index.ts`.
-5. Safe migration rollback script (`down` function).
+## 2026-09-15T10:37:03Z
+
+<USER_REQUEST>
+You are m1_explorer_3, a teamwork_preview_explorer agent.
+Your working directory is: /home/trung/Documents/2026/project/test-v6/.agents/m1_explorer_3
+Your parent is: orchestrator (conversation ID: 97815561-5c1e-4548-8e83-6acb89c4e2aa)
+
+MANDATORY FIRST STEP: Read the user request at:
+/home/trung/Documents/2026/project/test-v6/.agents/ORIGINAL_REQUEST.md
+Specifically review the Phase 6 (Seller Revenue) section starting from line 73.
+
+YOUR MISSION:
+Explore requirements and exact implementation design for Milestone 1:
+Focus Area 3: `refunds` Collection, Payload Config Registration, & PostgreSQL Migration Batch 7:
+1. Design `refunds` collection (web/src/collections/Refunds/index.ts):
+   - Fields: code (text, unique, indexed, e.g. REF-YYYYMMDD-XXXXX), order (rel: orders, indexed), orderItem (rel: order_items), buyer (rel: users, indexed), seller (rel: users, indexed), amount (number VND), platformFeeRefunded (number VND), sellerAmountRefunded (number VND), currency (select 'VND', default 'VND'), reason (text), status (select: COMPLETED, FAILED), processedBy (rel: users, Finance Admin or Super Admin), ledgerTransaction (rel: wallet_ledger or number), entitlementRevoked (checkbox), createdAt (date, default now).
+   - Access control: canEditMoney (deny direct REST mutations), read for buyer, seller, financeAdmin, admin.
+2. Review web/src/payload.config.ts to register all 4 new collections: `SellerEarnings`, `Withdrawals`, `WithdrawalEvents`, `Refunds`.
+3. Design PostgreSQL Migration Batch 7 (web/src/migrations/20260915_100000_phase6_seller_revenue.ts):
+   - Inspect existing migration patterns in Batch 5 (`20260915_064708_phase4_payment_wallet.ts`) and Batch 6 (`20260915_071500_phase5_purchase_download.ts`).
+   - DDL for enum types, tables, foreign keys, indices (unique index on orderItem in seller_earnings, index on seller in withdrawals, etc.), check constraints (`amount >= 50000 AND amount <= 50000000`, `seller_amount >= 0`, `platform_fee >= 0`), and down migration statements.
+   - Command to run migrations: `pnpm --prefix web payload migrate`.
+
+Deliver a comprehensive handoff report to:
+/home/trung/Documents/2026/project/test-v6/.agents/m1_explorer_3/handoff.md
+Maintain BRIEFING.md and progress.md in your working directory. Notify orchestrator when done.
+</USER_REQUEST>

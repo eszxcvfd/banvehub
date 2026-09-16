@@ -1,19 +1,30 @@
 # Progress Heartbeat - m1_worker_1
 
-Last visited: 2026-09-15T07:29:50Z
-Status: Implementation completed, all 12 tasks executed, 100% test pass on existing suites, 0 lint errors.
+Last visited: 2026-09-15T11:16:00Z
+Status: In progress - Phase 6 Milestone 1 implementation starting.
 
 ## Step Checklist
-- [x] Initialized DISPATCH.md, BRIEFING.md, progress.md
-- [x] Read ORIGINAL_REQUEST.md, PROJECT.md, and explorer handoff reports (m1_explorer_1, m1_explorer_2, m1_explorer_3)
-- [x] Implement access controls: orderAccess.ts, entitlementAccess.ts, downloadEventAccess.ts
-- [x] Implement collections: Orders, OrderItems (with BR-04 and BR-07 hooks), Entitlements (with R2 hook), DownloadEvents
-- [x] Update Users/index.ts (join field orders to `on: 'buyer'`)
-- [x] Update plugins/index.ts (disable plugin orders: `orders: false`, clean up schema override)
-- [x] Update payload.config.ts (register 4 collections)
-- [x] Implement migration 20260915_071500_phase5_purchase_download (.ts and .json) and register in migrations/index.ts
-- [x] Run migration `pnpm --prefix web payload migrate` and verify status (`Batch 6 | Yes`)
-- [x] Generate types `pnpm --prefix web payload generate:types`
-- [x] Run test suite `pnpm --prefix web test:int` (17 existing suites passed 100% - 242 tests)
-- [x] Run linting `pnpm --prefix web lint` (0 errors)
-- [ ] Write handoff.md and send completion message to parent
+- [x] Review DISPATCH.md, ORIGINAL_REQUEST.md, PROJECT.md, and 3 explorer handoffs
+- [x] Update BRIEFING.md and progress.md
+- [ ] Focus Area 1:
+  - [ ] Update `web/src/collections/Orders/index.ts` (status 'REFUNDED', earnings join)
+  - [ ] Update `web/src/app/api/v1/me/orders/route.ts` (allow 'REFUNDED' status)
+  - [ ] Update `web/src/components/OrderStatus/index.tsx` (style 'REFUNDED' badge)
+  - [ ] Update `web/src/access/sellerProfileAccess.ts` (field access controls)
+  - [ ] Update `web/src/collections/SellerProfiles.ts` (commissionRate field)
+  - [ ] Create `web/src/access/sellerEarningsAccess.ts`
+  - [ ] Create `web/src/collections/SellerEarnings/` hooks and `index.ts`
+- [ ] Focus Area 2:
+  - [ ] Create `web/src/access/withdrawalAccess.ts`
+  - [ ] Create `web/src/collections/Withdrawals/` hooks and `index.ts`
+  - [ ] Create `web/src/collections/WithdrawalEvents/` hooks and `index.ts`
+- [ ] Focus Area 3:
+  - [ ] Create `web/src/access/refundAccess.ts`
+  - [ ] Create `web/src/collections/Refunds/index.ts`
+  - [ ] Update `web/src/payload.config.ts` (register SellerEarnings, Withdrawals, WithdrawalEvents, Refunds)
+  - [ ] Create migration Batch 7 `web/src/migrations/20260915_100000_phase6_seller_revenue.ts`
+  - [ ] Register Batch 7 in `web/src/migrations/index.ts`
+- [ ] Run migration `pnpm --prefix web payload migrate`
+- [ ] Generate types `pnpm --prefix web generate:types`
+- [ ] Verify build, lint, and tests
+- [ ] Deliver handoff report and notify orchestrator

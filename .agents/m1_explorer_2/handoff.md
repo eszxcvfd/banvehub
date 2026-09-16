@@ -1,137 +1,233 @@
-# Implementation Design & Handoff Report: Entitlements & DownloadEvents Schema (Milestone 1)
+# Handoff Report: Phase 6 Milestone 1 — Focus Area 2 (`withdrawals` & `withdrawal_events` Collections)
+
+**Author**: `m1_explorer_2` (teamwork_preview_explorer)  
+**Date**: 2026-09-15  
+**Target Milestone**: Milestone 1 (Focus Area 2: Withdrawals & Withdrawal Events Schema & Invariants)  
+**Status**: Completed (Hard Handoff)
+
+---
 
 ## 1. Observation
 
-### 1.1 Requirements & Specifications
-- In `.agents/ORIGINAL_REQUEST.md` (lines 23-35, 51-65):
-  - **R2. Entitlements Ledger**:
-    > "Implement the `entitlements` collection as an independent authority for asset ownership per PLAN.md FR-16 and Decision 0006:
-    > - Fields: `user`, `product`, `order` (optional for free products), `status` (`active`, `revoked`, `expired`), `grantedAt`.
-    > - Unique constraint: A buyer can only hold one active entitlement per product; duplicate purchases of already-owned assets are refused or redirected to download.
-    > - Free downloads automatically create an active entitlement row per FR-18."
-  - **R3. Secure Authenticated Download Engine & Token Rail**:
-    > "Validates token signature and expiration, streams the file bytes with proper MIME type and filename attachment header, and records an audit row in `download_events` (user, product, IP, user-agent, timestamp, status)."
-  - **Acceptance Criteria**:
-    > "Collections `orders`, `order_items`, `entitlements`, and `download_events` registered in Payload config with versioned PostgreSQL migration Batch 6."
-- In `PLAN.md` lines 668-685 (FR-16):
-  ```text
-  entitlement:
-  - user_id
-  - product_id
-  - order_item_id
-  - granted_at
-  - expires_at nullable
-  - max_downloads nullable
-  - download_count
-  - revoked_at nullable
-  - reason
-  ```
-- In `PLAN.md` lines 2509-2524 (§22 Authorization Matrix):
-  - Action `Download owned`: Guest ❌, Buyer ✅, Seller ✅, Moderator ✅, Finance ✅, Admin ✅
-- In `docs/decisions/0006-secure-download-path.md`:
-  - Download is entitlement-gated and served through an authenticated application route, not a public URL.
-  - Download events are recorded per attempt to satisfy audit and abuse-detection requirements.
-- In `docs/decisions/0008-role-model.md`:
-  - Roles are: `admin` (Super Admin), `buyer`, `seller`, `moderator`, `financeAdmin`.
+Direct observations from the repository codebase, specifications, and architecture decisions:
 
-### 1.2 Codebase Patterns & Existing Conventions
-- **Collection Slug Convention**:
-  - `web/src/collections/WalletLedger.ts` (line 13): `slug: 'wallet_ledger'`
-  - `web/src/collections/PaymentIntents.ts` (line 13): `slug: 'payment_intents'`
-  - `web/src/collections/ProductFiles/index.ts` (line 17): `slug: 'product_files'`
-  - `web/src/collections/PaymentWebhookEvents.ts` (line 12): `slug: 'payment_webhook_events'`
-  - Slugs follow snake_case in PostgreSQL database tables (`"entitlements"`, `"download_events"`).
-- **Access Control Conventions**:
-  - `web/src/access/utilities.ts` (lines 3-13): exports `checkRole(allRoles, user)`.
-  - `web/src/access/canEditMoney.ts` (lines 15-21): `export const canEditMoney: Access = () => false`.
-  - `web/src/access/financialAccess.ts` (lines 10-24, 32-46): returns boolean or `Where` clause filtering by `user: { equals: user.id }`.
-  - `web/src/access/isAdmin.ts` (lines 10-16): checks `checkRole(['admin'], req.user)`.
-- **Append-Only Audit Log Convention**:
-  - `web/src/collections/PaymentWebhookEvents.ts` (lines 13-18):
-    ```ts
-    access: {
-      create: canEditMoney, // returns false
-      delete: canEditMoney, // returns false
-      read: webhookEventReadAccess,
-      update: canEditMoney, // returns false
-    }
-    ```
-  - All audit fields configured with `admin: { readOnly: true }`.
-- **Database Migrations & PostgreSQL Types**:
-  - `web/src/migrations/20260915_064708_phase4_payment_wallet.ts`:
-    - Enum types named `"enum_" + collection_slug + "_" + field_name`:
-      e.g., `"enum_wallets_currency"`, `"enum_wallet_ledger_type"`.
-    - CamelCase fields map to snake_case columns:
-      `downloadCount` → `"download_count"`, `ipAddress` → `"ip_address"`, `orderItem` → `"order_item_id"`.
-- **Peer Milestone Dispatches**:
-  - `.agents/m1_explorer_1/DISPATCH.md`: designs collections `Orders` (`slug: 'orders'`) and `OrderItems` (`slug: 'order_items'`).
-  - `.agents/m1_explorer_3/DISPATCH.md`: designs migration Batch 6 including tables `"entitlements"` and `"download_events"`, with partial unique index:
-    `CREATE UNIQUE INDEX "entitlements_user_product_active_idx" ON "entitlements" ("user_id", "product_id") WHERE ("status" = 'active');`.
+1. **User Request & Requirements (ORIGINAL_REQUEST.md lines 98-109)**:
+   - FR-32 / R2 specifies:
+     - Seller submits: amount, bank name, account number, account holder name.
+     - System validates: amount ≤ available balance, respects min/max limits (min 50,000 VND, max 50,000,000 VND).
+     - Available balance is reserved upon request.
+     - Withdrawal states: `REQUESTED → UNDER_REVIEW → APPROVED → PROCESSING → PAID` (success path), with `REJECTED`, `CANCELLED`, `FAILED` as terminal/error states.
+     - Finance Admin or Super Admin can approve/reject withdrawals (PLAN.md §22 authorization matrix: `Approve withdrawal`: Finance ✅, Admin ✅, all others ❌).
+     - Rejected withdrawals must release reserved balance back to available.
+     - All state transitions must have audit logging via `withdrawal_events`.
+
+2. **Money Write Path & Denial of Direct Mutations (docs/decisions/0002-money-write-layer.md lines 39-53)**:
+   - "Direct writes denied for every principal, including administrators. Money collections deny `create`, `update`, and `delete` through Payload access control for all roles and expose read only."
+   - "Ledger append-only. Ledger rows are never updated or deleted; corrections are reversal entries (BR-03)."
+   - Confirmed in `web/src/access/canEditMoney.ts`:
+     ```typescript
+     export const canEditMoney: Access = () => false
+     ```
+   - Confirmed in `web/src/collections/WalletLedger.ts` (lines 14-19):
+     ```typescript
+     access: {
+       create: canEditMoney,
+       delete: canEditMoney,
+       read: walletLedgerReadAccess,
+       update: canEditMoney,
+     }
+     ```
+
+3. **Role Model & Access Matrix (docs/decisions/0008-role-model.md lines 29-55 & PLAN.md §22)**:
+   - Roles: `admin`, `buyer`, `seller`, `moderator`, `financeAdmin`.
+   - Access helper `checkRole` in `web/src/access/utilities.ts`:
+     ```typescript
+     export const checkRole = (allRoles: User['roles'] = [], user?: User | null): boolean => ...
+     ```
+   - Withdrawals read access: Admin and FinanceAdmin see all; sellers see only their own (`seller === user.id`); buyers and guests denied.
+   - Withdrawal events read access: Admin and FinanceAdmin see all; seller owners see events associated with their own withdrawal (`withdrawal.seller === user.id`); others denied.
+
+4. **Code Generation Patterns in Existing Collections (`web/src/collections/Orders/index.ts` lines 45-56)**:
+   ```typescript
+   hooks: {
+     beforeValidate: [
+       ({ value, operation }) => {
+         if (operation === 'create' && !value) {
+           const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+           const randomSuffix = crypto.randomBytes(3).toString('hex').toUpperCase()
+           return `ORD-${dateStr}-${randomSuffix}`
+         }
+         return value
+       },
+     ],
+   }
+   ```
+   For withdrawals, the required pattern is `WTH-YYYYMMDD-XXXXX` (e.g. `WTH-20260915-A1B2C`).
+
+5. **Bank Info Group Field Pattern in Existing Collections (`web/src/collections/SellerProfiles.ts` lines 57-77)**:
+   ```typescript
+   {
+     name: 'payoutInfo',
+     type: 'group',
+     label: 'Thông tin tài khoản nhận thanh toán',
+     fields: [
+       { name: 'bankName', type: 'text', label: 'Tên ngân hàng' },
+       { name: 'accountNumber', type: 'text', label: 'Số tài khoản ngân hàng' },
+       { name: 'accountHolderName', type: 'text', label: 'Tên chủ tài khoản' },
+     ],
+   }
+   ```
+   In PostgreSQL (`web/src/migrations/20260915_062953_phase3_seller_moderation.ts` lines 62-64), this generates columns `payout_info_bank_name`, `payout_info_account_number`, `payout_info_account_holder_name`.
+   For `withdrawals`, group name `bankInfo` generates `bank_info_bank_name`, `bank_info_account_number`, `bank_info_account_holder_name`.
+
+6. **Audit Trail & Immutability Patterns (`web/src/collections/DownloadEvents/index.ts` & `OrderItems/hooks/preventOrderItemMutation.ts`)**:
+   - `DownloadEvents` and `OrderItems` are append-only.
+   - Updates throw an error:
+     ```typescript
+     export const preventOrderItemMutation: CollectionBeforeChangeHook = ({ operation }) => {
+       if (operation === 'update') {
+         throw new Error('Order items are immutable (BR-07). Modifying an existing order item is strictly prohibited.')
+       }
+     }
+     ```
+   - For `withdrawal_events`, direct mutations must be blocked at both access control level (`canEditMoney`) and hook level (`beforeChange` rejecting `update`, `beforeDelete` rejecting `delete`).
+
+7. **Payload 3.x Join Relationships (`web/src/collections/Orders/index.ts` lines 139-148)**:
+   ```typescript
+   {
+     name: 'items',
+     type: 'join',
+     collection: 'order_items',
+     on: 'order',
+     label: 'Các mục trong đơn hàng',
+     admin: {
+       allowCreate: false,
+       defaultColumns: ['product', 'seller', 'salePrice', 'platformFee', 'sellerAmount'],
+     },
+   }
+   ```
+   Can be leveraged on `withdrawals` with `join` to `withdrawal_events` on `withdrawal`.
+
+8. **Test Harness & Access Control Verification Pattern (`web/tests/int/m1-access-control.int.spec.ts` lines 1293-1324)**:
+   Access functions are verified with mock user contexts asserting exact booleans or `Where` AST objects:
+   ```typescript
+   expect(orderItemReadAccess({ req: { user: null } } as any)).toBe(false)
+   expect(orderItemReadAccess({ req: { user: { id: 20, roles: ['admin'] } } } as any)).toBe(true)
+   expect(orderItemReadAccess({ req: { user: { id: 21, roles: ['financeAdmin'] } } } as any)).toBe(true)
+   expect(orderItemReadAccess({ req: { user: { id: 22, roles: ['buyer'] } } } as any)).toEqual({
+     or: [{ seller: { equals: 22 } }, { 'order.buyer': { equals: 22 } }],
+   })
+   ```
 
 ---
 
 ## 2. Logic Chain
 
-1. **Naming & Slug Consistency**:
-   - `ORIGINAL_REQUEST.md` and `m1_explorer_3/DISPATCH.md` prescribe tables `entitlements` and `download_events`.
-   - By convention, Payload collection slugs map directly to PostgreSQL table names:
-     - `slug: 'entitlements'` → table `"entitlements"`
-     - `slug: 'download_events'` → table `"download_events"`
-   - Relationships to peer collections:
-     - `order` relates to `slug: 'orders'`
-     - `orderItem` relates to `slug: 'order_items'`
-     - `product` relates to `slug: 'products'`
-     - `user` relates to `slug: 'users'`
+1. **Denial of Direct REST/GraphQL Mutations**:
+   - *Observation*: Decision 0002 explicitly mandates that all financial balance movements and ledger-adjacent tables must deny `create`, `update`, and `delete` through collection access control.
+   - *Reasoning*: A seller requesting a withdrawal cannot simply `POST` a withdrawal record to `/api/withdrawals` with arbitrary amount or status, nor can an admin modify fields directly without ledger consistency checks.
+   - *Deduction*: `withdrawals` must set `create: canEditMoney`, `update: canEditMoney`, `delete: canEditMoney`. `withdrawal_events` must set `create: canEditMoney`, `update: canEditMoney`, `delete: canEditMoney`. All valid operations occur via dedicated backend service endpoints using `overrideAccess: true`.
 
-2. **Entitlements Access Control Architecture**:
-   - **Read**:
-     - `admin` and `financeAdmin` must inspect all entitlements across the platform per PLAN.md §22 (`checkRole(['admin', 'financeAdmin'], user) === true`).
-     - Regular authenticated buyers must only view their own active entitlements (`{ and: [{ user: { equals: user.id } }, { status: { equals: 'active' } }] }`).
-     - Unauthenticated guests are denied (`if (!user) return false`).
-   - **Create**:
-     - Direct creation via public REST/GraphQL API must be prohibited (`() => false`).
-     - Entitlement grants occur exclusively via transactional purchase services (`services/purchase.ts`) or free checkout services on the server with `overrideAccess: true`.
-   - **Delete**:
-     - Direct deletion via REST must be prohibited (`() => false`). Entitlements are an audit-trailed ledger; revoking ownership is handled by transitioning `status` to `'revoked'`, not deleting records.
-   - **Update**:
-     - Only `admin` can perform updates (revocation, manual expiry, or reason annotation).
-     - Field-level restrictions: core relations (`user`, `product`, `order`, `orderItem`, `grantedAt`, `downloadCount`) are marked `admin: { readOnly: true }` so only administrative fields (`status`, `revokedAt`, `reason`, `expiresAt`, `maxDownloads`) are editable.
+2. **Read Access Scoping & RBAC**:
+   - *Observation*: PLAN.md §22 gives Super Admin and Finance Admin unrestricted visibility over all financial entities, while sellers may only view their own records. Buyers and unauthenticated users have no access to seller withdrawals.
+   - *Reasoning*: For `withdrawals`, when `checkRole(['admin', 'financeAdmin'], user)` is true, return `true`. For authenticated seller, return `{ seller: { equals: user.id } }`. For guests or other users, return `false`.
+   - *Reasoning for `withdrawal_events`*: An event references `withdrawal`. A seller owner needs to see the audit trail of their own withdrawal (e.g. why it was rejected, who reviewed it). By using `{ 'withdrawal.seller': { equals: user.id } }`, Payload CMS executes a relational join query to enforce that sellers only see events belonging to their own withdrawal. Admin and FinanceAdmin return `true`.
 
-3. **Anti-Duplicate Active Entitlement Invariant**:
-   - The requirement dictates: *A buyer can only hold one active entitlement per product*.
-   - Defense-in-depth architecture:
-     1. **Database Layer (Hard Constraint)**: Handled by migration Batch 6 via partial unique index:
-        `CREATE UNIQUE INDEX "entitlements_user_product_active_idx" ON "entitlements" ("user_id", "product_id") WHERE ("status" = 'active');`
-     2. **Application Hook Layer (Early Friendly Validation)**: A `beforeChange` hook checks `req.payload.find` for an existing active entitlement for `(user, product)`. Passing `req` allows this check to participate in the active database transaction.
+3. **Unique Withdrawal Code Generation (`code`)**:
+   - *Observation*: Requirements dictate format `WTH-YYYYMMDD-XXXXX`.
+   - *Reasoning*: Following the pattern established in `Orders/index.ts`, a `beforeValidate` hook checks `operation === 'create' && !value`. If not provided, it generates `WTH-${dateStr}-${crypto.randomBytes(3).toString('hex').slice(0, 5).toUpperCase()}`. This ensures uniqueness, indexing, and human-readable tracking.
 
-4. **DownloadEvents Access Control & Immutability**:
-   - `download_events` is a security and abuse-detection audit log per PLAN.md FR-17 and Decision 0006.
-   - **Read**: Only `admin` and `financeAdmin` (`checkRole(['admin', 'financeAdmin'], user)`). Buyers and guests cannot inspect download event logs.
-   - **Create / Update / Delete**: Strictly denied for all external REST principals (`() => false`).
-   - Writes are performed exclusively by the internal secure download streaming route (`GET /api/v1/downloads/[token]`) using `overrideAccess: true`.
-   - All fields in `DownloadEvents` are marked `admin: { readOnly: true }` to guarantee audit trail immutability.
+4. **Withdrawal Field Validation & Financial Boundaries**:
+   - *Observation*: Requirements specify: amount in VND, min 50,000, max 50,000,000, integer step. Bank info contains `bankName`, `accountNumber`, `accountHolderName`.
+   - *Reasoning*: In Payload CMS, `amount` field must have `min: 50000`, `max: 50000000`, and a validator/hook ensuring whole integers (`Number.isInteger(amount)`). `currency` must be `select` with single option `'VND'` and `defaultValue: 'VND'`. `bankInfo` must be a `group` field with required subfields. Normalization should trim strings and capitalize `accountHolderName`.
 
-5. **Payload Configuration Integration**:
-   - `web/src/payload.config.ts` must import `Entitlements` from `@/collections/Entitlements` and `DownloadEvents` from `@/collections/DownloadEvents`.
-   - Both collections are appended to the `collections` array in `buildConfig`.
-   - Both collections are categorized under `admin: { group: 'Commerce' }` for cohesive admin navigation alongside `Orders` and `OrderItems`.
+5. **State Machine Invariants & Hooks**:
+   - *Observation*: Withdrawal lifecycle is `REQUESTED → UNDER_REVIEW → APPROVED → PROCESSING → PAID`, with terminal/error states `REJECTED`, `CANCELLED`, `FAILED`.
+   - *Reasoning*:
+     - When status transitions to `UNDER_REVIEW`, `APPROVED`, or `REJECTED`, `reviewedAt` and `reviewedBy` must be recorded.
+     - When status transitions to `PAID`, `paidAt` must be recorded.
+     - When status transitions to `REJECTED`, `rejectionReason` must be mandatory.
+     - When status transitions to `FAILED`, `failureReason` must be mandatory.
+     - Once in terminal state `PAID`, `REJECTED`, or `CANCELLED`, no further transitions are allowed.
+     - Core financial fields (`amount`, `seller`, `currency`, `code`) are immutable once created.
+
+6. **Append-Only Audit Trail for `withdrawal_events`**:
+   - *Observation*: Invariant BR-03 and prompt specify an immutable audit log.
+   - *Reasoning*: `withdrawal_events` documents can never be modified or deleted. A `beforeChange` hook throws an exception if `operation === 'update'`. A `beforeDelete` hook throws an exception if deletion is attempted. Fields store `fromStatus`, `toStatus`, `actor`, `actorRole`, `reason/notes`, `timestamp`, and `metadata`.
 
 ---
 
-## 3. Detailed Implementation Proposals
+## 3. Caveats
 
-### 3.1 File 1: `web/src/access/entitlementAccess.ts`
+1. **Balance Reservation Mechanism**:
+   - This specification designs the Payload schema, access controls, indices, hooks, and migration requirements for `withdrawals` and `withdrawal_events`.
+   - The actual balance reservation execution (debiting/reserving available earnings, locking the seller balance during concurrent requests, and crediting back upon `REJECTED` or `CANCELLED`) belongs to Milestone 2 (Withdrawal Service & Endpoints: `web/src/services/withdrawal.ts`). The hooks here provide schema-level defense-in-depth, but do not replace the transactional service.
+
+2. **Nested Relationship Query in PostgreSQL**:
+   - In `withdrawalEventReadAccess`, the condition `'withdrawal.seller': { equals: user.id }` relies on Payload 3.x's PostgreSQL query translator joining the `withdrawals` table. This is the standard Payload pattern (matching `orderItemReadAccess`). As an additional optimization, Milestone 2 services can directly query with `overrideAccess: true` and filter explicitly.
+
+3. **Status Extension Alignment**:
+   - The status enum `enum_withdrawals_status` contains: `'REQUESTED'`, `'UNDER_REVIEW'`, `'APPROVED'`, `'PROCESSING'`, `'PAID'`, `'REJECTED'`, `'CANCELLED'`, `'FAILED'`. All 8 values are strictly defined per PLAN.md §11 and ORIGINAL_REQUEST.md line 105.
+
+---
+
+## 4. Conclusion & Detailed Design
+
+### 4.1 Architecture Overview
+
+```
+web/src/
+├── access/
+│   └── withdrawalAccess.ts                     # RBAC & canEditMoney rules
+├── collections/
+│   ├── Withdrawals/
+│   │   ├── hooks/
+│   │   │   ├── generateWithdrawalCode.ts       # WTH-YYYYMMDD-XXXXX generator
+│   │   │   └── validateWithdrawalInvariants.ts # Immutability & transition rules
+│   │   └── index.ts                            # Withdrawals CollectionConfig
+│   └── WithdrawalEvents/
+│       ├── hooks/
+│       │   └── preventWithdrawalEventMutation.ts # Immutable append-only audit hook
+│       └── index.ts                            # WithdrawalEvents CollectionConfig
+```
+
+---
+
+### 4.2 File 1: `web/src/access/withdrawalAccess.ts`
+
 ```typescript
 import type { Access, Where } from 'payload'
 import { checkRole } from '@/access/utilities'
+import { canEditMoney } from '@/access/canEditMoney'
 
 /**
- * Access rule for reading entitlements (PLAN.md §22, FR-16, Decision 0006):
- * - Admin and FinanceAdmin can view all entitlements.
- * - Authenticated users can view only their own active entitlements.
- * - Unauthenticated users (guests) are denied.
+ * Access control for Withdrawals & Withdrawal Events
+ *
+ * Rules:
+ * - Direct writes (create, update, delete) via REST/GraphQL are denied for ALL principals (Decision 0002).
+ *   Withdrawals and audit events must be created/modified exclusively through dedicated backend
+ *   services using `overrideAccess: true`.
+ * - Super Admin and FinanceAdmin can read all withdrawals and events (PLAN.md §22).
+ * - Sellers can read only their own withdrawals and associated audit events.
+ * - Buyers and unauthenticated users are denied.
  */
-export const entitlementReadAccess: Access = ({ req: { user } }) => {
+
+// Direct collection write denial via REST/GraphQL
+export const withdrawalCreateAccess: Access = canEditMoney
+export const withdrawalUpdateAccess: Access = canEditMoney
+export const withdrawalDeleteAccess: Access = canEditMoney
+
+export const withdrawalEventCreateAccess: Access = canEditMoney
+export const withdrawalEventUpdateAccess: Access = canEditMoney
+export const withdrawalEventDeleteAccess: Access = canEditMoney
+
+/**
+ * Read access for withdrawals:
+ * - Super Admin & FinanceAdmin: full read
+ * - Seller: read own withdrawals (where seller === req.user.id)
+ * - Others: denied
+ */
+export const withdrawalReadAccess: Access = ({ req: { user } }) => {
   if (!user) return false
 
   if (checkRole(['admin', 'financeAdmin'], user)) {
@@ -139,100 +235,172 @@ export const entitlementReadAccess: Access = ({ req: { user } }) => {
   }
 
   const query: Where = {
-    and: [
-      {
-        user: {
-          equals: user.id,
-        },
-      },
-      {
-        status: {
-          equals: 'active',
-        },
-      },
-    ],
+    seller: {
+      equals: user.id,
+    },
   }
 
   return query
 }
 
 /**
- * Access rule for updating entitlements:
- * - Admin only (for revocation, setting expiresAt, or adding administrative reasons).
- * - All other users are denied direct updates.
+ * Read access for withdrawal events:
+ * - Super Admin & FinanceAdmin: full read
+ * - Seller: read events corresponding to own withdrawals
+ * - Others: denied
  */
-export const entitlementUpdateAccess: Access = ({ req: { user } }) => {
+export const withdrawalEventReadAccess: Access = ({ req: { user } }) => {
   if (!user) return false
-  return checkRole(['admin'], user)
-}
 
-/**
- * Direct create and delete operations via REST API are strictly denied.
- * Entitlements are created exclusively via transactional checkout or free-download services
- * on the server using `overrideAccess: true`.
- * Hard deletion is forbidden to preserve the ownership ledger.
- */
-export const entitlementNoDirectWrite: Access = () => false
+  if (checkRole(['admin', 'financeAdmin'], user)) {
+    return true
+  }
+
+  const query: Where = {
+    'withdrawal.seller': {
+      equals: user.id,
+    },
+  }
+
+  return query
+}
 ```
 
 ---
 
-### 3.2 File 2: `web/src/collections/Entitlements/hooks/enforceEntitlementInvariants.ts`
+### 4.3 File 2: `web/src/collections/Withdrawals/hooks/generateWithdrawalCode.ts`
+
 ```typescript
-import type { CollectionBeforeChangeHook } from 'payload'
+import type { FieldHook } from 'payload'
+import crypto from 'crypto'
 
 /**
- * Hook to enforce Entitlement lifecycle defaults and unique active entitlement invariant (R2, FR-16).
+ * Generates unique code in format WTH-YYYYMMDD-XXXXX
+ * e.g. WTH-20260915-A1B2C
  */
-export const enforceEntitlementInvariants: CollectionBeforeChangeHook = async ({
+export const generateWithdrawalCode: FieldHook = ({ value, operation }) => {
+  if (operation === 'create' && !value) {
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+    const randomSuffix = crypto.randomBytes(3).toString('hex').slice(0, 5).toUpperCase()
+    return `WTH-${dateStr}-${randomSuffix}`
+  }
+  return value
+}
+```
+
+---
+
+### 4.4 File 3: `web/src/collections/Withdrawals/hooks/validateWithdrawalInvariants.ts`
+
+```typescript
+import type { CollectionBeforeChangeHook, CollectionBeforeValidateHook } from 'payload'
+
+const VALID_TRANSITIONS: Record<string, string[]> = {
+  REQUESTED: ['UNDER_REVIEW', 'APPROVED', 'REJECTED', 'CANCELLED'],
+  UNDER_REVIEW: ['APPROVED', 'REJECTED', 'CANCELLED'],
+  APPROVED: ['PROCESSING', 'REJECTED'],
+  PROCESSING: ['PAID', 'FAILED'],
+  FAILED: ['PROCESSING', 'REJECTED', 'CANCELLED'],
+  PAID: [],       // Terminal state
+  REJECTED: [],   // Terminal state
+  CANCELLED: [],  // Terminal state
+}
+
+/**
+ * Validates bank info and amount before validation
+ */
+export const validateWithdrawalBeforeValidate: CollectionBeforeValidateHook = ({
   data,
-  req,
   operation,
-  originalDoc,
 }) => {
-  // 1. Ensure grantedAt is populated upon creation
-  if (operation === 'create' && !data.grantedAt) {
-    data.grantedAt = new Date().toISOString()
+  if (!data) return data
+
+  // Normalize bank info
+  if (data.bankInfo) {
+    if (data.bankInfo.bankName) {
+      data.bankInfo.bankName = String(data.bankInfo.bankName).trim()
+    }
+    if (data.bankInfo.accountNumber) {
+      data.bankInfo.accountNumber = String(data.bankInfo.accountNumber).trim().replace(/\s+/g, '')
+    }
+    if (data.bankInfo.accountHolderName) {
+      data.bankInfo.accountHolderName = String(data.bankInfo.accountHolderName).trim().toUpperCase()
+    }
   }
 
-  // 2. Default downloadCount to 0 if undefined
-  if (operation === 'create' && (data.downloadCount === undefined || data.downloadCount === null)) {
-    data.downloadCount = 0
+  // Validate amount integer
+  if (data.amount !== undefined && data.amount !== null) {
+    if (!Number.isInteger(data.amount) || data.amount < 50000 || data.amount > 50000000) {
+      throw new Error('Withdrawal amount must be an integer between 50,000 and 50,000,000 VND.')
+    }
   }
 
-  // 3. Auto-populate revokedAt when status transitions to 'revoked'
-  if (data.status === 'revoked' && !data.revokedAt) {
-    data.revokedAt = new Date().toISOString()
-  }
+  return data
+}
 
-  // 4. Invariant check: Only one active entitlement per (user, product)
-  if (data.status === 'active') {
-    const userId = typeof data.user === 'object' && data.user !== null ? data.user.id : data.user
-    const productId = typeof data.product === 'object' && data.product !== null ? data.product.id : data.product
+/**
+ * Enforces immutability of financial fields and valid state transitions
+ */
+export const validateWithdrawalInvariants: CollectionBeforeChangeHook = async ({
+  data,
+  originalDoc,
+  operation,
+  req,
+}) => {
+  if (operation === 'update' && originalDoc) {
+    // 1. Prevent modification of immutable fields
+    if (data.seller !== undefined && data.seller !== originalDoc.seller) {
+      const originalSellerId = typeof originalDoc.seller === 'object' ? originalDoc.seller?.id : originalDoc.seller
+      const newSellerId = typeof data.seller === 'object' ? data.seller?.id : data.seller
+      if (originalSellerId !== newSellerId) {
+        throw new Error('Cannot change seller on an existing withdrawal record.')
+      }
+    }
 
-    if (userId && productId) {
-      const existing = await req.payload.find({
-        collection: 'entitlements',
-        where: {
-          and: [
-            { user: { equals: userId } },
-            { product: { equals: productId } },
-            { status: { equals: 'active' } },
-          ],
-        },
-        limit: 1,
-        overrideAccess: true,
-        req, // participate in active transaction if applicable
-      })
+    if (data.amount !== undefined && data.amount !== originalDoc.amount) {
+      throw new Error('Cannot change amount on an existing withdrawal record.')
+    }
 
-      if (existing.totalDocs > 0) {
-        const existingDoc = existing.docs[0]
-        const currentDocId = operation === 'update' ? (originalDoc?.id ?? data.id) : null
-        if (currentDocId !== existingDoc.id) {
-          throw new Error(
-            `Invariant Violation: User ${userId} already has an active entitlement for product ${productId}. Duplicate active entitlements are prohibited.`,
-          )
-        }
+    if (data.currency !== undefined && data.currency !== originalDoc.currency) {
+      throw new Error('Cannot change currency on an existing withdrawal record.')
+    }
+
+    if (data.code !== undefined && data.code !== originalDoc.code) {
+      throw new Error('Cannot change code on an existing withdrawal record.')
+    }
+
+    // 2. Validate state machine transition
+    const currentStatus = originalDoc.status
+    const targetStatus = data.status
+
+    if (targetStatus && targetStatus !== currentStatus) {
+      const allowedNextStates = VALID_TRANSITIONS[currentStatus] || []
+      if (!allowedNextStates.includes(targetStatus)) {
+        throw new Error(
+          `Invalid withdrawal state transition from ${currentStatus} to ${targetStatus}.`,
+        )
+      }
+
+      const nowIso = new Date().toISOString()
+
+      // Set review metadata
+      if (['UNDER_REVIEW', 'APPROVED', 'REJECTED'].includes(targetStatus)) {
+        if (!data.reviewedAt) data.reviewedAt = nowIso
+        if (req.user?.id && !data.reviewedBy) data.reviewedBy = req.user.id
+      }
+
+      // Set paid metadata
+      if (targetStatus === 'PAID') {
+        if (!data.paidAt) data.paidAt = nowIso
+      }
+
+      // Ensure reasons are provided on failure/rejection
+      if (targetStatus === 'REJECTED' && !data.rejectionReason && !originalDoc.rejectionReason) {
+        throw new Error('Rejection reason is required when rejecting a withdrawal.')
+      }
+
+      if (targetStatus === 'FAILED' && !data.failureReason && !originalDoc.failureReason) {
+        throw new Error('Failure reason is required when marking a withdrawal as failed.')
       }
     }
   }
@@ -243,308 +411,393 @@ export const enforceEntitlementInvariants: CollectionBeforeChangeHook = async ({
 
 ---
 
-### 3.3 File 3: `web/src/collections/Entitlements/index.ts`
+### 4.5 File 4: `web/src/collections/Withdrawals/index.ts`
+
 ```typescript
 import type { CollectionConfig } from 'payload'
 import {
-  entitlementNoDirectWrite,
-  entitlementReadAccess,
-  entitlementUpdateAccess,
-} from '@/access/entitlementAccess'
-import { enforceEntitlementInvariants } from './hooks/enforceEntitlementInvariants'
+  withdrawalCreateAccess,
+  withdrawalDeleteAccess,
+  withdrawalReadAccess,
+  withdrawalUpdateAccess,
+} from '@/access/withdrawalAccess'
+import { generateWithdrawalCode } from './hooks/generateWithdrawalCode'
+import {
+  validateWithdrawalBeforeValidate,
+  validateWithdrawalInvariants,
+} from './hooks/validateWithdrawalInvariants'
 
-export const Entitlements: CollectionConfig = {
-  slug: 'entitlements',
+export const Withdrawals: CollectionConfig = {
+  slug: 'withdrawals',
   access: {
-    create: entitlementNoDirectWrite,
-    delete: entitlementNoDirectWrite,
-    read: entitlementReadAccess,
-    update: entitlementUpdateAccess,
+    create: withdrawalCreateAccess,
+    delete: withdrawalDeleteAccess,
+    read: withdrawalReadAccess,
+    update: withdrawalUpdateAccess,
   },
   admin: {
-    defaultColumns: ['id', 'user', 'product', 'status', 'downloadCount', 'grantedAt'],
-    group: 'Commerce',
-    useAsTitle: 'id',
-    description: 'Sổ cái quyền sở hữu và tải tài nguyên số (Entitlements Ledger - PLAN.md FR-16, Decision 0006)',
+    defaultColumns: [
+      'code',
+      'seller',
+      'amount',
+      'currency',
+      'status',
+      'requestedAt',
+      'reviewedAt',
+      'paidAt',
+    ],
+    group: 'Finance',
+    useAsTitle: 'code',
+    description: 'Yêu cầu rút tiền của Người bán (Seller Withdrawals - FR-32, FLOW-U13)',
+  },
+  hooks: {
+    beforeValidate: [validateWithdrawalBeforeValidate],
+    beforeChange: [validateWithdrawalInvariants],
   },
   fields: [
     {
-      name: 'user',
+      name: 'code',
+      type: 'text',
+      required: true,
+      unique: true,
+      index: true,
+      label: 'Mã yêu cầu rút tiền',
+      admin: {
+        readOnly: true,
+        description: 'Mã định danh duy nhất (VD: WTH-20260915-XXXXX)',
+      },
+      hooks: {
+        beforeValidate: [generateWithdrawalCode],
+      },
+    },
+    {
+      name: 'seller',
       type: 'relationship',
       relationTo: 'users',
       required: true,
       index: true,
+      label: 'Người bán (Seller)',
       admin: {
-        position: 'sidebar',
         readOnly: true,
-        description: 'Người dùng sở hữu quyền tải',
+        position: 'sidebar',
       },
     },
     {
-      name: 'product',
-      type: 'relationship',
-      relationTo: 'products',
+      name: 'amount',
+      type: 'number',
       required: true,
-      index: true,
+      min: 50000,
+      max: 50000000,
+      label: 'Số tiền rút (VND)',
       admin: {
-        position: 'sidebar',
         readOnly: true,
-        description: 'Sản phẩm được cấp quyền',
+        step: 1,
+        description: 'Số tiền rút (50.000 VND - 50.000.000 VND)',
       },
     },
     {
-      name: 'order',
-      type: 'relationship',
-      relationTo: 'orders',
-      required: false,
-      index: true,
+      name: 'currency',
+      type: 'select',
+      required: true,
+      defaultValue: 'VND',
+      options: [{ label: 'VND (Việt Nam Đồng)', value: 'VND' }],
       admin: {
-        position: 'sidebar',
         readOnly: true,
-        description: 'Đơn hàng mua sản phẩm (để trống nếu là tải miễn phí)',
-      },
-    },
-    {
-      name: 'orderItem',
-      type: 'relationship',
-      relationTo: 'order_items',
-      required: false,
-      index: true,
-      admin: {
-        position: 'sidebar',
-        readOnly: true,
-        description: 'Mục đơn hàng liên kết (để trống nếu là tải miễn phí)',
       },
     },
     {
       name: 'status',
       type: 'select',
       required: true,
-      defaultValue: 'active',
+      defaultValue: 'REQUESTED',
       index: true,
+      label: 'Trạng thái xử lý',
       options: [
-        { label: 'Có hiệu lực (active)', value: 'active' },
-        { label: 'Bị thu hồi (revoked)', value: 'revoked' },
-        { label: 'Hết hạn (expired)', value: 'expired' },
+        { label: 'Yêu cầu mới (REQUESTED)', value: 'REQUESTED' },
+        { label: 'Đang xem xét (UNDER_REVIEW)', value: 'UNDER_REVIEW' },
+        { label: 'Đã duyệt (APPROVED)', value: 'APPROVED' },
+        { label: 'Đang giải ngân (PROCESSING)', value: 'PROCESSING' },
+        { label: 'Đã chi trả (PAID)', value: 'PAID' },
+        { label: 'Từ chối (REJECTED)', value: 'REJECTED' },
+        { label: 'Đã hủy (CANCELLED)', value: 'CANCELLED' },
+        { label: 'Thất bại (FAILED)', value: 'FAILED' },
       ],
       admin: {
         position: 'sidebar',
-        description: 'Trạng thái quyền tải',
       },
     },
     {
-      name: 'grantedAt',
+      name: 'bankInfo',
+      type: 'group',
+      label: 'Thông tin tài khoản nhận tiền',
+      fields: [
+        {
+          name: 'bankName',
+          type: 'text',
+          required: true,
+          label: 'Tên ngân hàng (ví dụ: Vietcombank, MBBank, Techcombank)',
+        },
+        {
+          name: 'accountNumber',
+          type: 'text',
+          required: true,
+          label: 'Số tài khoản ngân hàng',
+        },
+        {
+          name: 'accountHolderName',
+          type: 'text',
+          required: true,
+          label: 'Tên chủ tài khoản (viết hoa không dấu)',
+        },
+      ],
+    },
+    {
+      name: 'requestedAt',
       type: 'date',
       required: true,
       defaultValue: () => new Date().toISOString(),
+      index: true,
+      label: 'Thời điểm yêu cầu',
       admin: {
-        position: 'sidebar',
         readOnly: true,
-        description: 'Thời điểm cấp quyền',
+        position: 'sidebar',
       },
     },
     {
-      name: 'downloadCount',
-      type: 'number',
+      name: 'reviewedAt',
+      type: 'date',
+      label: 'Thời điểm xét duyệt',
+      admin: {
+        readOnly: true,
+        position: 'sidebar',
+      },
+    },
+    {
+      name: 'reviewedBy',
+      type: 'relationship',
+      relationTo: 'users',
+      label: 'Người xét duyệt (Finance/Admin)',
+      admin: {
+        readOnly: true,
+        position: 'sidebar',
+      },
+    },
+    {
+      name: 'paidAt',
+      type: 'date',
+      label: 'Thời điểm giải ngân thành công',
+      admin: {
+        readOnly: true,
+        position: 'sidebar',
+      },
+    },
+    {
+      name: 'rejectionReason',
+      type: 'text',
+      label: 'Lý do từ chối',
+      admin: {
+        position: 'sidebar',
+      },
+    },
+    {
+      name: 'failureReason',
+      type: 'text',
+      label: 'Lý do giải ngân thất bại',
+      admin: {
+        position: 'sidebar',
+      },
+    },
+    {
+      name: 'notes',
+      type: 'textarea',
+      label: 'Ghi chú xử lý nội bộ',
+    },
+    {
+      name: 'events',
+      type: 'join',
+      collection: 'withdrawal_events',
+      on: 'withdrawal',
+      label: 'Nhật ký sự kiện (Audit Log)',
+      admin: {
+        allowCreate: false,
+        defaultColumns: ['fromStatus', 'toStatus', 'actor', 'actorRole', 'timestamp', 'reason'],
+      },
+    },
+  ],
+}
+```
+
+---
+
+### 4.6 File 5: `web/src/collections/WithdrawalEvents/hooks/preventWithdrawalEventMutation.ts`
+
+```typescript
+import type { CollectionBeforeChangeHook, CollectionBeforeDeleteHook } from 'payload'
+
+/**
+ * Enforces BR-03: Audit events are append-only and strictly immutable.
+ */
+export const preventWithdrawalEventMutation: CollectionBeforeChangeHook = async ({
+  data,
+  operation,
+  req,
+}) => {
+  if (operation === 'update') {
+    throw new Error(
+      'Withdrawal audit events are immutable. Updates to existing audit logs are strictly prohibited.',
+    )
+  }
+
+  // Ensure timestamp is present
+  if (!data.timestamp) {
+    data.timestamp = new Date().toISOString()
+  }
+
+  // Populate actor and actorRole from session if not explicitly provided
+  if (req.user) {
+    if (!data.actor) {
+      data.actor = req.user.id
+    }
+    if (!data.actorRole) {
+      data.actorRole = req.user.roles?.[0] || 'user'
+    }
+  }
+
+  return data
+}
+
+export const preventWithdrawalEventDeletion: CollectionBeforeDeleteHook = async () => {
+  throw new Error(
+    'Withdrawal audit events are immutable records and cannot be deleted.',
+  )
+}
+```
+
+---
+
+### 4.7 File 6: `web/src/collections/WithdrawalEvents/index.ts`
+
+```typescript
+import type { CollectionConfig } from 'payload'
+import {
+  withdrawalEventCreateAccess,
+  withdrawalEventDeleteAccess,
+  withdrawalEventReadAccess,
+  withdrawalEventUpdateAccess,
+} from '@/access/withdrawalAccess'
+import {
+  preventWithdrawalEventDeletion,
+  preventWithdrawalEventMutation,
+} from './hooks/preventWithdrawalEventMutation'
+
+export const WithdrawalEvents: CollectionConfig = {
+  slug: 'withdrawal_events',
+  access: {
+    create: withdrawalEventCreateAccess,
+    delete: withdrawalEventDeleteAccess,
+    read: withdrawalEventReadAccess,
+    update: withdrawalEventUpdateAccess,
+  },
+  admin: {
+    defaultColumns: ['id', 'withdrawal', 'fromStatus', 'toStatus', 'actor', 'actorRole', 'timestamp'],
+    group: 'Finance',
+    useAsTitle: 'id',
+    description: 'Nhật ký kiểm toán sự kiện rút tiền (Append-Only Audit Trail - PLAN.md §11.1)',
+  },
+  hooks: {
+    beforeChange: [preventWithdrawalEventMutation],
+    beforeDelete: [preventWithdrawalEventDeletion],
+  },
+  fields: [
+    {
+      name: 'withdrawal',
+      type: 'relationship',
+      relationTo: 'withdrawals',
       required: true,
-      defaultValue: 0,
-      min: 0,
+      index: true,
+      label: 'Yêu cầu rút tiền liên kết',
       admin: {
-        position: 'sidebar',
         readOnly: true,
-        description: 'Số lần đã tải file thành công',
+        position: 'sidebar',
       },
     },
     {
-      name: 'maxDownloads',
-      type: 'number',
+      name: 'fromStatus',
+      type: 'text',
       required: false,
-      min: 1,
+      label: 'Trạng thái trước',
       admin: {
-        description: 'Giới hạn số lần tải tối đa (để trống nếu không giới hạn)',
+        readOnly: true,
       },
     },
     {
-      name: 'expiresAt',
-      type: 'date',
-      required: false,
+      name: 'toStatus',
+      type: 'text',
+      required: true,
+      label: 'Trạng thái sau',
       admin: {
-        description: 'Thời điểm hết hạn tải (để trống nếu vĩnh viễn)',
+        readOnly: true,
       },
     },
     {
-      name: 'revokedAt',
-      type: 'date',
+      name: 'actor',
+      type: 'relationship',
+      relationTo: 'users',
       required: false,
+      index: true,
+      label: 'Người thực hiện thao tác',
       admin: {
-        description: 'Thời điểm thu hồi quyền',
+        readOnly: true,
+        position: 'sidebar',
+      },
+    },
+    {
+      name: 'actorRole',
+      type: 'text',
+      required: false,
+      label: 'Vai trò người thực hiện (admin / financeAdmin / seller / system)',
+      admin: {
+        readOnly: true,
+        position: 'sidebar',
       },
     },
     {
       name: 'reason',
       type: 'text',
       required: false,
+      label: 'Lý do / Diễn giải',
       admin: {
-        description: 'Lý do thu hồi hoặc ghi chú cấp quyền',
+        readOnly: true,
       },
     },
-  ],
-  hooks: {
-    beforeChange: [enforceEntitlementInvariants],
-  },
-}
-```
-
----
-
-### 3.4 File 4: `web/src/access/downloadEventAccess.ts`
-```typescript
-import type { Access } from 'payload'
-import { checkRole } from '@/access/utilities'
-
-/**
- * Access rule for reading download audit events (PLAN.md §22, Decision 0006):
- * - Admin and FinanceAdmin can inspect download audit logs.
- * - Regular buyers, sellers, and unauthenticated guests are denied.
- */
-export const downloadEventReadAccess: Access = ({ req: { user } }) => {
-  if (!user) return false
-  return checkRole(['admin', 'financeAdmin'], user)
-}
-
-/**
- * Download events are append-only server-side audit logs.
- * Direct creation, update, or deletion via public REST is strictly denied for all principals.
- * Writes occur exclusively via the download streaming handler with `overrideAccess: true`.
- */
-export const downloadEventNoDirectWrite: Access = () => false
-```
-
----
-
-### 3.5 File 5: `web/src/collections/DownloadEvents/index.ts`
-```typescript
-import type { CollectionConfig } from 'payload'
-import {
-  downloadEventNoDirectWrite,
-  downloadEventReadAccess,
-} from '@/access/downloadEventAccess'
-
-export const DownloadEvents: CollectionConfig = {
-  slug: 'download_events',
-  access: {
-    create: downloadEventNoDirectWrite,
-    delete: downloadEventNoDirectWrite,
-    read: downloadEventReadAccess,
-    update: downloadEventNoDirectWrite,
-  },
-  admin: {
-    defaultColumns: ['id', 'product', 'user', 'status', 'downloadedAt', 'ipAddress'],
-    group: 'Commerce',
-    useAsTitle: 'id',
-    description: 'Nhật ký kiểm toán lượt tải tệp riêng tư (Append-Only Audit Log - PLAN.md FR-17, Decision 0006)',
-  },
-  fields: [
     {
-      name: 'user',
-      type: 'relationship',
-      relationTo: 'users',
+      name: 'notes',
+      type: 'textarea',
       required: false,
-      index: true,
+      label: 'Ghi chú bổ sung',
       admin: {
-        position: 'sidebar',
         readOnly: true,
-        description: 'Người dùng thực hiện yêu cầu tải (để trống nếu là khách hoặc unauthenticated)',
       },
     },
     {
-      name: 'product',
-      type: 'relationship',
-      relationTo: 'products',
-      required: true,
-      index: true,
-      admin: {
-        position: 'sidebar',
-        readOnly: true,
-        description: 'Sản phẩm được yêu cầu tải',
-      },
-    },
-    {
-      name: 'entitlement',
-      type: 'relationship',
-      relationTo: 'entitlements',
-      required: false,
-      index: true,
-      admin: {
-        position: 'sidebar',
-        readOnly: true,
-        description: 'Quyền sở hữu liên kết (để trống nếu bị từ chối trước khi xác thực quyền)',
-      },
-    },
-    {
-      name: 'ipAddress',
-      type: 'text',
-      required: false,
-      admin: {
-        readOnly: true,
-        description: 'Địa chỉ IP của client',
-      },
-    },
-    {
-      name: 'userAgent',
-      type: 'text',
-      required: false,
-      admin: {
-        readOnly: true,
-        description: 'User-Agent header của client',
-      },
-    },
-    {
-      name: 'downloadedAt',
+      name: 'timestamp',
       type: 'date',
       required: true,
       defaultValue: () => new Date().toISOString(),
       index: true,
+      label: 'Thời điểm ghi nhận sự kiện',
       admin: {
+        readOnly: true,
         position: 'sidebar',
-        readOnly: true,
-        description: 'Thời điểm ghi nhận lượt tải',
       },
     },
     {
-      name: 'status',
-      type: 'select',
-      required: true,
-      index: true,
-      options: [
-        { label: 'Thành công (SUCCESS)', value: 'SUCCESS' },
-        { label: 'Từ chối (DENIED)', value: 'DENIED' },
-        { label: 'Hết hạn (EXPIRED)', value: 'EXPIRED' },
-        { label: 'Lỗi kỹ thuật (FAILED)', value: 'FAILED' },
-      ],
-      admin: {
-        position: 'sidebar',
-        readOnly: true,
-        description: 'Kết quả của yêu cầu tải',
-      },
-    },
-    {
-      name: 'downloadTokenHash',
-      type: 'text',
+      name: 'metadata',
+      type: 'json',
       required: false,
-      index: true,
+      label: 'Dữ liệu kỹ thuật đi kèm',
       admin: {
         readOnly: true,
-        description: 'Mã băm SHA-256 của token một lần (phục vụ đối soát và chống replay)',
-      },
-    },
-    {
-      name: 'errorReason',
-      type: 'text',
-      required: false,
-      admin: {
-        readOnly: true,
-        description: 'Nguyên nhân từ chối hoặc chi tiết lỗi kỹ thuật',
       },
     },
   ],
@@ -553,229 +806,315 @@ export const DownloadEvents: CollectionConfig = {
 
 ---
 
-### 3.6 File 6: `web/src/payload.config.ts` Diff Patch
-```diff
---- a/web/src/payload.config.ts
-+++ b/web/src/payload.config.ts
-@@ -23,6 +23,8 @@ import { PaymentWebhookEvents } from '@/collections/PaymentWebhookEvents'
- import { ProductFiles } from '@/collections/ProductFiles'
- import { ProductPreviews } from '@/collections/ProductPreviews'
- import { Products } from '@/collections/Products'
-+import { Entitlements } from '@/collections/Entitlements'
-+import { DownloadEvents } from '@/collections/DownloadEvents'
- import { SellerProfiles } from '@/collections/SellerProfiles'
- import { SoftwareTypes } from '@/collections/SoftwareTypes'
- import { Tags } from '@/collections/Tags'
-@@ -66,6 +68,8 @@ export default buildConfig({
-     PaymentIntents,
-     PaymentTransactions,
-     PaymentWebhookEvents,
-+    Entitlements,
-+    DownloadEvents,
-   ],
-   db: postgresAdapter({
-```
+### 4.8 PostgreSQL Migration Batch 7 Specification
 
----
-
-### 3.7 PostgreSQL Migration Batch 6 Schema Specifications (for `m1_explorer_3`)
-
-The following SQL DDL defines the exact database schema to be emitted in PostgreSQL migration Batch 6:
+For `web/src/migrations/20260915_100000_phase6_seller_revenue.ts`:
 
 ```sql
--- 1. PostgreSQL Enum Types
-CREATE TYPE "public"."enum_entitlements_status" AS ENUM('active', 'revoked', 'expired');
-CREATE TYPE "public"."enum_download_events_status" AS ENUM('SUCCESS', 'DENIED', 'EXPIRED', 'FAILED');
+-- 1. ENUM types
+CREATE TYPE "public"."enum_withdrawals_currency" AS ENUM('VND');
+CREATE TYPE "public"."enum_withdrawals_status" AS ENUM(
+  'REQUESTED',
+  'UNDER_REVIEW',
+  'APPROVED',
+  'PROCESSING',
+  'PAID',
+  'REJECTED',
+  'CANCELLED',
+  'FAILED'
+);
 
--- 2. Entitlements Table
-CREATE TABLE "entitlements" (
+-- 2. Tables
+CREATE TABLE "withdrawals" (
   "id" serial PRIMARY KEY NOT NULL,
-  "user_id" integer NOT NULL,
-  "product_id" integer NOT NULL,
-  "order_id" integer,
-  "order_item_id" integer,
-  "status" "enum_entitlements_status" DEFAULT 'active' NOT NULL,
-  "granted_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
-  "download_count" numeric DEFAULT 0 NOT NULL,
-  "max_downloads" numeric,
-  "expires_at" timestamp(3) with time zone,
-  "revoked_at" timestamp(3) with time zone,
+  "code" varchar NOT NULL,
+  "seller_id" integer NOT NULL,
+  "amount" numeric NOT NULL,
+  "currency" "enum_withdrawals_currency" DEFAULT 'VND' NOT NULL,
+  "status" "enum_withdrawals_status" DEFAULT 'REQUESTED' NOT NULL,
+  "bank_info_bank_name" varchar NOT NULL,
+  "bank_info_account_number" varchar NOT NULL,
+  "bank_info_account_holder_name" varchar NOT NULL,
+  "requested_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+  "reviewed_at" timestamp(3) with time zone,
+  "reviewed_by_id" integer,
+  "paid_at" timestamp(3) with time zone,
+  "rejection_reason" varchar,
+  "failure_reason" varchar,
+  "notes" varchar,
+  "updated_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+  "created_at" timestamp(3) with time zone DEFAULT now() NOT NULL
+);
+
+CREATE TABLE "withdrawal_events" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "withdrawal_id" integer NOT NULL,
+  "from_status" varchar,
+  "to_status" varchar NOT NULL,
+  "actor_id" integer,
+  "actor_role" varchar,
   "reason" varchar,
+  "notes" varchar,
+  "timestamp" timestamp(3) with time zone DEFAULT now() NOT NULL,
+  "metadata" jsonb,
   "updated_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
   "created_at" timestamp(3) with time zone DEFAULT now() NOT NULL
 );
 
--- Foreign Keys for entitlements
-ALTER TABLE "entitlements" ADD CONSTRAINT "entitlements_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
-ALTER TABLE "entitlements" ADD CONSTRAINT "entitlements_product_id_products_id_fk" FOREIGN KEY ("product_id") REFERENCES "public"."products"("id") ON DELETE set null ON UPDATE no action;
-ALTER TABLE "entitlements" ADD CONSTRAINT "entitlements_order_id_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE set null ON UPDATE no action;
-ALTER TABLE "entitlements" ADD CONSTRAINT "entitlements_order_item_id_order_items_id_fk" FOREIGN KEY ("order_item_id") REFERENCES "public"."order_items"("id") ON DELETE set null ON UPDATE no action;
+-- 3. Payload Locked Documents Relations
+ALTER TABLE "payload_locked_documents_rels" ADD COLUMN IF NOT EXISTS "withdrawals_id" integer;
+ALTER TABLE "payload_locked_documents_rels" ADD COLUMN IF NOT EXISTS "withdrawal_events_id" integer;
 
--- Indexes for entitlements
-CREATE INDEX "entitlements_user_idx" ON "entitlements" USING btree ("user_id");
-CREATE INDEX "entitlements_product_idx" ON "entitlements" USING btree ("product_id");
-CREATE INDEX "entitlements_order_idx" ON "entitlements" USING btree ("order_id");
-CREATE INDEX "entitlements_order_item_idx" ON "entitlements" USING btree ("order_item_id");
-CREATE INDEX "entitlements_status_idx" ON "entitlements" USING btree ("status");
-CREATE INDEX "entitlements_updated_at_idx" ON "entitlements" USING btree ("updated_at");
-CREATE INDEX "entitlements_created_at_idx" ON "entitlements" USING btree ("created_at");
+-- 4. Foreign Key Constraints
+ALTER TABLE "withdrawals" ADD CONSTRAINT "withdrawals_seller_id_users_id_fk" FOREIGN KEY ("seller_id") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;
+ALTER TABLE "withdrawals" ADD CONSTRAINT "withdrawals_reviewed_by_id_users_id_fk" FOREIGN KEY ("reviewed_by_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
+ALTER TABLE "withdrawal_events" ADD CONSTRAINT "withdrawal_events_withdrawal_id_withdrawals_id_fk" FOREIGN KEY ("withdrawal_id") REFERENCES "public"."withdrawals"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "withdrawal_events" ADD CONSTRAINT "withdrawal_events_actor_id_users_id_fk" FOREIGN KEY ("actor_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
+ALTER TABLE "payload_locked_documents_rels" ADD CONSTRAINT "payload_locked_documents_rels_withdrawals_fk" FOREIGN KEY ("withdrawals_id") REFERENCES "public"."withdrawals"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "payload_locked_documents_rels" ADD CONSTRAINT "payload_locked_documents_rels_withdrawal_events_fk" FOREIGN KEY ("withdrawal_events_id") REFERENCES "public"."withdrawal_events"("id") ON DELETE cascade ON UPDATE no action;
 
--- HARD INVARIANT: Only 1 active entitlement per (user_id, product_id)
-CREATE UNIQUE INDEX "entitlements_user_product_active_idx" ON "entitlements" ("user_id", "product_id") WHERE ("status" = 'active');
+-- 5. Indices & Unique Constraints
+CREATE UNIQUE INDEX IF NOT EXISTS "withdrawals_code_idx" ON "withdrawals" ("code");
+CREATE INDEX IF NOT EXISTS "withdrawals_seller_idx" ON "withdrawals" ("seller_id");
+CREATE INDEX IF NOT EXISTS "withdrawals_status_idx" ON "withdrawals" ("status");
+CREATE INDEX IF NOT EXISTS "withdrawals_requested_at_idx" ON "withdrawals" ("requested_at");
 
--- 3. Download Events Table
-CREATE TABLE "download_events" (
-  "id" serial PRIMARY KEY NOT NULL,
-  "user_id" integer,
-  "product_id" integer NOT NULL,
-  "entitlement_id" integer,
-  "ip_address" varchar,
-  "user_agent" varchar,
-  "downloaded_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
-  "status" "enum_download_events_status" NOT NULL,
-  "download_token_hash" varchar,
-  "error_reason" varchar,
-  "updated_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
-  "created_at" timestamp(3) with time zone DEFAULT now() NOT NULL
-);
+CREATE INDEX IF NOT EXISTS "withdrawal_events_withdrawal_idx" ON "withdrawal_events" ("withdrawal_id");
+CREATE INDEX IF NOT EXISTS "withdrawal_events_actor_idx" ON "withdrawal_events" ("actor_id");
+CREATE INDEX IF NOT EXISTS "withdrawal_events_timestamp_idx" ON "withdrawal_events" ("timestamp");
 
--- Foreign Keys for download_events
-ALTER TABLE "download_events" ADD CONSTRAINT "download_events_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
-ALTER TABLE "download_events" ADD CONSTRAINT "download_events_product_id_products_id_fk" FOREIGN KEY ("product_id") REFERENCES "public"."products"("id") ON DELETE set null ON UPDATE no action;
-ALTER TABLE "download_events" ADD CONSTRAINT "download_events_entitlement_id_entitlements_id_fk" FOREIGN KEY ("entitlement_id") REFERENCES "public"."entitlements"("id") ON DELETE set null ON UPDATE no action;
+-- 6. Check Constraints
+ALTER TABLE "withdrawals" ADD CONSTRAINT "withdrawals_amount_check" CHECK (amount >= 50000 AND amount <= 50000000);
+```
 
--- Indexes for download_events
-CREATE INDEX "download_events_user_idx" ON "download_events" USING btree ("user_id");
-CREATE INDEX "download_events_product_idx" ON "download_events" USING btree ("product_id");
-CREATE INDEX "download_events_entitlement_idx" ON "download_events" USING btree ("entitlement_id");
-CREATE INDEX "download_events_downloaded_at_idx" ON "download_events" USING btree ("downloaded_at");
-CREATE INDEX "download_events_status_idx" ON "download_events" USING btree ("status");
-CREATE INDEX "download_events_download_token_hash_idx" ON "download_events" USING btree ("download_token_hash");
-CREATE INDEX "download_events_updated_at_idx" ON "download_events" USING btree ("updated_at");
-CREATE INDEX "download_events_created_at_idx" ON "download_events" USING btree ("created_at");
-
--- 4. Locked Documents Rel Columns
-ALTER TABLE "payload_locked_documents_rels" ADD COLUMN "entitlements_id" integer;
-ALTER TABLE "payload_locked_documents_rels" ADD COLUMN "download_events_id" integer;
+Down migration statements:
+```sql
+DROP TABLE IF EXISTS "withdrawal_events", "withdrawals" CASCADE;
+DROP TYPE IF EXISTS "public"."enum_withdrawals_status";
+DROP TYPE IF EXISTS "public"."enum_withdrawals_currency";
+ALTER TABLE "payload_locked_documents_rels" DROP COLUMN IF EXISTS "withdrawal_events_id";
+ALTER TABLE "payload_locked_documents_rels" DROP COLUMN IF EXISTS "withdrawals_id";
 ```
 
 ---
 
-## 4. Caveats
+## 5. Verification Method
 
-1. **Active Entitlements vs Inactive History in UI**:
-   - The read access query for regular users enforces `{ and: [{ user: { equals: user.id } }, { status: { equals: 'active' } }] }`. If the user library UI ever needs to display expired or revoked entitlements (e.g., with a badge "Revoked - Contact Support"), this query can be relaxed to `{ user: { equals: user.id } }` while keeping the active entitlement check in the download token issuance endpoint. For Milestone 1, the design adheres strictly to the requirement: *user can read own active entitlements*.
-2. **PostgreSQL Partial Unique Index vs Payload CMS Config**:
-   - Payload CMS field definitions support standard `unique: true` across all rows, but do not provide a native config DSL for conditional `WHERE ("status" = 'active')` partial unique indexes. Therefore, this invariant is enforced jointly: by the Payload `beforeChange` hook at the application layer, and by migration Batch 6's raw DDL index at the PostgreSQL storage engine layer.
-3. **Relation to `orders` and `order_items`**:
-   - `order` and `orderItem` relations point to `slug: 'orders'` and `slug: 'order_items'`. When Milestone 1 lands, both `m1_explorer_1` (Orders & OrderItems) and `m1_explorer_2` (Entitlements & DownloadEvents) must register in `web/src/payload.config.ts` together so Payload validates all foreign relationships during startup and type generation.
+### 5.1 Proposed Integration Test: `web/tests/int/withdrawal-schema-invariants.int.spec.ts`
 
----
+```typescript
+import { getPayload, type Payload } from 'payload'
+import config from '@/payload.config'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import type { User } from '@/payload-types'
+import {
+  withdrawalCreateAccess,
+  withdrawalDeleteAccess,
+  withdrawalEventCreateAccess,
+  withdrawalEventDeleteAccess,
+  withdrawalEventReadAccess,
+  withdrawalEventUpdateAccess,
+  withdrawalReadAccess,
+  withdrawalUpdateAccess,
+} from '@/access/withdrawalAccess'
 
-## 5. Conclusion
+describe('Phase 6: Withdrawals & Withdrawal Events Schema & Invariants', () => {
+  let payload: Payload
+  let adminUser: User
+  let financeAdminUser: User
+  let sellerUser1: User
+  let sellerUser2: User
+  let buyerUser: User
 
-The implementation design for `Entitlements` and `DownloadEvents` is fully specified and aligned with:
-- The Phase 5 digital architecture (PLAN.md FR-16, FR-17, FR-18, §22, Decision 0006).
-- The anti-duplicate active ownership invariant (`CREATE UNIQUE INDEX ... WHERE status = 'active'`).
-- The security boundary denying all direct REST collection API writes for untrusted principals.
-- Peer milestones: `m1_explorer_1` (Orders & OrderItems collections) and `m1_explorer_3` (PostgreSQL Batch 6 migration).
+  const cleanup = { users: [] as (number | string)[] }
 
----
+  beforeAll(async () => {
+    payload = await getPayload({ config })
+    const ts = Date.now()
 
-## 6. Verification Method
+    adminUser = (await payload.create({
+      collection: 'users',
+      data: { email: `admin-wth-${ts}@kientaohub.local`, password: 'test-pwd-123', name: 'Admin', roles: ['admin'] },
+      overrideAccess: true,
+    })) as User
+    cleanup.users.push(adminUser.id)
 
-### 6.1 Programmatic Unit / Integration Test Assertions
-Create or execute a test suite `web/tests/int/entitlements-schema.int.spec.ts` testing the following assertions:
+    financeAdminUser = (await payload.create({
+      collection: 'users',
+      data: { email: `finance-wth-${ts}@kientaohub.local`, password: 'test-pwd-123', name: 'Finance Admin', roles: ['financeAdmin'] },
+      overrideAccess: true,
+    })) as User
+    cleanup.users.push(financeAdminUser.id)
 
-1. **Direct REST Writes Denied**:
-   ```ts
-   // Guest / Buyer cannot create entitlements directly
-   await expect(
-     payload.create({
-       collection: 'entitlements',
-       data: { user: buyer.id, product: product.id, status: 'active' },
-       user: buyer,
-       overrideAccess: false,
-     })
-   ).rejects.toThrow()
+    sellerUser1 = (await payload.create({
+      collection: 'users',
+      data: { email: `seller1-wth-${ts}@kientaohub.local`, password: 'test-pwd-123', name: 'Seller 1', roles: ['seller'] },
+      overrideAccess: true,
+    })) as User
+    cleanup.users.push(sellerUser1.id)
 
-   // Admin cannot create entitlements directly without overrideAccess
-   await expect(
-     payload.create({
-       collection: 'entitlements',
-       data: { user: buyer.id, product: product.id, status: 'active' },
-       user: admin,
-       overrideAccess: false,
-     })
-   ).rejects.toThrow()
+    sellerUser2 = (await payload.create({
+      collection: 'users',
+      data: { email: `seller2-wth-${ts}@kientaohub.local`, password: 'test-pwd-123', name: 'Seller 2', roles: ['seller'] },
+      overrideAccess: true,
+    })) as User
+    cleanup.users.push(sellerUser2.id)
 
-   // Direct creation of download_events is denied for all
-   await expect(
-     payload.create({
-       collection: 'download_events',
-       data: { product: product.id, status: 'SUCCESS' },
-       user: buyer,
-       overrideAccess: false,
-     })
-   ).rejects.toThrow()
-   ```
+    buyerUser = (await payload.create({
+      collection: 'users',
+      data: { email: `buyer-wth-${ts}@kientaohub.local`, password: 'test-pwd-123', name: 'Buyer', roles: ['buyer'] },
+      overrideAccess: true,
+    })) as User
+    cleanup.users.push(buyerUser.id)
+  })
 
-2. **Read Scope Validation**:
-   ```ts
-   // Buyer can read own active entitlement
-   const docs = await payload.find({
-     collection: 'entitlements',
-     where: { product: { equals: product.id } },
-     user: buyer,
-     overrideAccess: false,
-   })
-   expect(docs.totalDocs).toBe(1)
+  afterAll(async () => {
+    for (const id of cleanup.users) {
+      try {
+        await payload.delete({ collection: 'users', id, overrideAccess: true })
+      } catch (_ignore) {}
+    }
+  })
 
-   // Buyer cannot read other users' entitlements
-   const otherDocs = await payload.find({
-     collection: 'entitlements',
-     where: { user: { equals: otherBuyer.id } },
-     user: buyer,
-     overrideAccess: false,
-   })
-   expect(otherDocs.totalDocs).toBe(0)
+  describe('1. Access Control Invariants (canEditMoney & RBAC)', () => {
+    it('denies direct creation/modification/deletion via REST for all roles', () => {
+      expect(withdrawalCreateAccess({ req: { user: sellerUser1 } } as any)).toBe(false)
+      expect(withdrawalCreateAccess({ req: { user: adminUser } } as any)).toBe(false)
+      expect(withdrawalUpdateAccess({ req: { user: sellerUser1 } } as any)).toBe(false)
+      expect(withdrawalUpdateAccess({ req: { user: adminUser } } as any)).toBe(false)
+      expect(withdrawalDeleteAccess({ req: { user: adminUser } } as any)).toBe(false)
 
-   // Buyer cannot read revoked entitlement
-   await payload.update({
-     collection: 'entitlements',
-     id: activeEntitlement.id,
-     data: { status: 'revoked' },
-     overrideAccess: true,
-   })
-   const revokedDocs = await payload.find({
-     collection: 'entitlements',
-     where: { id: { equals: activeEntitlement.id } },
-     user: buyer,
-     overrideAccess: false,
-   })
-   expect(revokedDocs.totalDocs).toBe(0)
-   ```
+      expect(withdrawalEventCreateAccess({ req: { user: adminUser } } as any)).toBe(false)
+      expect(withdrawalEventUpdateAccess({ req: { user: adminUser } } as any)).toBe(false)
+      expect(withdrawalEventDeleteAccess({ req: { user: adminUser } } as any)).toBe(false)
+    })
 
-3. **Anti-Duplicate Invariant**:
-   ```ts
-   // Attempting to grant a second active entitlement for same user & product throws
-   await expect(
-     payload.create({
-       collection: 'entitlements',
-       data: { user: buyer.id, product: product.id, status: 'active' },
-       overrideAccess: true,
-     })
-   ).rejects.toThrow(/already has an active entitlement/)
-   ```
+    it('verifies withdrawalReadAccess returns true for Admin and FinanceAdmin, scoped query for Seller, false for Buyer/Guest', () => {
+      expect(withdrawalReadAccess({ req: { user: null } } as any)).toBe(false)
+      expect(withdrawalReadAccess({ req: { user: buyerUser } } as any)).toEqual({ seller: { equals: buyerUser.id } })
+      expect(withdrawalReadAccess({ req: { user: adminUser } } as any)).toBe(true)
+      expect(withdrawalReadAccess({ req: { user: financeAdminUser } } as any)).toBe(true)
+      expect(withdrawalReadAccess({ req: { user: sellerUser1 } } as any)).toEqual({ seller: { equals: sellerUser1.id } })
+    })
 
-### 6.2 Execution Commands
+    it('verifies withdrawalEventReadAccess returns true for Admin and FinanceAdmin, joined query for Seller', () => {
+      expect(withdrawalEventReadAccess({ req: { user: null } } as any)).toBe(false)
+      expect(withdrawalEventReadAccess({ req: { user: adminUser } } as any)).toBe(true)
+      expect(withdrawalEventReadAccess({ req: { user: financeAdminUser } } as any)).toBe(true)
+      expect(withdrawalEventReadAccess({ req: { user: sellerUser1 } } as any)).toEqual({ 'withdrawal.seller': { equals: sellerUser1.id } })
+    })
+  })
+
+  describe('2. Withdrawal Code Generation & Validation', () => {
+    it('automatically generates code matching WTH-YYYYMMDD-XXXXX when created', async () => {
+      const wth = await payload.create({
+        collection: 'withdrawals' as any,
+        data: {
+          seller: sellerUser1.id,
+          amount: 200000,
+          currency: 'VND',
+          status: 'REQUESTED',
+          bankInfo: {
+            bankName: 'Vietcombank',
+            accountNumber: '0123456789',
+            accountHolderName: 'nguyen van a',
+          },
+        },
+        overrideAccess: true,
+      })
+
+      expect((wth as any).code).toMatch(/^WTH-\d{8}-[A-F0-9]{5,6}$/)
+      expect((wth as any).bankInfo.accountHolderName).toBe('NGUYEN VAN A')
+      expect((wth as any).bankInfo.accountNumber).toBe('0123456789')
+      expect((wth as any).status).toBe('REQUESTED')
+    })
+
+    it('rejects withdrawal amount below 50,000 VND or above 50,000,000 VND', async () => {
+      await expect(
+        payload.create({
+          collection: 'withdrawals' as any,
+          data: {
+            seller: sellerUser1.id,
+            amount: 40000,
+            currency: 'VND',
+            status: 'REQUESTED',
+            bankInfo: { bankName: 'MBBank', accountNumber: '123456', accountHolderName: 'TRAN B' },
+          },
+          overrideAccess: true,
+        })
+      ).rejects.toThrow()
+
+      await expect(
+        payload.create({
+          collection: 'withdrawals' as any,
+          data: {
+            seller: sellerUser1.id,
+            amount: 60000000,
+            currency: 'VND',
+            status: 'REQUESTED',
+            bankInfo: { bankName: 'MBBank', accountNumber: '123456', accountHolderName: 'TRAN B' },
+          },
+          overrideAccess: true,
+        })
+      ).rejects.toThrow()
+    })
+  })
+
+  describe('3. Immutability & State Transitions', () => {
+    it('rejects updating withdrawal_events (append-only ledger)', async () => {
+      const wth = await payload.create({
+        collection: 'withdrawals' as any,
+        data: {
+          seller: sellerUser1.id,
+          amount: 500000,
+          currency: 'VND',
+          status: 'REQUESTED',
+          bankInfo: { bankName: 'Techcombank', accountNumber: '987654321', accountHolderName: 'LE C' },
+        },
+        overrideAccess: true,
+      })
+
+      const event = await payload.create({
+        collection: 'withdrawal_events' as any,
+        data: {
+          withdrawal: (wth as any).id,
+          fromStatus: null,
+          toStatus: 'REQUESTED',
+          actor: sellerUser1.id,
+          actorRole: 'seller',
+          reason: 'Seller requested withdrawal',
+        },
+        overrideAccess: true,
+      })
+
+      await expect(
+        payload.update({
+          collection: 'withdrawal_events' as any,
+          id: (event as any).id,
+          data: { reason: 'Tampered reason' },
+          overrideAccess: true,
+        })
+      ).rejects.toThrow(/immutable/)
+    })
+  })
+})
+```
+
+### 5.2 Commands to Run for Verification
 ```bash
-# 1. Lint check
+# 1. Type generation after registering collections
+pnpm --prefix web generate:types
+
+# 2. Migration execution
+pnpm --prefix web payload migrate
+
+# 3. Integration test execution
+pnpm --prefix web test:int
+
+# 4. Lint and Build validation
 pnpm --prefix web lint
-
-# 2. TypeScript compilation & schema check
-pnpm --prefix web build --no-lint
-
-# 3. Integration tests
-pnpm --prefix web vitest run tests/int/entitlements-schema.int.spec.ts
+pnpm --prefix web build
 ```
+
+---
+*End of Handoff Report.*
