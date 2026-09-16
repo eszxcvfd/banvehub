@@ -58,8 +58,30 @@ export async function POST(req: Request) {
       )
     }
 
-    const productId = typeof rawProductId === 'number' ? rawProductId : parseInt(String(rawProductId), 10)
-    if (isNaN(productId) || productId <= 0) {
+    let productId: number
+    if (typeof rawProductId === 'number') {
+      if (!Number.isInteger(rawProductId) || rawProductId <= 0) {
+        return NextResponse.json(
+          {
+            error: 'INVALID_REQUEST',
+            message: 'productId phải là số nguyên dương hợp lệ.',
+          },
+          { status: 400 }
+        )
+      }
+      productId = rawProductId
+    } else if (typeof rawProductId === 'string' && /^\d+$/.test(rawProductId.trim())) {
+      productId = parseInt(rawProductId.trim(), 10)
+      if (productId <= 0) {
+        return NextResponse.json(
+          {
+            error: 'INVALID_REQUEST',
+            message: 'productId phải là số nguyên dương hợp lệ.',
+          },
+          { status: 400 }
+        )
+      }
+    } else {
       return NextResponse.json(
         {
           error: 'INVALID_REQUEST',
@@ -69,7 +91,16 @@ export async function POST(req: Request) {
       )
     }
 
-    const buyerId = typeof user.id === 'string' ? parseInt(user.id, 10) : user.id
+    const buyerId = typeof user.id === 'string' ? parseInt(user.id, 10) : Number(user.id)
+    if (!buyerId || isNaN(buyerId) || buyerId <= 0) {
+      return NextResponse.json(
+        {
+          error: 'UNAUTHORIZED',
+          message: 'Yêu cầu đăng nhập để thực hiện mua sản phẩm.',
+        },
+        { status: 401 }
+      )
+    }
 
     const result = await purchaseProduct(payload, {
       buyerId,

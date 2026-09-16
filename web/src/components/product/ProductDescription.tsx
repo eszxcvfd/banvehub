@@ -18,6 +18,18 @@ export function ProductDescription({ product }: { product: Product }) {
     (s): s is SoftwareType => typeof s === 'object' && s !== null,
   )
 
+  const sellerObj =
+    typeof product.seller === 'object' && product.seller !== null
+      ? product.seller
+      : null
+
+  const sellerId: number | string | null =
+    sellerObj && sellerObj.id != null
+      ? sellerObj.id
+      : typeof product.seller === 'number' || typeof product.seller === 'string'
+      ? product.seller
+      : null
+
   return (
     <div className="flex flex-col gap-6">
       {/* Taxonomy Pills */}
@@ -51,6 +63,8 @@ export function ProductDescription({ product }: { product: Product }) {
 
       {/* Digital CTA Card */}
       <DigitalProductCTA
+        productId={product.id}
+        sellerId={sellerId}
         isFree={isFree}
         price={price}
         fileFormat={product.technicalSpecs?.fileFormat}
@@ -59,7 +73,9 @@ export function ProductDescription({ product }: { product: Product }) {
       />
 
       {/* Seller Attribution Block */}
-      <SellerAttribution />
+      <SellerAttribution
+        sellerName={sellerObj?.name || undefined}
+      />
 
       {/* Asset Description */}
       {product.description ? (
