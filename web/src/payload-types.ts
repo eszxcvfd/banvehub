@@ -86,6 +86,10 @@ export interface Config {
     order_items: OrderItem;
     entitlements: Entitlement;
     download_events: DownloadEvent;
+    seller_earnings: SellerEarning;
+    withdrawals: Withdrawal;
+    withdrawal_events: WithdrawalEvent;
+    refunds: Refund;
     forms: Form;
     'form-submissions': FormSubmission;
     addresses: Address;
@@ -102,6 +106,10 @@ export interface Config {
     };
     orders: {
       items: 'order_items';
+      earnings: 'seller_earnings';
+    };
+    withdrawals: {
+      events: 'withdrawal_events';
     };
   };
   collectionsSelect: {
@@ -124,6 +132,10 @@ export interface Config {
     order_items: OrderItemsSelect<false> | OrderItemsSelect<true>;
     entitlements: EntitlementsSelect<false> | EntitlementsSelect<true>;
     download_events: DownloadEventsSelect<false> | DownloadEventsSelect<true>;
+    seller_earnings: SellerEarningsSelect<false> | SellerEarningsSelect<true>;
+    withdrawals: WithdrawalsSelect<false> | WithdrawalsSelect<true>;
+    withdrawal_events: WithdrawalEventsSelect<false> | WithdrawalEventsSelect<true>;
+    refunds: RefundsSelect<false> | RefundsSelect<true>;
     forms: FormsSelect<false> | FormsSelect<true>;
     'form-submissions': FormSubmissionsSelect<false> | FormSubmissionsSelect<true>;
     addresses: AddressesSelect<false> | AddressesSelect<true>;
@@ -140,10 +152,12 @@ export interface Config {
   globals: {
     header: Header;
     footer: Footer;
+    commission_settings: CommissionSetting;
   };
   globalsSelect: {
     header: HeaderSelect<false> | HeaderSelect<true>;
     footer: FooterSelect<false> | FooterSelect<true>;
+    commission_settings: CommissionSettingsSelect<false> | CommissionSettingsSelect<true>;
   };
   locale: null;
   widgets: {
@@ -239,7 +253,7 @@ export interface Order {
    */
   totalAmount: number;
   currency: 'VND';
-  status: 'PENDING' | 'COMPLETED' | 'CANCELLED';
+  status: 'PENDING' | 'COMPLETED' | 'CANCELLED' | 'REFUNDED';
   paymentSource: 'wallet' | 'free';
   /**
    * Thời điểm hoàn tất thanh toán và cấp quyền sở hữu
@@ -251,6 +265,11 @@ export interface Order {
   notes?: string | null;
   items?: {
     docs?: (number | OrderItem)[];
+    hasNextPage?: boolean;
+    totalDocs?: number;
+  };
+  earnings?: {
+    docs?: (number | SellerEarning)[];
     hasNextPage?: boolean;
     totalDocs?: number;
   };
@@ -1006,6 +1025,77 @@ export interface ProductFile {
   focalY?: number | null;
 }
 /**
+ * Sổ cái doanh thu người bán và chính sách giữ tiền (Seller Earnings - PLAN.md FR-31, BR-03)
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "seller_earnings".
+ */
+export interface SellerEarning {
+  id: number;
+  seller: number | User;
+  order: number | Order;
+  /**
+   * Mục đơn hàng tương ứng (đảm bảo tính duy nhất 1-1, tránh trùng lặp doanh thu)
+   */
+  orderItem: number | OrderItem;
+  product: number | Product;
+  /**
+   * Giá bán của sản phẩm tại thời điểm giao dịch (snapshot)
+   */
+  salePrice: number;
+  /**
+   * Phí hoa hồng nền tảng (salePrice * commissionRate)
+   */
+  platformFee: number;
+  /**
+   * Doanh thu chuyển cho người bán (salePrice - platformFee - tax)
+   */
+  sellerAmount: number;
+  /**
+   * Thuế snapshot tại thời điểm giao dịch (không tính trong P0, mặc định 0)
+   */
+  tax: number;
+  /**
+   * Tỷ lệ chiết khấu snapshot tại thời điểm giao dịch (BR-07)
+   */
+  commissionRate: number;
+  currency: 'VND';
+  /**
+   * Vòng đời: PENDING -> AVAILABLE -> PAID (hoặc REVERSED nếu hoàn tiền)
+   */
+  status: 'PENDING' | 'AVAILABLE' | 'REVERSED' | 'PAID';
+  /**
+   * Số ngày giữ tiền tạm thời trước khi chuyển thành khả dụng (mặc định 7 ngày)
+   */
+  holdPeriodDays: number;
+  /**
+   * Thời điểm thu nhập tự động chuyển sang AVAILABLE (createdAt + holdPeriodDays)
+   */
+  holdUntil: string;
+  /**
+   * Thời điểm thu nhập thực tế chuyển sang trạng thái AVAILABLE
+   */
+  availableAt?: string | null;
+  /**
+   * Thời điểm hoàn tất chi trả tiền cho người bán qua yêu cầu rút tiền
+   */
+  paidAt?: string | null;
+  /**
+   * Thời điểm đơn hàng bị hoàn trả và thu nhập bị đảo ngược
+   */
+  reversedAt?: string | null;
+  /**
+   * Phiên bản chính sách chiết khấu hoa hồng snapshot
+   */
+  policyVersion: string;
+  /**
+   * Ghi chú nội bộ, lý do hoàn trả hoặc mã đối soát
+   */
+  notes?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "addresses".
  */
@@ -1084,6 +1174,10 @@ export interface SellerProfile {
   };
   sellerTermsAccepted: boolean;
   sellerTermsAcceptedAt?: string | null;
+  /**
+   * Tỷ lệ hoa hồng sàn áp dụng riêng cho người bán (0.00 - 1.00, VD: 0.20 = 20%). Nếu để trống sẽ sử dụng tỷ lệ mặc định toàn sàn (30%).
+   */
+  commissionRate?: number | null;
   status?: ('pending' | 'active' | 'suspended' | 'rejected') | null;
   totalSales?: number | null;
   rating?: number | null;
@@ -1327,6 +1421,101 @@ export interface DownloadEvent {
   createdAt: string;
 }
 /**
+ * Yêu cầu rút tiền của Người bán (Seller Withdrawals - FR-32, FLOW-U13)
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "withdrawals".
+ */
+export interface Withdrawal {
+  id: number;
+  /**
+   * Mã định danh duy nhất (VD: WTH-20260915-A1B2C3D4)
+   */
+  code: string;
+  seller: number | User;
+  /**
+   * Số tiền rút (50.000 VND - 50.000.000 VND)
+   */
+  amount: number;
+  currency: 'VND';
+  status: 'REQUESTED' | 'UNDER_REVIEW' | 'APPROVED' | 'PROCESSING' | 'PAID' | 'REJECTED' | 'CANCELLED' | 'FAILED';
+  bankInfo: {
+    bankName: string;
+    accountNumber: string;
+    accountHolderName: string;
+  };
+  requestedAt: string;
+  reviewedAt?: string | null;
+  reviewedBy?: (number | null) | User;
+  paidAt?: string | null;
+  rejectionReason?: string | null;
+  failureReason?: string | null;
+  notes?: string | null;
+  events?: {
+    docs?: (number | WithdrawalEvent)[];
+    hasNextPage?: boolean;
+    totalDocs?: number;
+  };
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Nhật ký kiểm toán sự kiện rút tiền (Append-Only Audit Trail - PLAN.md §11.1)
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "withdrawal_events".
+ */
+export interface WithdrawalEvent {
+  id: number;
+  withdrawal: number | Withdrawal;
+  fromStatus?: string | null;
+  toStatus: string;
+  actor?: (number | null) | User;
+  actorRole?: string | null;
+  reason?: string | null;
+  notes?: string | null;
+  timestamp: string;
+  metadata?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Lịch sử hoàn tiền và bút toán bù trừ (Refunds & Compensating Ledger - BR-03)
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "refunds".
+ */
+export interface Refund {
+  id: number;
+  /**
+   * Mã định danh duy nhất của giao dịch hoàn tiền (VD: REF-YYYYMMDD-XXXXX)
+   */
+  code: string;
+  order: number | Order;
+  orderItem: number | OrderItem;
+  buyer: number | User;
+  seller: number | User;
+  amount: number;
+  platformFeeRefunded: number;
+  sellerAmountRefunded: number;
+  currency: 'VND';
+  reason: string;
+  status: 'COMPLETED' | 'FAILED';
+  processedBy: number | User;
+  ledgerTransaction?: (number | null) | WalletLedger;
+  entitlementRevoked?: boolean | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "form-submissions".
  */
@@ -1482,6 +1671,22 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'download_events';
         value: number | DownloadEvent;
+      } | null)
+    | ({
+        relationTo: 'seller_earnings';
+        value: number | SellerEarning;
+      } | null)
+    | ({
+        relationTo: 'withdrawals';
+        value: number | Withdrawal;
+      } | null)
+    | ({
+        relationTo: 'withdrawal_events';
+        value: number | WithdrawalEvent;
+      } | null)
+    | ({
+        relationTo: 'refunds';
+        value: number | Refund;
       } | null)
     | ({
         relationTo: 'forms';
@@ -1929,6 +2134,7 @@ export interface SellerProfilesSelect<T extends boolean = true> {
       };
   sellerTermsAccepted?: T;
   sellerTermsAcceptedAt?: T;
+  commissionRate?: T;
   status?: T;
   totalSales?: T;
   rating?: T;
@@ -2033,6 +2239,7 @@ export interface OrdersSelect<T extends boolean = true> {
   paidAt?: T;
   notes?: T;
   items?: T;
+  earnings?: T;
   updatedAt?: T;
   createdAt?: T;
 }
@@ -2085,6 +2292,99 @@ export interface DownloadEventsSelect<T extends boolean = true> {
   status?: T;
   downloadTokenHash?: T;
   errorReason?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "seller_earnings_select".
+ */
+export interface SellerEarningsSelect<T extends boolean = true> {
+  seller?: T;
+  order?: T;
+  orderItem?: T;
+  product?: T;
+  salePrice?: T;
+  platformFee?: T;
+  sellerAmount?: T;
+  tax?: T;
+  commissionRate?: T;
+  currency?: T;
+  status?: T;
+  holdPeriodDays?: T;
+  holdUntil?: T;
+  availableAt?: T;
+  paidAt?: T;
+  reversedAt?: T;
+  policyVersion?: T;
+  notes?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "withdrawals_select".
+ */
+export interface WithdrawalsSelect<T extends boolean = true> {
+  code?: T;
+  seller?: T;
+  amount?: T;
+  currency?: T;
+  status?: T;
+  bankInfo?:
+    | T
+    | {
+        bankName?: T;
+        accountNumber?: T;
+        accountHolderName?: T;
+      };
+  requestedAt?: T;
+  reviewedAt?: T;
+  reviewedBy?: T;
+  paidAt?: T;
+  rejectionReason?: T;
+  failureReason?: T;
+  notes?: T;
+  events?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "withdrawal_events_select".
+ */
+export interface WithdrawalEventsSelect<T extends boolean = true> {
+  withdrawal?: T;
+  fromStatus?: T;
+  toStatus?: T;
+  actor?: T;
+  actorRole?: T;
+  reason?: T;
+  notes?: T;
+  timestamp?: T;
+  metadata?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "refunds_select".
+ */
+export interface RefundsSelect<T extends boolean = true> {
+  code?: T;
+  order?: T;
+  orderItem?: T;
+  buyer?: T;
+  seller?: T;
+  amount?: T;
+  platformFeeRefunded?: T;
+  sellerAmountRefunded?: T;
+  currency?: T;
+  reason?: T;
+  status?: T;
+  processedBy?: T;
+  ledgerTransaction?: T;
+  entitlementRevoked?: T;
   updatedAt?: T;
   createdAt?: T;
 }
@@ -2390,6 +2690,19 @@ export interface Footer {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "commission_settings".
+ */
+export interface CommissionSetting {
+  id: number;
+  /**
+   * Tỷ lệ hoa hồng mặc định của sàn (0.0 - 1.0, mặc định: 0.30 tức 30%)
+   */
+  defaultRate: number;
+  updatedAt?: string | null;
+  createdAt?: string | null;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "header_select".
  */
 export interface HeaderSelect<T extends boolean = true> {
@@ -2430,6 +2743,16 @@ export interface FooterSelect<T extends boolean = true> {
             };
         id?: T;
       };
+  updatedAt?: T;
+  createdAt?: T;
+  globalType?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "commission_settings_select".
+ */
+export interface CommissionSettingsSelect<T extends boolean = true> {
+  defaultRate?: T;
   updatedAt?: T;
   createdAt?: T;
   globalType?: T;

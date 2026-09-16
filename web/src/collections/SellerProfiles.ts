@@ -3,7 +3,9 @@ import { slugField } from 'payload'
 
 import { adminOnly } from '@/access/adminOnly'
 import {
+  adminOrFinanceAdminFieldAccess,
   adminOrModeratorFieldAccess,
+  commissionRateReadAccess,
   sellerProfileReadAccess,
   sellerProfileUpdateAccess,
 } from '@/access/sellerProfileAccess'
@@ -88,6 +90,23 @@ export const SellerProfiles: CollectionConfig = {
       admin: {
         readOnly: true,
         position: 'sidebar',
+      },
+    },
+    {
+      name: 'commissionRate',
+      type: 'number',
+      label: 'Tỷ lệ hoa hồng sàn riêng (Commission Rate Override)',
+      min: 0,
+      max: 1,
+      admin: {
+        position: 'sidebar',
+        step: 0.01,
+        description:
+          'Tỷ lệ hoa hồng sàn áp dụng riêng cho người bán (0.00 - 1.00, VD: 0.20 = 20%). Nếu để trống sẽ sử dụng tỷ lệ mặc định toàn sàn (30%).',
+      },
+      access: {
+        read: commissionRateReadAccess,
+        update: adminOrFinanceAdminFieldAccess,
       },
     },
     {

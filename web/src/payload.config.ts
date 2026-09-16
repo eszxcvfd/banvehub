@@ -21,6 +21,10 @@ import { Entitlements } from '@/collections/Entitlements'
 import { DownloadEvents } from '@/collections/DownloadEvents'
 import { Orders } from '@/collections/Orders'
 import { OrderItems } from '@/collections/OrderItems'
+import { SellerEarnings } from '@/collections/SellerEarnings'
+import { Withdrawals } from '@/collections/Withdrawals'
+import { WithdrawalEvents } from '@/collections/WithdrawalEvents'
+import { Refunds } from '@/collections/Refunds'
 import { Pages } from '@/collections/Pages'
 import { PaymentIntents } from '@/collections/PaymentIntents'
 import { PaymentTransactions } from '@/collections/PaymentTransactions'
@@ -36,6 +40,7 @@ import { WalletLedger } from '@/collections/WalletLedger'
 import { Wallets } from '@/collections/Wallets'
 import { Footer } from '@/globals/Footer'
 import { Header } from '@/globals/Header'
+import { CommissionSettings } from '@/globals/CommissionSettings'
 import { plugins } from './plugins'
 
 const filename = fileURLToPath(import.meta.url)
@@ -73,6 +78,10 @@ export default buildConfig({
     OrderItems,
     Entitlements,
     DownloadEvents,
+    SellerEarnings,
+    Withdrawals,
+    WithdrawalEvents,
+    Refunds,
   ],
   db: postgresAdapter({
     pool: {
@@ -119,7 +128,7 @@ export default buildConfig({
   }),
   //email: nodemailerAdapter(),
   endpoints: [],
-  globals: [Header, Footer],
+  globals: [Header, Footer, CommissionSettings],
   plugins,
   secret: process.env.PAYLOAD_SECRET || '',
   typescript: {

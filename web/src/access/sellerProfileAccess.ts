@@ -68,3 +68,27 @@ export const adminOrModeratorFieldAccess: FieldAccess = ({ req: { user } }) => {
   }
   return false
 }
+
+/**
+ * Field-level access for financial administrative fields (e.g. commissionRate):
+ * Only Admin and FinanceAdmin can update this field.
+ */
+export const adminOrFinanceAdminFieldAccess: FieldAccess = ({ req: { user } }) => {
+  if (user) {
+    return checkRole(['admin', 'financeAdmin'], user)
+  }
+  return false
+}
+
+/**
+ * Field-level read access for commissionRate:
+ * Admin, FinanceAdmin, and the profile owner (seller) can read.
+ * Public visitors cannot view internal commission rates.
+ */
+export const commissionRateReadAccess: FieldAccess = ({ req: { user }, doc }) => {
+  if (!user) return false
+  if (checkRole(['admin', 'financeAdmin'], user)) return true
+  const profileUserId = typeof doc?.user === 'object' ? doc?.user?.id : doc?.user
+  return user.id === profileUserId
+}
+

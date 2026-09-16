@@ -10,6 +10,7 @@ import { initTransaction, commitTransaction, killTransaction } from 'payload'
 import crypto from 'crypto'
 import type { Product, Order, OrderItem, Entitlement } from '@/payload-types'
 import { debitWallet, InsufficientFundsError } from '@/services/wallet'
+import { resolveCommissionRate, calculateRevenueSplit } from '@/services/commission'
 
 // Re-export InsufficientFundsError for consumers
 export { InsufficientFundsError }
@@ -219,7 +220,28 @@ export async function purchaseProduct(
       req: effectiveReq,
     })) as Order
 
-    // 8. Create Order Items record (BR-07 snapshot line item)
+    // 8. Commission & Revenue Split (FR-31, BR-07)
+    let platformFee = 0
+    let sellerAmount = 0
+    let tax = 0
+    let policyVersion = 'free'
+    let commissionRate = 0
+
+    if (!isFreeProduct && pricePaid > 0) {
+      const resolution = await resolveCommissionRate(payload, {
+        sellerId: Number(sellerId),
+        productId: numericProductId,
+        req: effectiveReq,
+      })
+      const split = calculateRevenueSplit(pricePaid, resolution.commissionRate)
+      platformFee = split.platformFee
+      sellerAmount = split.sellerAmount
+      tax = split.tax || 0
+      policyVersion = resolution.policyVersion
+      commissionRate = resolution.commissionRate
+    }
+
+    // 8.1 Create Order Items record (BR-07 snapshot line item)
     const orderItemDoc = (await payload.create({
       collection: 'order_items',
       data: {
@@ -227,14 +249,39 @@ export async function purchaseProduct(
         product: numericProductId,
         seller: Number(sellerId) || numericBuyerId,
         salePrice: pricePaid,
-        platformFee: 0,
-        sellerAmount: pricePaid,
-        tax: 0,
-        policyVersion: 'v1',
+        platformFee,
+        sellerAmount,
+        tax,
+        policyVersion,
       },
       overrideAccess: true,
       req: effectiveReq,
     })) as OrderItem
+
+    // 8.2 Create Seller Earnings record (FR-31, BR-03) in the same transaction
+    if (!isFreeProduct && pricePaid > 0) {
+      await payload.create({
+        collection: 'seller_earnings',
+        data: {
+          seller: Number(sellerId),
+          order: orderDoc.id,
+          orderItem: orderItemDoc.id,
+          product: numericProductId,
+          salePrice: pricePaid,
+          platformFee,
+          sellerAmount,
+          tax,
+          commissionRate,
+          currency: 'VND',
+          status: 'PENDING',
+          holdPeriodDays: 7,
+          holdUntil: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          policyVersion,
+        },
+        overrideAccess: true,
+        req: effectiveReq,
+      })
+    }
 
     // 9. Create Entitlements record (PLAN.md FR-16, FR-18, Decision 0006)
     const entitlementDoc = (await payload.create({

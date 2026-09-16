@@ -99,6 +99,7 @@ export const Orders: CollectionConfig = {
         { label: 'Chờ xử lý (PENDING)', value: 'PENDING' },
         { label: 'Hoàn thành (COMPLETED)', value: 'COMPLETED' },
         { label: 'Đã hủy (CANCELLED)', value: 'CANCELLED' },
+        { label: 'Đã hoàn tiền (REFUNDED)', value: 'REFUNDED' },
       ],
       admin: {
         readOnly: true,
@@ -144,6 +145,16 @@ export const Orders: CollectionConfig = {
       admin: {
         allowCreate: false,
         defaultColumns: ['product', 'seller', 'salePrice', 'platformFee', 'sellerAmount'],
+      },
+    },
+    {
+      name: 'earnings',
+      type: 'join',
+      collection: 'seller_earnings',
+      on: 'order',
+      label: 'Thu nhập người bán từ đơn hàng',
+      admin: {
+        allowCreate: false,
       },
     },
   ],

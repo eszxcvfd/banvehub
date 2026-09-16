@@ -36,7 +36,7 @@ export async function GET(req: Request) {
       },
     }
 
-    if (statusParam && ['PENDING', 'COMPLETED', 'CANCELLED'].includes(statusParam.toUpperCase())) {
+    if (statusParam && ['PENDING', 'COMPLETED', 'CANCELLED', 'REFUNDED'].includes(statusParam.toUpperCase())) {
       where.status = {
         equals: statusParam.toUpperCase(),
       }

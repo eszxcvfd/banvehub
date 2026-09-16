@@ -28,7 +28,7 @@ const collections: CollectionSlug[] = [
 
 const categories = ['Accessories', 'T-Shirts', 'Hats']
 
-const globals: GlobalSlug[] = ['header', 'footer']
+const globals: ('header' | 'footer')[] = ['header', 'footer']
 
 const baseAddressUSData: Transaction['billingAddress'] = {
   title: 'Dr.',
