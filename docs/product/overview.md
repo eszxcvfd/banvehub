@@ -35,6 +35,10 @@ Recorded in `docs/decisions/`:
 - The payment intent state machine is fixed (decision 0005).
 - Downloads are entitlement-gated with a short-lived token (decision 0006).
 - P0 search runs on PostgreSQL; Meilisearch is P1 (decision 0007).
+- Roles are `admin`, `buyer`, `seller`, `moderator`, `financeAdmin`, with
+  `buyer` as the default (decision 0008).
+- Seller revenue policy: withdrawal bounds, per-earning hold period, commission
+  precedence, and the tax-inclusive earning equation (decision 0009).
 
 ## Observable Today
 
@@ -55,23 +59,44 @@ sells physical goods with variants, carts, shipping addresses, USD-style
 currency presentation, English copy, and Stripe checkout. None of that is
 KienTaoHub behaviour; it is the starting point recorded in decision 0001.
 
+## Built
+
+Delivered in phases, each with a green check suite recorded in
+`docs/plans/completed/`:
+
+| Phase | Commit | Surface |
+|---|---|---|
+| 2 Catalog | `000e372` | digital catalog, product/files/previews/software types/tags, RBAC, storefront, SEO |
+| 3 Seller & moderation | `caaae36` | seller profiles, upload, private originals, moderation workflow |
+| 4 Payment & wallet | `a7a506f` | internal wallet, append-only ledger, payment intents and transactions, SePay webhook rail |
+| 5 Purchase & download | `2ea1dee` | orders and order items with fee snapshots, entitlements, download events, tokenised download route |
+
+26 integration suites in `web/tests/int/` cover these surfaces, including RBAC,
+ledger invariants, webhook duplication, purchase invariants, and secure
+download.
+
 ## Not Built
 
-Nothing below exists, in any form:
-
-- Wallet, ledger, payment intents, transactions, or webhook handling; the
-  `transactions` collection in the schema is the template's Stripe bookkeeping.
-- Entitlements, download events, or the `/downloads/{product}` route.
-- Seller profiles, upload, moderation, or payouts.
-- Orders in the product sense, reviews, comments, tickets, or disputes.
-- The five §5 roles are implemented (decision 0008), but the §22 rows whose
-  entities do not exist yet are not: purchase, download, ledger view, and
-  withdrawal approval arrive with the payment, order, and withdrawal slices.
-  Seller self-edit of an owned product also waits for the Phase 3 seller entity.
-- Object storage, Redis, CI, or observability.
-- Email delivery, deployment, TLS, CDN, or backups.
+- Seller earnings, withdrawals, withdrawal events, and refunds are **present on
+  disk but uncommitted and unverified**: the Phase 6 Milestone 1 collections,
+  access rules, and migration Batch 7 exist in the working tree and no
+  environment has applied that migration. Treat them as unimplemented until
+  the milestone's verification gate closes.
+- Commission calculation, the earnings pipeline, withdrawal request and
+  approval, compensating refunds, and the seller dashboard and finance admin
+  screens.
+- Reviews, comments, tickets, and disputes.
+- Object storage and Redis.
+- Email delivery, deployment, TLS, CDN, and backups.
 
 ## Open Owner Decisions
 
-Commission rate and hold period; top-up bounds; secure-download token lifetime;
-whether email re-enters launch scope; VND presentation and Vietnamese copy.
+- The site-wide default commission rate, its storage, and `policyVersion`
+  issuance. Decision 0009 fixes the precedence and the snapshot rule but no
+  rate exists yet, so commission cannot be computed.
+- Top-up bounds; secure-download token lifetime; whether email re-enters
+  launch scope; VND presentation and Vietnamese copy. Commission rate and hold
+  period were listed here and are now resolved by decision 0009 — the hold
+  period as a per-earning snapshot defaulting to 7 days, and commission only
+  partially, since the site default is still unset.
+
