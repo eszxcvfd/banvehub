@@ -1,68 +1,41 @@
-# Project Sentinel Handoff Report: KienTaoHub Phase 6 (Seller Revenue)
+# Sentinel Final Handoff Report — Storefront Purchase and Download Flow Integration
 
-**Agent**: `sentinel` (Project Sentinel)  
-**Project**: KienTaoHub Phase 6 (Seller Revenue)  
-**Date**: 2026-09-16  
-**Parent Conversation ID**: `279a9ece-b7e4-4977-9556-6f5325d3025a`  
-**Verdict**: **VICTORY CONFIRMED**
+## Observation
+- User requested end-to-end Storefront Purchase and Download flow implementation and integration for KienTaoHub:
+  - Wire `DigitalProductCTA` into `ProductDescription.tsx` with real product `id` and seller information.
+  - Query current user entitlement: render "Tải xuống ngay" immediately when owned; author badge ("Sản phẩm của bạn") and self-purchase locking for sellers.
+  - Digital purchase flow with wallet balance debit via `/api/v1/orders/purchase` with loading indicator and instant automatic download trigger.
+  - Free product instant download (`is_free = true` or `price = 0`) via `/api/v1/downloads/token` auto-enrollment without wallet deduction.
+  - Guest login guidance with return URL preservation; insufficient funds modal with shortfall math, direct link to `/wallet`, and in-modal retry.
+  - Quality gates: 419 existing integration tests passing without regression, clean ESLint (0 errors), Next.js production build exit code 0.
+- Authoritative user request logged in `.agents/ORIGINAL_REQUEST.md` under `## 2026-09-16T13:27:00Z`.
 
----
+## Logic Chain
+1. **Routing**: Per Routing Decision Table, user explicitly requested "Small, focused team (SWE Light: one implementing agent plus repeated adversarial review)". Routed to `teamwork_preview_swe` (SWE Light Orchestrator Gen 4, `e6e2f23e-5dce-49f8-94f2-0ae0f17f3ff0`).
+2. **Execution & Adversarial Review**: Swarm executed the implementation and completed 3 full rounds of adversarial review:
+   - Round 0: Initial wiring of `DigitalProductCTA.tsx`, `ProductDescription.tsx`, endpoints, and basic unit tests.
+   - Round 1: Addressed 6 edge cases (guest leaks, unapproved product 500s, query leakage, string seller IDs); expanded tests to 43.
+   - Round 2: Addressed 6 edge cases (user switching desync, negative cache persistence, in-modal retry, float param injection, null price guards); expanded tests to 50.
+   - Round 3: Addressed 4 edge cases (multi-tab sync via BroadcastChannel/focus, strict integer validation in `orders/purchase`, modal double-click protection); expanded tests to 60.
+3. **Internal Verification**: SWE Orchestrator ran internal victory audit and claimed completion.
+4. **Mandatory Sentinel Victory Audit**: Following the Sentinel mandate, claims of completion are never taken at face value. Sentinel spawned an independent Victory Auditor (`teamwork_preview_victory_auditor`, `33d693e1-dfad-4453-baf7-be9c22126e06`).
+5. **Verdict**: Auditor executed full 3-phase audit (timeline analysis, anti-cheating detection, independent live test execution) and returned **VICTORY CONFIRMED**.
+6. **Cleanup**: Both monitoring crons cancelled via `manage_task(action="kill")` and all subagents terminated via `manage_subagents(action="kill_all")`.
 
-## 1. Observation
+## Caveats
+- Browser file-saving prompts across specific niche mobile webviews rely on browser OS capabilities; fallback manual re-click is provided.
+- Live external webhook latency during banking provider outages is decoupled from storefront frontend state.
 
-1. **User Objective & Requirements**:
-   - Deliver Phase 6 (Seller Revenue) of KienTaoHub: 3-tier commission calculation, seller earnings with 7-day hold, bank withdrawal request & 8-state approval workflow with Threat T7 concurrency protection, compensating refund ledger with BR-03 immutability, seller dashboard (`/seller`) & finance admin operations (`/finance`), and full verification with 0 regressions.
+## Conclusion
+- All requirements R1–R5 and acceptance criteria are 100% satisfied and independently verified.
+- Independent Victory Auditor verdict: **VICTORY CONFIRMED**.
+- Project is complete and ready for human review.
 
-2. **Execution Lifecycle**:
-   - Initialized and routed via General Path to `teamwork_preview_orchestrator`.
-   - Executed across 6 distinct milestones (M1 Data Layer & Batch 7 migration; M2 Commission calculation & Batch 8 migration; M3 Withdrawal workflow & concurrency defense; M4 Compensating refund ledger & reversal; M5 Seller dashboard & Finance admin portal; M6 Full regression, typecheck, lint, and production build).
-   - Project Orchestrator Gen 4 (`b96b7657-610e-4105-89ae-923e3ac1b237`) delivered all milestones with passing review and forensic audits, claiming 100% project completion.
+## Verification Method
+1. `pnpm --prefix web test:challenger`: 3/3 test files passed, 60/60 tests passed (100% pass rate in 1.25s).
+2. `pnpm --prefix web test:int`: 28/28 test files passed, 419/419 tests passed (100% pass rate in 66.20s against `kientaohub_test`). Zero regressions.
+3. `pnpm --prefix web lint`: Exit code 0, 0 errors.
+4. `pnpm --prefix web build`: Exit code 0, 43/43 routes generated cleanly via Turbopack.
+5. Independent Victory Audit Report: `/home/trung/Documents/2026/project/test-v6/.agents/victory_auditor_sentinel_gen4/audit.md`.
 
-3. **Independent Victory Audit (`victory_auditor_1`)**:
-   - Dispatched clean-context independent victory auditor `teamwork_preview_victory_auditor` (`78ee3801-129a-4750-9eae-f3461dc51060`) to inspect against `/home/trung/Documents/2026/project/test-v6/.agents/ORIGINAL_REQUEST.md`.
-   - **Phase A (Timeline & Scope)**: PASS. All requirements R1–R5 faithfully implemented.
-   - **Phase B (Integrity Check)**: PASS. Zero hardcoded values, zero facades, zero test mocks/bypasses, real live PostgreSQL DDL with check constraints verified.
-   - **Phase C (Independent Test Execution)**: PASS:
-     - `pnpm tsc --noEmit`: 0 errors (clean exit 0).
-     - `pnpm lint`: 0 errors (clean exit 0).
-     - Phase 6 Integration Suites: 72/72 passed (100%).
-     - Prior Phase Regression Suites (Phases 1–5): 347/347 passed (100% — Zero regressions).
-     - Full Repository Integration Test Suite: 419/419 passed (100%) across 28 test files in 75.08s.
-     - Production Next.js Build: 43/43 routes compiled successfully (clean exit 0).
-   - **Verdict**: `VICTORY CONFIRMED`.
 
----
-
-## 2. Logic Chain
-
-1. **Gate Invariant**: The Project Sentinel does not accept victory claims at face value.
-2. **Independent Audit Isolation**: Spawning a separate, un-primed `teamwork_preview_victory_auditor` without shared memory ensured unbiased evaluation directly against `ORIGINAL_REQUEST.md`.
-3. **Execution Evidence**: The victory auditor independently re-ran TypeScript typechecking, linting, unit/integration suites, regression suites, and production Next.js compilation, matching the orchestrator's claim 100%.
-4. **Conclusion of Success**: With all requirements satisfied, all constraints enforced, zero regressions, and an explicit `VICTORY CONFIRMED` verdict from the independent auditor, Phase 6 is verifiably complete.
-
----
-
-## 3. Caveats & Operating Notes
-
-1. **Governing Scope Decisions**:
-   - **A1**: Site default commission rate is dynamic data stored in Payload global `CommissionSettings` (seeded to `0.30` in Batch 8 migration, policy version `site-default-v1-0.30`), not hardcoded in code.
-   - **A2**: Promotional campaign collection was deferred from P0; resolver safely skips/falls through to seller/site tiers.
-2. **PostgreSQL Container**:
-   - PostgreSQL runs inside Docker (`kientaohub-postgres`). When querying DB directly from host, use `docker exec kientaohub-postgres psql -U payload -d kientaohub -c "..."`.
-
----
-
-## 4. Conclusion
-
-Phase 6 (Seller Revenue) of KienTaoHub is fully implemented, verified, and audited. The solution complies with all architectural, security, and financial requirements.
-
----
-
-## 5. Verification Method
-
-- Independent Victory Audit Report: `/home/trung/Documents/2026/project/test-v6/.agents/victory_auditor_1/handoff.md`
-- Completed Plan File: `/home/trung/Documents/2026/project/test-v6/docs/plans/completed/phase-6-seller-revenue.md`
-- Integration Test Command: `pnpm --prefix web test:int` (419/419 pass)
-- TypeScript Verification: `pnpm --prefix web tsc --noEmit` (0 errors)
-- Linter Verification: `pnpm --prefix web lint` (0 errors)
-- Build Verification: `pnpm --prefix web build` (clean exit 0)

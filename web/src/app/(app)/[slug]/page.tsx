@@ -6,7 +6,7 @@ import { generateMeta } from '@/utilities/generateMeta'
 import configPromise from '@payload-config'
 import { getPayload } from 'payload'
 import { draftMode } from 'next/headers'
-import { homeStaticData } from '@/endpoints/seed/home-static'
+import { homeStaticData } from '@/utilities/home-static'
 import React from 'react'
 
 import type { Page } from '@/payload-types'

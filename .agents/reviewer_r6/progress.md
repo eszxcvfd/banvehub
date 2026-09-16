@@ -1,0 +1,27 @@
+# Progress - Review Round 6
+
+- [x] Step 1: Independently understand task & inspect current code in `web/scripts/seed-realistic.mts`
+- [x] Step 2: Break it & verify current database state (confirm Finding E⁸: date mismatch between codes and created_at: 253/253 orders, 16/16 refunds, 8/8 withdrawals, 65 artificial codes)
+- [x] Step 3: Implement mandatory lockstep fix in `web/scripts/seed-realistic.mts`:
+  - [x] Canonical order code generator for all 253 orders: `'ORD-' || to_char(created_at, 'YYYYMMDD') || '-' || <hex>`
+  - [x] Eliminate `ORD-PENDING-` and `ORD-CANCEL-` prefixes entirely
+  - [x] Canonical refund code generator: `REF-YYYYMMDD-HEX` using refund's own `created_at`
+  - [x] Canonical withdrawal code generator: `WTH-YYYYMMDD-XXXXXXXX` using withdrawal's own `created_at` with 8-hex suffix
+  - [x] Lockstep update: `wallet_ledger.reference_id`, `wallet_ledger.description`, `orders.notes` while `forbid_ledger_mutation` is disabled
+  - [x] Invariant checks in Section 19: code dates vs created_at, unique code collision checks, orphan checks, regex validation, 20260916 scan
+- [x] Step 4: Take pre-wipe snapshot backup: `kientaohub-r6-pre-wipe-20260916-155006.dump` (578,624 bytes)
+- [x] Step 5: Execute re-seed: `SEED_CONFIRM=yes pnpm -C web seed:realistic` (exit code 0)
+- [x] Step 6: Deep Verification:
+  - [x] 0 rows where code-date != own created_at (orders: 0/253, refunds: 0/16, withdrawals: 0/8)
+  - [x] Exhaustive `20260916` day-stamp scan across database: 0 matches in business tables (1 match in system table `payload_migrations.name`)
+  - [x] 0 orphaned ledger rows (all 161 order-linked rows match `orders.code`)
+  - [x] 4 unique code indexes intact, 0 collisions
+  - [x] E⁷ latency sweep intact (distinct deltas: 77, max latency: 89s)
+  - [x] Supervisor 30 acceptance checks (Suite A: 7/7, Suite B: 8/8, Suite C: 3/3, Suite D: 2/2, Suite E: 4/4)
+  - [x] Negative trigger probes (all 4 probes correctly raise)
+  - [x] Category coverage (140 published products across all 8 categories)
+  - [x] Integration test suite & test isolation check (`pnpm -C web test:int` 28/28 test files passed, 419/419 tests passed, 100% row count identity on `kientaohub`)
+  - [x] Linter & build check (`pnpm -C web lint` 0 errors, `pnpm -C web build` 42/42 routes compiled)
+- [x] Step 7: Update documentation (`docs/plans/completed/realistic-db-seed.md`, `docs/runbooks/dev-database.md`)
+- [x] Step 8: Git staging & handoff report in `reviewer_r6/handoff.md`
+- [ ] Step 9: Single send_message to orchestrator

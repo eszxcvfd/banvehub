@@ -1,0 +1,32 @@
+# Reviewer Round 4 Progress
+
+## Status / Plan
+- [x] Initialized reviewer workspace and progress tracker
+- [x] Verified Findings E⁵ & E⁶ on live database:
+  - 253/253 orders predating buyer account creation
+  - 201/201 ledger entries predating user account creation
+  - 161/161 products predating seller profile creation
+  - 0 paid orders in recent 30 days (status stratification)
+  - 16/16 refunds with uniform unjittered 1-day delay
+- [x] Implemented Option (a) fix in `web/scripts/seed-realistic.mts`:
+  - Interleaved order generation (188 purchases, 35 pending, 30 cancelled) with overlapping ID ranges
+  - Deterministic permutation date distribution across 6 months
+  - Jittered refunds (2-72 hours)
+  - Aligned products to precede orders
+  - Backdated users and seller profiles to precede all activity
+  - Added supervisor 30-check automated acceptance suite assertions
+- [x] Preserved baseline backup `kientaohub-20260916-110336.dump` (938,678 bytes) and took fresh pre-wipe snapshot `kientaohub-r4-pre-wipe-20260916-151913.dump` (573,039 bytes)
+- [x] Re-seeded development database via `SEED_CONFIRM=yes pnpm -C web seed:realistic` (task-194 completed successfully with exit code 0)
+- [x] Executed independent raw SQL verification across all 30 supervisor acceptance checks:
+  - Suite A (Financials A1-A7): 100% passed (0 unlinked orders, 0 unlinked refunds, 0 unbacked refund credits, 16/16 refunds linked, 0 balance mismatches, 0 negative wallets, 0 unlogged paid orders)
+  - Suite B (Causal Integrity B1-B8): 100% passed (0 orders predate user accounts, 0 ledger rows predate user accounts, 0 products predate seller profiles, 0 entitlements/refunds predate orders; 44 distinct user creation days, 12 distinct seller profile creation days; admin id=1 earliest account)
+  - Suite C (Recency & De-stratification C1-C3): 100% passed (55 paid orders in last 45 days, non-zero across all 7 months Jul/Aug/Sep non-zero, overlapping ID ranges across all 4 statuses)
+  - Suite D (Refund Jitter D1-D2): 100% passed (16 distinct deltas from 13h to 70h, 0 exactly 24-hour deltas)
+  - Suite E (Preservation E1-E4): 100% passed (admin salt/hash/roles preserved byte-for-byte, commission global 0.30, all 5 triggers active, exact entity counts verified)
+- [x] Verified 6 negative trigger probes on live DB (all raised required exceptions)
+- [x] Verified test isolation (A5): `pnpm test:int` ran 28 test files (419 passed); row counts across all 17 tables on `kientaohub` before and after test run were 100% identical
+- [x] Verified `pnpm lint` (0 errors) and Next.js production build (`pnpm build`, 42/42 routes compiled with exit code 0)
+- [x] Updated `docs/plans/completed/realistic-db-seed.md` and `docs/runbooks/dev-database.md` documenting resolved invariants
+- [x] Staged all deliverables cleanly in git (`git add docs/ web/`)
+- [x] Write handoff report in `.agents/reviewer_r4/handoff.md`
+- [x] Send final message to parent orchestrator
