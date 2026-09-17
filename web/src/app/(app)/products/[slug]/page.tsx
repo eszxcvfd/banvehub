@@ -5,6 +5,7 @@ import { GridTileImage } from '@/components/Grid/tile'
 import { Gallery } from '@/components/product/Gallery'
 import { ProductDescription } from '@/components/product/ProductDescription'
 import { TechnicalSpecsTable } from '@/components/product/TechnicalSpecsTable'
+import { ProductReviewsSection } from '@/components/product/ProductReviewsSection'
 import configPromise from '@payload-config'
 import { getPayload } from 'payload'
 import { draftMode } from 'next/headers'
@@ -179,6 +180,11 @@ export default async function ProductPage({ params }: Args) {
         {/* Detailed Technical Specifications Table */}
         <div className="mt-10">
           <TechnicalSpecsTable product={product} />
+        </div>
+
+        {/* Customer Reviews and Ratings Section (R3, FR-20, BR-05) */}
+        <div className="mt-12">
+          <ProductReviewsSection productId={product.id} productTitle={product.title} />
         </div>
       </div>
 

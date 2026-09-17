@@ -90,6 +90,7 @@ export interface Config {
     withdrawals: Withdrawal;
     withdrawal_events: WithdrawalEvent;
     refunds: Refund;
+    reviews: Review;
     forms: Form;
     'form-submissions': FormSubmission;
     addresses: Address;
@@ -136,6 +137,7 @@ export interface Config {
     withdrawals: WithdrawalsSelect<false> | WithdrawalsSelect<true>;
     withdrawal_events: WithdrawalEventsSelect<false> | WithdrawalEventsSelect<true>;
     refunds: RefundsSelect<false> | RefundsSelect<true>;
+    reviews: ReviewsSelect<false> | ReviewsSelect<true>;
     forms: FormsSelect<false> | FormsSelect<true>;
     'form-submissions': FormSubmissionsSelect<false> | FormSubmissionsSelect<true>;
     addresses: AddressesSelect<false> | AddressesSelect<true>;
@@ -1516,6 +1518,49 @@ export interface Refund {
   createdAt: string;
 }
 /**
+ * Đánh giá và xếp hạng sản phẩm đã xác minh mua hàng (Reviews & Ratings - PLAN.md FR-20, BR-05)
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "reviews".
+ */
+export interface Review {
+  id: number;
+  /**
+   * Sản phẩm được đánh giá
+   */
+  product: number | Product;
+  /**
+   * Người mua gửi đánh giá
+   */
+  user: number | User;
+  /**
+   * Quyền sở hữu xác minh mua hàng (BR-05)
+   */
+  entitlement: number | Entitlement;
+  /**
+   * Đánh giá số sao (1 đến 5 sao)
+   */
+  rating: number;
+  /**
+   * Tiêu đề đánh giá (tùy chọn)
+   */
+  title?: string | null;
+  /**
+   * Nội dung nhận xét chi tiết (tối thiểu 5 ký tự)
+   */
+  content: string;
+  /**
+   * Trạng thái kiểm duyệt đánh giá
+   */
+  status: 'published' | 'pending' | 'rejected';
+  sellerReply?: {
+    comment?: string | null;
+    repliedAt?: string | null;
+  };
+  updatedAt: string;
+  createdAt: string;
+}
+/**
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "form-submissions".
  */
@@ -1687,6 +1732,10 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'refunds';
         value: number | Refund;
+      } | null)
+    | ({
+        relationTo: 'reviews';
+        value: number | Review;
       } | null)
     | ({
         relationTo: 'forms';
@@ -2385,6 +2434,27 @@ export interface RefundsSelect<T extends boolean = true> {
   processedBy?: T;
   ledgerTransaction?: T;
   entitlementRevoked?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "reviews_select".
+ */
+export interface ReviewsSelect<T extends boolean = true> {
+  product?: T;
+  user?: T;
+  entitlement?: T;
+  rating?: T;
+  title?: T;
+  content?: T;
+  status?: T;
+  sellerReply?:
+    | T
+    | {
+        comment?: T;
+        repliedAt?: T;
+      };
   updatedAt?: T;
   createdAt?: T;
 }

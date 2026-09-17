@@ -1,7 +1,7 @@
-# BRIEFING — 2026-09-16T13:28:00Z
+# BRIEFING — 2026-09-17T02:52:45Z
 
 ## Mission
-Oversee implementation and integration of Storefront Purchase and Download flow for KienTaoHub via SWE Light orchestrator (teamwork_preview_swe), monitoring progress and executing independent victory audit upon completion.
+Oversee implementation and integration of the launch-blocking P0 Reviews & Ratings system for KienTaoHub via SWE Light orchestrator (teamwork_preview_swe), monitoring progress and executing independent victory audit upon completion.
 
 ## 🔒 My Identity
 - Archetype: sentinel
@@ -21,6 +21,10 @@ Oversee implementation and integration of Storefront Purchase and Download flow 
 - Victory Auditor Sentinel Gen 4: 33d693e1-dfad-4453-baf7-be9c22126e06 (.agents/victory_auditor_sentinel_gen4 - running 3-phase audit)
 - Progress Reporting Cron Task: task-30 (cancelled upon completion)
 - Liveness Check Cron Task: task-32 (cancelled upon completion)
+- SWE Orchestrator Gen 5: b684d8cc-3e5c-4dab-8049-076d46d311a1 (.agents/swe_orchestrator_gen5 - victory claimed)
+- Progress Reporting Cron Task (Gen 5): task-26 (cancelled upon completion)
+- Liveness Check Cron Task (Gen 5): task-28 (cancelled upon completion)
+- Victory Auditor Sentinel Gen 5: 6294c3ae-a49e-44eb-b810-99939a008ffe (.agents/victory_auditor_sentinel_gen5 - VICTORY CONFIRMED)
 
 ## 🔒 Key Constraints
 - No technical decisions — relay only
@@ -30,34 +34,33 @@ Oversee implementation and integration of Storefront Purchase and Download flow 
 - BLOCKING AUDIT GATE: Victory audit MUST NOT pass while DEFECT E″ (wallet ledger structurally incomplete: missing 25 purchase debits on completed orders and missing 13 refund credits with null ledger_transaction_id) is open.
 - BLOCKING AUDIT GATE: Victory audit MUST NOT pass without empirical verification of Finding E¹³ (A/B/C/G timeline, E updated_at polarity, N paid_at null for row 8, J decoupled withdrawal status, Addendum A-D entitlements latency & refund spread/decoupling).
 - Non-regression & Quality Gates: 419 integration tests must pass, pnpm lint 0 errors, pnpm build 0 errors (42/42 routes).
+- Reviews & Ratings: BR-05 entitlement-backed reviews only; 1 review per buyer/product; rating 1-5; 401/403/409/400 validation; full stats aggregation.
 
 ## User Context
-- **Last user request**: Implement and integrate the end-to-end Storefront Purchase and Download flow for KienTaoHub (DigitalProductCTA, purchase API, download token streaming, wallet debit, free downloads, modals, self-purchase guard).
+- **Last user request**: Implement and integrate the launch-blocking P0 Reviews & Ratings system for KienTaoHub: create Payload CMS `Reviews` collection with BR-05 verified-purchase enforcement, implement API routes for reviews with stats aggregation, and build storefront UI on `/products/[slug]` with interactive review form and rating breakdown.
 - **Routing**: SWE Light path -> `teamwork_preview_swe`
 - **Routing rationale**: Single self-contained feature, user explicitly requested "Small, focused team (SWE Light: one implementing agent plus repeated adversarial review)".
 - **Pending clarifications**: none
 - **Delivered results**:
-  - `DigitalProductCTA.tsx` & `ProductDescription.tsx` wired with real product ID, seller verification, entitlement checking, wallet debit purchase trigger, and insufficient balance modal.
-  - Active entitlement detection immediately renders "Tải xuống ngay" with "Đã sở hữu" status.
-  - Seller identity detection displays "Sản phẩm của bạn" and locks self-purchases.
-  - Instant automatic download trigger on purchase success.
-  - Multi-tab real-time sync using `BroadcastChannel('kientaohub_purchases')`, `localStorage`, and window focus listeners.
-  - Free asset auto-enrollment via `purchaseProduct` (0 VND) without wallet deduction.
-  - Radix Dialog modals for Unauthenticated Guests (preserving return URL) and Insufficient Balance (shortfall math, top-up link to `/wallet`, and in-modal retry).
-  - All quality gates met: 60/60 challenger tests pass, 419/419 integration tests pass, ESLint 0 errors, clean Next.js build (43 routes).
+  - `Reviews` Payload CMS collection registered with schema relations (product, user, entitlement), bounds (1-5 rating), trimmed content, status, and sellerReply.
+  - Strict BR-05 enforcement: only buyers with active entitlements can submit reviews (403 for unentitled/revoked).
+  - Anti-abuse uniqueness: 1 review per buyer-product pair enforced via compound unique index and application hook (atomic 409).
+  - REST endpoints: `GET` with O(1) PostgreSQL Drizzle SQL aggregation (average, count, 1-5 breakdown) and `POST` / `PUT` with strict validation and role separation.
+  - Storefront UI on `/products/[slug]`: ratings breakdown, verified badge ("Đã mua hàng"), seller reply display, and interactive submission modal dialog.
+  - Full test suites: 455 integration tests pass (29/29 files, 36 reviews tests), 74 challenger tests pass (14 reviews tests), 165/165 seed invariants pass, 0 lint errors, build 0 (43 routes).
 
 ## Project Status
-- **Phase**: complete (VICTORY CONFIRMED by Independent Victory Auditor 33d693e1-dfad-4453-baf7-be9c22126e06; all crons and subagents terminated)
+- **Phase**: complete (VICTORY CONFIRMED by Independent Victory Auditor 6294c3ae-a49e-44eb-b810-99939a008ffe; all crons and subagents terminated)
 
 ## Victory Audit Status
 - **Triggered**: yes
-- **Auditor**: 33d693e1-dfad-4453-baf7-be9c22126e06 (.agents/victory_auditor_sentinel_gen4)
+- **Auditor**: 6294c3ae-a49e-44eb-b810-99939a008ffe (.agents/victory_auditor_sentinel_gen5)
 - **Verdict**: VICTORY CONFIRMED
 - **Retry count**: 0
 
 ## Artifact Index
 - /home/trung/Documents/2026/project/test-v6/.agents/ORIGINAL_REQUEST.md — Authoritative record of user requests
-- /home/trung/Documents/2026/project/test-v6/.agents/swe_orchestrator_gen4/handoff.md — Orchestrator handoff
-- /home/trung/Documents/2026/project/test-v6/.agents/victory_auditor_sentinel_gen4/audit.md — Sentinel Independent Victory Audit report
-- /home/trung/Documents/2026/project/test-v6/.agents/victory_auditor_sentinel_gen4/handoff.md — Auditor handoff
-
+- /home/trung/Documents/2026/project/test-v6/.agents/swe_orchestrator_gen5/handoff.md — SWE Orchestrator Gen 5 Handoff
+- /home/trung/Documents/2026/project/test-v6/.agents/victory_auditor_sentinel_gen5/audit.md — Sentinel Victory Auditor Gen 5 Report
+- /home/trung/Documents/2026/project/test-v6/.agents/victory_auditor_sentinel_gen5/handoff.md — Sentinel Victory Auditor Gen 5 Handoff
+- /home/trung/Documents/2026/project/test-v6/.agents/sentinel/handoff.md — Sentinel Completion Handoff

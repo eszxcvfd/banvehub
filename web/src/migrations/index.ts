@@ -6,6 +6,7 @@ import * as migration_20260915_064708_phase4_payment_wallet from './20260915_064
 import * as migration_20260915_071500_phase5_purchase_download from './20260915_071500_phase5_purchase_download';
 import * as migration_20260915_100000_phase6_seller_revenue from './20260915_100000_phase6_seller_revenue';
 import * as migration_20260916_000000_phase6_commission_settings from './20260916_000000_phase6_commission_settings';
+import * as migration_20260917_000000_phase7_reviews from './20260917_000000_phase7_reviews';
 
 export const migrations = [
   {
@@ -47,5 +48,10 @@ export const migrations = [
     up: migration_20260916_000000_phase6_commission_settings.up,
     down: migration_20260916_000000_phase6_commission_settings.down,
     name: '20260916_000000_phase6_commission_settings',
+  },
+  {
+    up: migration_20260917_000000_phase7_reviews.up,
+    down: migration_20260917_000000_phase7_reviews.down,
+    name: '20260917_000000_phase7_reviews',
   },
 ];

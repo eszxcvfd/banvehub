@@ -1234,3 +1234,98 @@ Integrity mode: development
 - [ ] `pnpm --prefix web test:int` passes all 419 integration tests against `kientaohub_test`.
 
 
+
+
+## 2026-09-17T01:43:05Z
+
+# Teamwork Project Prompt
+
+This is a single self-contained feature; keep it small and focused.
+Requested team: Small, focused team (SWE Light: one implementing agent plus repeated adversarial review)
+
+Implement and integrate the launch-blocking P0 Reviews & Ratings system for KienTaoHub: create the Payload CMS `Reviews` collection with BR-05 verified-purchase enforcement (entitlement-backed), implement secure API routes for submitting and fetching product reviews, and build the customer-facing reviews UI (ratings breakdown, verified badge, and review submission form) on the product details page (`/products/[slug]`).
+
+Working directory: /home/trung/Documents/2026/project/test-v6
+Integrity mode: development
+
+### Reference Material & Authoritative Directives
+- `PLAN.md`: `FR-20 — Review` (§756), `BR-05 — Review phải verified` (§1415), `FLOW-U08 — Đánh giá sau mua` (§1210).
+- `docs/decisions/0003-p0-scope-lock.md`: P0 entity list (`reviews` is the final launch-blocking entity).
+- Existing collections: `web/src/collections/` (`Entitlements`, `Products`, `Orders`, `Users`).
+- Existing product page: `web/src/app/(app)/[slug]/page.tsx`, `web/src/components/product/ProductDescription.tsx`.
+- Existing session & auth: `payload.auth({ headers })` and `useAuth()` hook.
+
+---
+
+## Requirements
+
+### R1. Payload CMS `Reviews` Collection (FR-20, BR-05)
+- Define and register the `Reviews` collection in Payload CMS (`web/src/collections/Reviews/` or `Reviews.ts`).
+- Schema fields:
+  - `product`: relationship to `products` (required, indexed).
+  - `user`: relationship to `users` (required, indexed).
+  - `entitlement`: relationship to `entitlements` (required for verified purchase validation).
+  - `rating`: integer 1 to 5 (required, min 1, max 5).
+  - `title`: text (optional).
+  - `content`: textarea / text (required, trimmed, min length 5).
+  - `status`: select (`published`, `pending`, `rejected`), default `published` (or `pending` if moderation applies).
+  - `sellerReply`: group or fields for seller response (text + repliedAt, optional).
+- Access control:
+  - Read: public for `published` status; users can read their own reviews; admins/moderators full read.
+  - Create: authenticated buyers holding active entitlement for the given product.
+  - Update: owner can edit within policy / admin can moderate.
+  - Delete: admin only (or user within grace period).
+- Uniqueness / Anti-abuse: ensure a user can only have one active review per product (enforced by unique index or beforeValidate hook).
+
+### R2. Reviews API Endpoints & Business Logic
+- **`GET /api/v1/products/[id]/reviews`**:
+  - Return paginated list of published reviews for the product, including reviewer name/avatar, rating, title, content, created date, and verified purchase badge.
+  - Return summary statistics: average rating (e.g. 4.8), total review count, and distribution breakdown (count for 1 to 5 stars).
+- **`POST /api/v1/products/[id]/reviews`**:
+  - Authenticate the requesting user (401 if unauthenticated).
+  - Enforce BR-05: verify the user owns an active `entitlement` for `productId` (403 if unentitled / no verified purchase).
+  - Prevent duplicate reviews: return 409 if user has already reviewed this product.
+  - Validate input bounds: rating must be integer 1–5; content must not be blank.
+  - Create review record linked to the user's entitlement and product.
+
+### R3. Storefront UI Reviews & Ratings Integration
+- Integrate a dedicated Reviews section into the product details page (`/products/[slug]`):
+  - **Rating Summary**: Display average star rating, star graphics (filled/half/empty stars), total review count, and a 5-bar rating distribution breakdown.
+  - **Review List**: Display published reviews chronologically with reviewer name, star rating, verified purchase badge ("Đã mua hàng"), date, and comment text.
+  - **Review Action / Form**:
+    - If user is authenticated, holds an active entitlement, and has not yet reviewed: render an intuitive "Viết đánh giá" (Write a review) button that opens a clean modal or inline form with interactive 1-5 star selector, optional title, and content field.
+    - If user has already reviewed: display their submitted review or allow editing.
+    - If user is not entitled or unauthenticated: clearly indicate reviews are restricted to verified purchasers ("Chỉ khách hàng đã mua sản phẩm mới có thể gửi đánh giá").
+
+### R4. Automated Testing & Verification Suite
+- Create challenger/integration test suites (`web/tests/challenger/reviews-flow.spec.tsx` or `web/tests/int/reviews.int.spec.ts`) covering:
+  - Unauthenticated requests rejected with 401.
+  - Non-purchaser requests rejected with 403 (BR-05 compliance).
+  - Purchaser with valid entitlement creates review successfully with 201/200.
+  - Duplicate review attempt rejected with 409.
+  - Invalid rating (< 1 or > 5) rejected with 400.
+  - GET reviews returns correct average rating and breakdown counts.
+- Maintain non-regression across all existing 28 integration test files (419 tests).
+
+### R5. Repository Quality & Build Gates
+- `pnpm --prefix web lint` must exit 0 with 0 errors.
+- `pnpm --prefix web build` must compile cleanly with exit code 0.
+- PostgreSQL database triggers and financial invariants must remain unmutated and healthy.
+
+---
+
+## Acceptance Criteria
+
+### Functional & Business Rule Gates
+- [ ] `Reviews` collection is registered in Payload CMS and visible in admin panel.
+- [ ] BR-05 is strictly enforced: only users with active entitlements for the product can submit reviews.
+- [ ] Users cannot submit multiple reviews for the same product (single review per buyer-product pair).
+- [ ] Rating is strictly validated to integers between 1 and 5.
+- [ ] `GET /api/v1/products/[id]/reviews` returns reviews, average rating, and 1-5 star breakdown.
+- [ ] Storefront `/products/[slug]` displays ratings breakdown, review list with "Đã mua hàng" badge, and review submission form for eligible buyers.
+
+### Verification & Quality Gates
+- [ ] Dedicated automated test suite passes with 100% green assertions for all business cases (401, 403, 409, 400, 201, stats aggregation).
+- [ ] `pnpm --prefix web test:int` passes 28/28 files, 419/419 tests with zero regressions.
+- [ ] `pnpm --prefix web lint` passes with 0 errors.
+- [ ] `pnpm --prefix web build` compiles cleanly with exit code 0.

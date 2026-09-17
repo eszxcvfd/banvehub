@@ -215,6 +215,24 @@ test.describe('KienTaoHub Phase 2: Digital Catalog Marketplace E2E Suite', () =>
       const res = await page.goto(`${baseURL}/products/non-existent-product-slug-xyz-404`)
       expect(res?.status()).toBe(404)
     })
+
+    test('T1-F3-06: Product detail renders Reviews & Ratings section (#reviews-section)', async ({ page }) => {
+      const slug = 'biet-thu-hien-dai-3-tang'
+      const res = await page.goto(`${baseURL}/products/${slug}`)
+      if (res?.status() === 200) {
+        // Reviews section container exists
+        const reviewsSection = page.locator('#reviews-section')
+        await expect(reviewsSection).toBeVisible()
+
+        // Reviews section heading
+        const reviewsHeading = reviewsSection.getByRole('heading', { name: /Đánh giá & Nhận xét/i })
+        await expect(reviewsHeading).toBeVisible()
+
+        // Unauthenticated guest sees login notice with link
+        const loginNotice = reviewsSection.getByRole('link', { name: /Đăng nhập/i }).first()
+        await expect(loginNotice).toBeVisible()
+      }
+    })
   })
 
   test.describe('Tier 1: Feature 4 - SEO, OpenGraph, Dynamic Sitemap & Robots.txt', () => {
