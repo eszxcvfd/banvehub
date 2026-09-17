@@ -26,6 +26,7 @@ import { Withdrawals } from '@/collections/Withdrawals'
 import { WithdrawalEvents } from '@/collections/WithdrawalEvents'
 import { Refunds } from '@/collections/Refunds'
 import { Reviews } from '@/collections/Reviews'
+import { Comments } from '@/collections/Comments'
 import { Pages } from '@/collections/Pages'
 import { PaymentIntents } from '@/collections/PaymentIntents'
 import { PaymentTransactions } from '@/collections/PaymentTransactions'
@@ -84,6 +85,7 @@ export default buildConfig({
     WithdrawalEvents,
     Refunds,
     Reviews,
+    Comments,
   ],
   db: postgresAdapter({
     pool: {

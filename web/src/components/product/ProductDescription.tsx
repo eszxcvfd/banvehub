@@ -6,7 +6,7 @@ import { DigitalProductCTA } from '@/components/product/DigitalProductCTA'
 import { SellerAttribution } from '@/components/product/SellerAttribution'
 import React from 'react'
 import Link from 'next/link'
-import { Star } from 'lucide-react'
+import { Star, MessageSquareText } from 'lucide-react'
 
 export function ProductDescription({ product }: { product: Product }) {
   const isFree = Boolean(product.isFree)
@@ -60,16 +60,28 @@ export function ProductDescription({ product }: { product: Product }) {
         <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
           {product.title}
         </h1>
-        <a
-          href="#reviews-section"
-          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors cursor-pointer"
-        >
-          <div className="flex items-center gap-0.5 text-amber-500">
-            <Star className="w-3.5 h-3.5 fill-amber-500" />
-            <span className="font-semibold text-foreground text-xs ml-0.5">Đánh giá</span>
-          </div>
-          <span>• Xem nhận xét từ khách hàng</span>
-        </a>
+        <div className="flex items-center gap-3 flex-wrap">
+          <a
+            href="#reviews-section"
+            className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+          >
+            <div className="flex items-center gap-0.5 text-amber-500">
+              <Star className="w-3.5 h-3.5 fill-amber-500" />
+              <span className="font-semibold text-foreground text-xs ml-0.5">Đánh giá</span>
+            </div>
+            <span>• Xem nhận xét từ khách hàng</span>
+          </a>
+          <span className="text-muted-foreground/30">•</span>
+          <a
+            href="#comments-section"
+            className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+          >
+            <div className="flex items-center gap-1 text-primary">
+              <MessageSquareText className="w-3.5 h-3.5" />
+              <span className="font-semibold text-foreground text-xs">Hỏi đáp & Bình luận</span>
+            </div>
+          </a>
+        </div>
       </div>
 
       {/* Digital CTA Card */}

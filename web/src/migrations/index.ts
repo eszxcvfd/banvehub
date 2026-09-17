@@ -7,6 +7,7 @@ import * as migration_20260915_071500_phase5_purchase_download from './20260915_
 import * as migration_20260915_100000_phase6_seller_revenue from './20260915_100000_phase6_seller_revenue';
 import * as migration_20260916_000000_phase6_commission_settings from './20260916_000000_phase6_commission_settings';
 import * as migration_20260917_000000_phase7_reviews from './20260917_000000_phase7_reviews';
+import * as migration_20260917_010000_phase8_comments from './20260917_010000_phase8_comments';
 
 export const migrations = [
   {
@@ -53,5 +54,10 @@ export const migrations = [
     up: migration_20260917_000000_phase7_reviews.up,
     down: migration_20260917_000000_phase7_reviews.down,
     name: '20260917_000000_phase7_reviews',
+  },
+  {
+    up: migration_20260917_010000_phase8_comments.up,
+    down: migration_20260917_010000_phase8_comments.down,
+    name: '20260917_010000_phase8_comments',
   },
 ];

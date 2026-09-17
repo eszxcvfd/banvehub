@@ -1329,3 +1329,101 @@ Integrity mode: development
 - [ ] `pnpm --prefix web test:int` passes 28/28 files, 419/419 tests with zero regressions.
 - [ ] `pnpm --prefix web lint` passes with 0 errors.
 - [ ] `pnpm --prefix web build` compiles cleanly with exit code 0.
+
+
+## 2026-09-17T03:11:48Z
+
+# Teamwork Project Prompt
+
+This is a single self-contained feature; keep it small and focused.
+Requested team: Small, focused team (SWE Light: one implementing agent plus repeated adversarial review)
+
+Implement and integrate the Product Comments & Q&A subsystem (FR-21) for KienTaoHub: create the Payload CMS `Comments` collection supporting public pre-purchase inquiries, seller/admin replies, and moderation states (`published`, `pending`, `hidden`); build secure REST API routes for listing, posting, and replying to comments; integrate an intuitive Q&A section into the product details page (`/products/[slug]`); and provide comprehensive automated integration and challenger tests.
+
+Working directory: /home/trung/Documents/2026/project/test-v6
+Integrity mode: development
+
+### Reference Material & Authoritative Directives
+- `PLAN.md`: `FR-21 — Comment / Q&A` (§778–795: User comment, Seller/Admin reply, Report, Hide, Thread/Reply).
+- Existing product page: `web/src/app/(app)/products/[slug]/page.tsx`, `web/src/components/product/ProductDescription.tsx`, `web/src/components/product/ProductReviewsSection.tsx`.
+- Existing collections: `web/src/collections/` (`Products`, `Users`, `Reviews`).
+- Existing session & auth: `payload.auth({ headers })` and `useAuth()` hook.
+
+---
+
+## Requirements
+
+### R1. Payload CMS `Comments` Collection (FR-21)
+- Define and register the `Comments` collection in Payload CMS (`web/src/collections/Comments/` or `Comments.ts`).
+- Schema fields:
+  - `product`: relationship to `products` (required, indexed).
+  - `user`: relationship to `users` (required, indexed).
+  - `parent`: relationship to `comments` (optional, self-referential for 1-level reply threads).
+  - `content`: textarea / text (required, trimmed, min length 3).
+  - `status`: select (`published`, `pending`, `hidden`), default `published`.
+  - `isSellerReply`: boolean (automatically computed or set when the replying user matches the product's seller).
+  - `isAdminReply`: boolean (automatically set when the replying user is an admin).
+- Access control:
+  - Read: public for `published` status; admins/moderators can view all statuses.
+  - Create: authenticated users (buyers, visitors, sellers, admins).
+  - Update: comment author (text content only within policy) or admin/moderator (moderation status).
+  - Delete: author soft-delete/hide or admin hard-delete.
+- Indexing & Migration: add migration file to create `comments` table with foreign keys and index on `(product_id, status)`.
+
+### R2. Comments REST Endpoints & Business Logic
+- **`GET /api/v1/products/[id]/comments`**:
+  - Return top-level published comments with their nested replies for the product.
+  - Include author attribution (name, avatar, role badges: "Tác giả / Người bán" or "Quản trị viên").
+  - Return total comment count and pagination support.
+- **`POST /api/v1/products/[id]/comments`**:
+  - Authenticate the requesting user (401 if unauthenticated).
+  - Validate input: `content` must be non-empty and meet minimum length (400 if invalid).
+  - If `parentId` is provided: verify the parent comment exists, belongs to the same product, and is a top-level comment (prevent unbounded nesting depth).
+  - Detect role context: flag if user is the product's seller (`isSellerReply = true`) or platform admin (`isAdminReply = true`).
+  - Create comment record with status `published` (201).
+- **`PATCH /api/v1/products/[id]/comments/[commentId]`**:
+  - Allow author or admin to update/hide their comment (200).
+
+### R3. Storefront UI Q&A & Comments Integration
+- Integrate a clean Q&A / Comments section on the product details page (`/products/[slug]`):
+  - Provide easy navigation alongside Reviews (e.g. tabs "Đánh giá" & "Hỏi đáp / Bình luận" or a dedicated section below reviews).
+  - Display comments list with author name, time ago, seller/admin badge, and reply thread.
+  - Interactive Comment Form:
+    - If authenticated: clear text input with "Đặt câu hỏi về tài nguyên này..." and submit button.
+    - If unauthenticated: prompt to login or display friendly login CTA.
+  - Reply Action:
+    - Allow the product seller or admin (and original author) to reply directly under a question.
+
+### R4. Automated Testing & Verification Suite
+- Create challenger and integration test suites (`web/tests/int/comments.int.spec.ts` and `web/tests/challenger/comments-flow.spec.tsx`) covering:
+  - Unauthenticated creation rejected (401).
+  - Valid user comment creation (201).
+  - Reply to comment with valid parent (201).
+  - Reply with invalid parent or mismatched product rejected (400/404).
+  - Blank/short content rejected (400).
+  - Role badge detection (seller reply flag vs regular user).
+  - GET comments returns nested replies with correct counts.
+- Maintain non-regression across all existing 29 integration test files (455 tests).
+
+### R5. Repository Quality & Build Gates
+- `pnpm --prefix web lint` must exit 0 with 0 errors.
+- `pnpm --prefix web build` must compile cleanly with exit code 0.
+- Database triggers and existing financial/seed invariants must remain unmutated.
+
+---
+
+## Acceptance Criteria
+
+### Functional & Business Rule Gates
+- [ ] `Comments` collection registered in Payload CMS and visible in admin panel.
+- [ ] Authenticated users can ask questions on any product; unauthenticated users prompted to log in.
+- [ ] Sellers and admins can reply to questions, displaying distinctive role badges ("Tác giả", "Quản trị viên").
+- [ ] Replies are properly linked to parent comments with a clean 1-level thread hierarchy.
+- [ ] Input is strictly validated (no blank or spam comments).
+- [ ] Storefront `/products/[slug]` renders the Q&A section with comment list, reply threads, and submission form.
+
+### Verification & Quality Gates
+- [ ] Dedicated automated test suite passes with 100% green assertions across all status codes and flows (401, 400, 201, replies, badges).
+- [ ] `pnpm --prefix web test:int` passes with zero regressions.
+- [ ] `pnpm --prefix web lint` passes with 0 errors.
+- [ ] `pnpm --prefix web build` compiles cleanly with exit code 0.

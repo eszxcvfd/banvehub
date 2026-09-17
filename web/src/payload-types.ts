@@ -91,6 +91,7 @@ export interface Config {
     withdrawal_events: WithdrawalEvent;
     refunds: Refund;
     reviews: Review;
+    comments: Comment;
     forms: Form;
     'form-submissions': FormSubmission;
     addresses: Address;
@@ -138,6 +139,7 @@ export interface Config {
     withdrawal_events: WithdrawalEventsSelect<false> | WithdrawalEventsSelect<true>;
     refunds: RefundsSelect<false> | RefundsSelect<true>;
     reviews: ReviewsSelect<false> | ReviewsSelect<true>;
+    comments: CommentsSelect<false> | CommentsSelect<true>;
     forms: FormsSelect<false> | FormsSelect<true>;
     'form-submissions': FormSubmissionsSelect<false> | FormSubmissionsSelect<true>;
     addresses: AddressesSelect<false> | AddressesSelect<true>;
@@ -1561,6 +1563,45 @@ export interface Review {
   createdAt: string;
 }
 /**
+ * Hỏi đáp & Bình luận sản phẩm (Q&A / Comments - PLAN.md FR-21)
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "comments".
+ */
+export interface Comment {
+  id: number;
+  /**
+   * Sản phẩm được bình luận
+   */
+  product: number | Product;
+  /**
+   * Người gửi bình luận
+   */
+  user: number | User;
+  /**
+   * Bình luận cha (nếu là câu trả lời 1 cấp)
+   */
+  parent?: (number | null) | Comment;
+  /**
+   * Nội dung bình luận / câu hỏi (tối thiểu 3 ký tự)
+   */
+  content: string;
+  /**
+   * Trạng thái kiểm duyệt bình luận
+   */
+  status: 'published' | 'pending' | 'hidden';
+  /**
+   * Đánh dấu phản hồi từ người bán sản phẩm
+   */
+  isSellerReply?: boolean | null;
+  /**
+   * Đánh dấu phản hồi từ quản trị viên
+   */
+  isAdminReply?: boolean | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "form-submissions".
  */
@@ -1736,6 +1777,10 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'reviews';
         value: number | Review;
+      } | null)
+    | ({
+        relationTo: 'comments';
+        value: number | Comment;
       } | null)
     | ({
         relationTo: 'forms';
@@ -2455,6 +2500,21 @@ export interface ReviewsSelect<T extends boolean = true> {
         comment?: T;
         repliedAt?: T;
       };
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "comments_select".
+ */
+export interface CommentsSelect<T extends boolean = true> {
+  product?: T;
+  user?: T;
+  parent?: T;
+  content?: T;
+  status?: T;
+  isSellerReply?: T;
+  isAdminReply?: T;
   updatedAt?: T;
   createdAt?: T;
 }

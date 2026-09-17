@@ -6,6 +6,7 @@ import { Gallery } from '@/components/product/Gallery'
 import { ProductDescription } from '@/components/product/ProductDescription'
 import { TechnicalSpecsTable } from '@/components/product/TechnicalSpecsTable'
 import { ProductReviewsSection } from '@/components/product/ProductReviewsSection'
+import { ProductCommentsSection } from '@/components/product/ProductCommentsSection'
 import configPromise from '@payload-config'
 import { getPayload } from 'payload'
 import { draftMode } from 'next/headers'
@@ -185,6 +186,15 @@ export default async function ProductPage({ params }: Args) {
         {/* Customer Reviews and Ratings Section (R3, FR-20, BR-05) */}
         <div className="mt-12">
           <ProductReviewsSection productId={product.id} productTitle={product.title} />
+        </div>
+
+        {/* Product Q&A and Comments Section (FR-21) */}
+        <div className="mt-12">
+          <ProductCommentsSection
+            productId={product.id}
+            productTitle={product.title}
+            sellerId={typeof product.seller === 'object' && product.seller !== null ? product.seller.id : product.seller}
+          />
         </div>
       </div>
 
