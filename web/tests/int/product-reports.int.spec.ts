@@ -1114,6 +1114,290 @@ describe('Product reports → moderation cases (FR-22)', () => {
   })
 
   // -------------------------------------------------------------------------
+  // Repair (t4 / finding F1) — the two branches that run AFTER payload.create fails
+  // -------------------------------------------------------------------------
+  describe('Repair F1: the post-create-failure branches (500 vs 409)', () => {
+    // Mutation check (repair t4/F1c) — these two tests are behaviour tests on the branch
+    // under test, not tautologies. Measured on transient scratch copies of
+    // `src/app/api/v1/products/[id]/reports/route.ts` (deleted after the run), driving
+    // the real route and one mutant with identical fixtures/state:
+    //  - mutant A "post-failure re-check removed (rethrow only)": real route 409,
+    //    mutant A 500 → the F1b assertion `expect(res.status).toBe(409)` fails;
+    //  - mutant B "every create failure mapped to 409": real route 500, mutant B 409 for
+    //    a (reporter, product) that owns no case at all → the F1a assertion
+    //    `expect(res.status).toBe(500)` fails.
+    // Recipe: copy the route next to this spec, apply one mutation, point a scratch spec
+    // at it and run `npx vitest run --config ./vitest.config.mts <scratch spec>`.
+    it('F1a: a create failure that is NOT a duplicate surfaces as 500 and writes no case', async () => {
+      const reporter = await createUser(
+        `f1a-${Date.now()}-${getSeq()}@kientaohub.local`,
+        ['buyer'],
+      )
+      const product = await createProduct(
+        `fr22-repair-f1a-${Date.now()}-${getSeq()}`,
+        'FR-22 Repair F1a Product',
+      )
+      actAs(reporter)
+
+      // The pre-check ran on the real DB (no open case), then the INSERT itself fails for
+      // an infrastructure reason — nothing about an existing case.
+      const originalCreate = payload.create.bind(payload)
+      let createAttempts = 0
+      const createSpy = vi.spyOn(payload, 'create').mockImplementation(async (args: any) => {
+        if (args?.collection === 'moderation_cases') {
+          createAttempts += 1
+          throw new Error('FR22_TEST_INJECTED_CREATE_FAILURE: connection terminated')
+        }
+        return (await originalCreate(args)) as any
+      })
+
+      let res: Response
+      try {
+        res = await POST(reportRequest(product.id, { reason: 'SPAM' }), makeContext(product.id))
+      } finally {
+        createSpy.mockRestore()
+      }
+
+      expect(createAttempts).toBe(1)
+      expect(res.status).toBe(500)
+      expect(res.status).not.toBe(201)
+      expect(res.status).not.toBe(409)
+
+      const body = await res.json()
+      expect(body.error).toBe('INTERNAL_ERROR')
+      expect(typeof body.message).toBe('string')
+      expect(body.message.length).toBeGreaterThan(0)
+      expect(body.success).toBeUndefined()
+
+      // The failure did not leave a partial write behind.
+      expect(
+        await countCases(`reporter_id = ${reporter.id} AND product_id = ${product.id}`),
+      ).toBe(0)
+    })
+
+    it('F1b: a create failure while a racing open case exists surfaces as 409 DUPLICATE_REPORT', async () => {
+      const reporter = await createUser(
+        `f1b-${Date.now()}-${getSeq()}@kientaohub.local`,
+        ['buyer'],
+      )
+      const product = await createProduct(
+        `fr22-repair-f1b-${Date.now()}-${getSeq()}`,
+        'FR-22 Repair F1b Product',
+      )
+      actAs(reporter)
+
+      // The winner of the race lands an OPEN case for the same (reporter, product) between
+      // the route's pre-check and its INSERT.
+      const seeded = await rawSql<any>(
+        `INSERT INTO moderation_cases (product_id, reporter_id, reason, status)
+         VALUES (${product.id}, ${reporter.id}, 'SPAM', 'OPEN') RETURNING id;`,
+      )
+      caseIds.push(seeded[0].id)
+
+      // The pre-check is blinded (it must miss the racing row), while the post-failure
+      // re-check reads the real table — the exact production ordering.
+      const originalFind = payload.find.bind(payload)
+      let caseLookups = 0
+      const findSpy = vi.spyOn(payload, 'find').mockImplementation(async (args: any) => {
+        if (args?.collection === 'moderation_cases') {
+          caseLookups += 1
+          if (caseLookups === 1) {
+            return { docs: [], totalDocs: 0, limit: 1, page: 1, totalPages: 0 } as any
+          }
+        }
+        return (await originalFind(args)) as any
+      })
+
+      // The INSERT loses the race: PostgreSQL refuses it through the partial unique index
+      // in production; here the same failure is injected deterministically.
+      const originalCreate = payload.create.bind(payload)
+      let createAttempts = 0
+      const createSpy = vi.spyOn(payload, 'create').mockImplementation(async (args: any) => {
+        if (args?.collection === 'moderation_cases') {
+          createAttempts += 1
+          throw new Error(
+            'FR22_TEST_INJECTED_UNIQUE_VIOLATION: duplicate key value violates unique constraint "moderation_cases_open_reporter_product_idx"',
+          )
+        }
+        return (await originalCreate(args)) as any
+      })
+
+      let res: Response
+      try {
+        res = await POST(reportRequest(product.id, { reason: 'SPAM' }), makeContext(product.id))
+      } finally {
+        createSpy.mockRestore()
+        findSpy.mockRestore()
+      }
+
+      expect(createAttempts).toBe(1)
+      expect(caseLookups).toBeGreaterThanOrEqual(2)
+      expect(res.status).toBe(409)
+      const body = await res.json()
+      expect(body.error).toBe('DUPLICATE_REPORT')
+      expect(body.message).toMatch(/đang chờ xử lý|đã có/i)
+      expect(body.success).toBeUndefined()
+
+      // The winner's row is the only one — the loser wrote nothing extra.
+      expect(
+        await countCases(`reporter_id = ${reporter.id} AND product_id = ${product.id}`),
+      ).toBe(1)
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // Repair (t4 / finding F3) — unpublished products are indistinguishable from unknown
+  // -------------------------------------------------------------------------
+  describe('Repair F3: unpublished products resolve like unknown products (anti-enumeration)', () => {
+    // Mutation check (repair t4/F3): on a transient scratch copy of the route with
+    // `storefrontVisibilityWhere()` removed from both lookups (the pre-repair behaviour),
+    // the same unpublished fixture answered `201` with a real created case
+    // (`{"success":true,"case":{"id":…,"status":"OPEN"}}`) while the real route answers
+    // `404 {"error":"PRODUCT_NOT_FOUND",…}` — so the F3a assertion
+    // `expect(byId.status).toBe(404)` fails against the unfiltered route, and the
+    // enumeration channel the finding described did exist.
+    let draftProduct: Product
+    const UNPUBLISHED_STATES = ['draft', 'submitted', 'in_review', 'changes_requested', 'rejected']
+
+    beforeAll(async () => {
+      draftProduct = await createProduct(
+        `fr22-repair-draft-${Date.now()}-${getSeq()}`,
+        'FR-22 Repair Unpublished Product',
+      )
+      // Park the fixture in an unpublished state (the route only reads `_status`; the
+      // moderation_status variants below are set with raw SQL to cover every non-approved
+      // state without re-implementing the moderation transition hooks here).
+      await rawSql(
+        `UPDATE products SET _status = 'draft', moderation_status = 'draft' WHERE id = ${draftProduct.id};`,
+      )
+      const row = await productRowState(draftProduct.id)
+      expect(row._status).toBe('draft')
+    })
+
+    it('F3a: every unpublished moderation state returns 404 for both the numeric id and the slug', async () => {
+      actAs(reporter1)
+
+      for (const state of UNPUBLISHED_STATES) {
+        await rawSql(
+          `UPDATE products SET _status = 'draft', moderation_status = '${state}' WHERE id = ${draftProduct.id};`,
+        )
+        const row = await productRowState(draftProduct.id)
+        expect(row.moderation_status, `state ${state} stored`).toBe(state)
+        expect(row._status, `state ${state} is unpublished`).toBe('draft')
+
+        const byId = await POST(
+          reportRequest(draftProduct.id, { reason: 'SPAM' }),
+          makeContext(draftProduct.id),
+        )
+        expect(byId.status, `unpublished (${state}) must 404 by id`).toBe(404)
+        expect((await byId.json()).error).toBe('PRODUCT_NOT_FOUND')
+
+        const bySlug = await POST(
+          reportRequest(draftProduct.slug as string, { reason: 'SPAM' }),
+          makeContext(draftProduct.slug as string),
+        )
+        expect(bySlug.status, `unpublished (${state}) must 404 by slug`).toBe(404)
+        expect((await bySlug.json()).error).toBe('PRODUCT_NOT_FOUND')
+      }
+
+      // No case was ever opened against the unpublished product.
+      expect(await countCases(`product_id = ${draftProduct.id}`)).toBe(0)
+    })
+
+    it('F3b: the unpublished-product 404 is byte-identical to the unknown-product 404', async () => {
+      await rawSql(
+        `UPDATE products SET _status = 'draft', moderation_status = 'submitted' WHERE id = ${draftProduct.id};`,
+      )
+      actAs(reporter1)
+
+      // Unknown slug/id — the reference response an attacker can trigger at will.
+      const unknownSlug = 'fr22-repair-khong-ton-tai'
+      const unknownBySlug = await POST(
+        reportRequest(unknownSlug, { reason: 'SPAM' }),
+        makeContext(unknownSlug),
+      )
+      const unknownBySlugBody = await unknownBySlug.text()
+      const unknownById = await POST(
+        reportRequest(987654321, { reason: 'SPAM' }),
+        makeContext(987654321),
+      )
+      const unknownByIdBody = await unknownById.text()
+
+      const draftBySlug = await POST(
+        reportRequest(draftProduct.slug as string, { reason: 'SPAM' }),
+        makeContext(draftProduct.slug as string),
+      )
+      const draftBySlugBody = await draftBySlug.text()
+      const draftById = await POST(
+        reportRequest(draftProduct.id, { reason: 'SPAM' }),
+        makeContext(draftProduct.id),
+      )
+      const draftByIdBody = await draftById.text()
+
+      // Same status AND same body bytes: nothing distinguishes "exists but unpublished"
+      // from "does not exist".
+      expect(draftBySlug.status).toBe(unknownBySlug.status)
+      expect(draftBySlugBody).toBe(unknownBySlugBody)
+      expect(draftById.status).toBe(unknownById.status)
+      expect(draftByIdBody).toBe(unknownByIdBody)
+
+      // …and the shared body is the documented envelope, not an accidental empty 404.
+      expect(unknownBySlugBody).toBe(
+        JSON.stringify({ error: 'PRODUCT_NOT_FOUND', message: 'Không tìm thấy sản phẩm.' }),
+      )
+      expect(draftByIdBody).toBe(unknownBySlugBody)
+    })
+
+    it('F3c: the filter matches the storefront rule, and published products still report (201 then 409)', async () => {
+      const fs = await import('node:fs/promises')
+      const path = await import('node:path')
+      const routeSource = await fs.readFile(
+        path.resolve(process.cwd(), 'src/app/api/v1/products/[id]/reports/route.ts'),
+        'utf8',
+      )
+      const pageSource = await fs.readFile(
+        path.resolve(process.cwd(), 'src/app/(app)/products/[slug]/page.tsx'),
+        'utf8',
+      )
+      // The route reuses the storefront rule verbatim — no bespoke visibility rule.
+      expect(pageSource).toContain("_status: { equals: 'published' }")
+      expect(routeSource).toContain("_status: { equals: 'published' }")
+      expect(routeSource).toContain('storefrontVisibilityWhere')
+
+      // Behavioural agreement on the same fixtures: the route hides exactly what the
+      // storefront query hides, and serves what it serves.
+      await rawSql(
+        `UPDATE products SET _status = 'draft', moderation_status = 'rejected' WHERE id = ${draftProduct.id};`,
+      )
+      expect(await storefrontQuery(draftProduct.slug as string)).toBe(0)
+      expect(await storefrontQuery(mainProduct.slug as string)).toBe(1)
+
+      // A published product is reportable normally: 201 first, 409 on the open duplicate.
+      const reporter = await createUser(
+        `f3c-${Date.now()}-${getSeq()}@kientaohub.local`,
+        ['buyer'],
+      )
+      actAs(reporter)
+
+      const first = await POST(
+        reportRequest(mainProduct.id, { reason: 'MISLEADING_PREVIEW' }),
+        makeContext(mainProduct.id),
+      )
+      expect(first.status).toBe(201)
+      const firstBody = await first.json()
+      caseIds.push(firstBody.case.id)
+      expect(firstBody.case.status).toBe('OPEN')
+
+      const second = await POST(
+        reportRequest(mainProduct.id, { reason: 'SPAM' }),
+        makeContext(mainProduct.id),
+      )
+      expect(second.status).toBe(409)
+      expect((await second.json()).error).toBe('DUPLICATE_REPORT')
+    })
+  })
+
+  // -------------------------------------------------------------------------
   // Closing invariants — measured after every reporting flow above has run
   // -------------------------------------------------------------------------
   describe('Criterion 4/9 (closing): the catalog and the money path are untouched', () => {

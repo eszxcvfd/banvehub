@@ -83,10 +83,21 @@ Positive:
 
 Tradeoffs:
 
-- Draft products are currently reportable and unpublished ids/slugs are
-  enumerable (`201`/`409` versus `404`), because the route resolves a product
-  without a `_status = published` filter. Measured as review finding F3 and
-  recorded as a follow-up; fixing it needs its own change.
+- Unpublished products are not reportable: the route resolves only
+  `_status = 'published'` products, so a draft answers exactly like a nonexistent
+  product. This closed the enumeration channel that the first release left open
+  (`201`/`409` versus `404`), measured as review finding F3 and shipped in the
+  follow-up repair round of 2026-09-18.
+- The visibility rule is currently written in two places — `queryProductBySlug` in
+  `web/src/app/(app)/products/[slug]/page.tsx:249-274` and
+  `storefrontVisibilityWhere` in the report route — because the repair was scoped to
+  the route. Review finding R1 records the drift risk: the agreement assertion binds
+  them by substring and does not detect a separately tightened page rule, so the rule
+  should be single-sourced in a shared module with a behavioural agreement check.
+- In draft-preview mode the product page still renders the report entry point, whose
+  `POST` now answers `404` for the unpublished product being previewed. Review finding
+  R2 records this and asks for the section to be hidden when
+  `draftMode().isEnabled`.
 - Rate limiting is still absent (NFR-17), so the dedupe rule is today's only
   anti-abuse measure for this surface.
 - A reporter can see only the fact that their report exists; the case is not
@@ -95,9 +106,15 @@ Tradeoffs:
 
 ## Follow-Up
 
-- F3 above: add a visibility filter to the report route, or record explicitly why
-  drafts stay reportable.
-- F1/F2 from the same review: test the `500` path and assert the rendered
-  `#report-section` entry point in the committed e2e suite.
+- R1: single-source the visibility rule and assert page↔route agreement behaviourally
+  instead of by substring.
+- R2: hide the report entry point while the page is in draft-preview mode.
+- F2 from the first review round: assert the rendered `#report-section` entry point in
+  the committed e2e suite (`web/tests/e2e/frontend.e2e.spec.ts`), which today covers
+  cart machinery only.
+- F4/F5 hygiene from the first review round: `migrate:down` of
+  `web/src/migrations/20260917_052848_phase9_tickets.ts` fails on an unguarded
+  `DROP CONSTRAINT`, and `.lit/evidence/verifier-t2-http.log` holds an inert JWT that
+  must be redacted before any `.lit/` commit (`.lit/` is untracked scratch today).
 - §13 notifications remain out of P0 per decision 0003, so reporters are not yet
   told the outcome of their report.

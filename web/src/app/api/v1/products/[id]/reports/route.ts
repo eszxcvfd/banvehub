@@ -19,8 +19,24 @@ const OPEN_CASE_STATUSES = ['OPEN', 'IN_REVIEW']
 const MAX_DESCRIPTION_LENGTH = 2000
 
 /**
+ * The storefront visibility rule, mirrored from `queryProductBySlug` in
+ * `src/app/(app)/products/[slug]/page.tsx`: outside draft-preview mode the catalog is
+ * only readable when `_status` is `published`.
+ *
+ * The report route has no draft-preview mode (that surface belongs to the page's
+ * `draftMode()` path), so it applies the published-only rule unconditionally. An
+ * unpublished product is therefore reported as `404 PRODUCT_NOT_FOUND`, exactly like a
+ * product that does not exist — without this filter, an attacker could enumerate
+ * draft/rejected ids and slugs by telling `201`/`409` apart from `404`.
+ *
+ * A fresh object is returned per call because the where clause is handed to the query
+ * builder (which may annotate it).
+ */
+const storefrontVisibilityWhere = () => ({ _status: { equals: 'published' } })
+
+/**
  * Resolve the product from a route param that may be either the numeric id or the slug.
- * Same contract as the FR-21 comments route.
+ * Only published products resolve (see `storefrontVisibilityWhere`).
  */
 async function resolveProductId(payload: any, paramId: string): Promise<number | null> {
   const trimmed = paramId?.trim()
@@ -32,9 +48,7 @@ async function resolveProductId(payload: any, paramId: string): Promise<number |
       const prodRes = await payload.find({
         collection: 'products',
         where: {
-          id: {
-            equals: id,
-          },
+          and: [{ id: { equals: id } }, storefrontVisibilityWhere()],
         },
         limit: 1,
         depth: 0,
@@ -49,9 +63,7 @@ async function resolveProductId(payload: any, paramId: string): Promise<number |
   const prods = await payload.find({
     collection: 'products',
     where: {
-      slug: {
-        equals: trimmed,
-      },
+      and: [{ slug: { equals: trimmed } }, storefrontVisibilityWhere()],
     },
     limit: 1,
     depth: 0,
@@ -116,7 +128,10 @@ function formatCase(doc: any, reporterId: number | string) {
  *
  * Contract (owner decision 2026-09-18, following the FR-21/FR-23 precedent):
  * - `401 UNAUTHORIZED` — only signed-in users may report; guests are invited to log in.
- * - `404 PRODUCT_NOT_FOUND` — the id/slug does not resolve to a product.
+ * - `404 PRODUCT_NOT_FOUND` — the id/slug does not resolve to a *published* product.
+ *   Unpublished products (draft, submitted, in_review, changes_requested, rejected) take
+ *   this branch too and are byte-identical to the unknown-product response, so the
+ *   endpoint never confirms the existence of a non-published product.
  * - `400 INVALID_REQUEST | INVALID_REASON | INVALID_DESCRIPTION` — malformed body, a
  *   reason outside the seven FR-22 values, or an oversized description.
  * - `409 DUPLICATE_REPORT` — this user already has an OPEN/IN_REVIEW case for this
