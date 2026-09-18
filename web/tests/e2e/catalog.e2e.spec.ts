@@ -1,7 +1,45 @@
 import { test, expect } from '@playwright/test'
-import { TEST_USERS } from '../helpers/seedCatalog'
+import { getTestPayload, TEST_USERS } from '../helpers/seedCatalog'
 
 const baseURL = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3000'
+
+/**
+ * Removes a product row this file created, selected by the exact slug the attempt used.
+ *
+ * `seller-asset-*` rows are NOT part of the suite's fixture identities (tests/helpers/seedCatalog.ts
+ * owns exactly 4 emails / 3 category slugs / 5 product slugs and nothing else), so the suite-level
+ * teardown deliberately does not touch them: whichever test creates such a row has to remove it
+ * itself, otherwise every full run leaves one more draft behind in the dev database.
+ *
+ * The write goes through the Payload Local API, the same path the other fixtures use - no raw SQL
+ * and no trigger bypass. `deleteByID` resolves the document by `id` alone (it does not filter on
+ * `_status`), so a `_status: 'draft'` row, which the REST delete endpoint would refuse without
+ * `?draft=true`, is removed, and Payload drops its `_products_v` version row together with it.
+ *
+ * The row is re-read after the delete and the survivor count is returned instead of being ignored:
+ * the caller asserts on it, so a failed cleanup fails the test loudly rather than leaving residue
+ * for the next run.
+ */
+async function deleteProductBySlug(slug: string): Promise<number> {
+  const payload = await getTestPayload()
+
+  const read = async (): Promise<{ id: string | number }[]> => {
+    const found = (await payload.find({
+      collection: 'products',
+      where: { slug: { equals: slug } },
+      limit: 0,
+      draft: true,
+      overrideAccess: true,
+    })) as unknown as { docs: { id: string | number }[] }
+    return found.docs
+  }
+
+  for (const doc of await read()) {
+    await payload.delete({ collection: 'products', id: doc.id, overrideAccess: true })
+  }
+
+  return (await read()).length
+}
 
 let sellerToken: string = ''
 let moderatorToken: string = ''
@@ -332,19 +370,29 @@ test.describe('KienTaoHub Phase 2: Digital Catalog Marketplace E2E Suite', () =>
         return
       }
 
-      const res = await request.post(`${baseURL}/api/products`, {
-        headers: {
-          Authorization: `JWT ${sellerToken}`,
-        },
-        data: {
-          title: `Seller Created Asset ${Date.now()}`,
-          slug: `seller-asset-${Date.now()}`,
-          price: 200000,
-          isFree: false,
-          _status: 'draft',
-        },
-      })
-      expect([200, 201]).toContain(res.status())
+      // One fresh slug per attempt: the cleanup below targets this attempt's row only, so a retry
+      // (or a sibling worker) can never delete or be confused by another attempt's product.
+      const slug = `seller-asset-${Date.now()}`
+
+      try {
+        const res = await request.post(`${baseURL}/api/products`, {
+          headers: {
+            Authorization: `JWT ${sellerToken}`,
+          },
+          data: {
+            title: `Seller Created Asset ${Date.now()}`,
+            slug,
+            price: 200000,
+            isFree: false,
+            _status: 'draft',
+          },
+        })
+        expect([200, 201]).toContain(res.status())
+      } finally {
+        // `finally` (not a trailing statement) so the row is removed even when the assertion above
+        // fails - a failed attempt must not leave its draft behind for the retry to inherit.
+        expect(await deleteProductBySlug(slug)).toBe(0)
+      }
     })
 
     test('T1-F5-06: Moderator role can update/moderate products (Decision 0008)', async ({ request }) => {
