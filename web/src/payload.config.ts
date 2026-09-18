@@ -28,6 +28,7 @@ import { Refunds } from '@/collections/Refunds'
 import { Reviews } from '@/collections/Reviews'
 import { Comments } from '@/collections/Comments'
 import { Tickets } from '@/collections/Tickets'
+import { ModerationCases } from '@/collections/ModerationCases'
 import { Pages } from '@/collections/Pages'
 import { PaymentIntents } from '@/collections/PaymentIntents'
 import { PaymentTransactions } from '@/collections/PaymentTransactions'
@@ -88,6 +89,7 @@ export default buildConfig({
     Reviews,
     Comments,
     Tickets,
+    ModerationCases,
   ],
   db: postgresAdapter({
     pool: {

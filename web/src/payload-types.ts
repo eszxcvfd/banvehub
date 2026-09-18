@@ -93,6 +93,7 @@ export interface Config {
     reviews: Review;
     comments: Comment;
     tickets: Ticket;
+    moderation_cases: ModerationCase;
     forms: Form;
     'form-submissions': FormSubmission;
     addresses: Address;
@@ -142,6 +143,7 @@ export interface Config {
     reviews: ReviewsSelect<false> | ReviewsSelect<true>;
     comments: CommentsSelect<false> | CommentsSelect<true>;
     tickets: TicketsSelect<false> | TicketsSelect<true>;
+    moderation_cases: ModerationCasesSelect<false> | ModerationCasesSelect<true>;
     forms: FormsSelect<false> | FormsSelect<true>;
     'form-submissions': FormSubmissionsSelect<false> | FormSubmissionsSelect<true>;
     addresses: AddressesSelect<false> | AddressesSelect<true>;
@@ -1671,6 +1673,56 @@ export interface Ticket {
   createdAt: string;
 }
 /**
+ * Hồ sơ kiểm duyệt do người dùng báo cáo sản phẩm (FR-22). Moderator/Admin xem và xử lý tại đây; báo cáo không tự đổi trạng thái sản phẩm.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "moderation_cases".
+ */
+export interface ModerationCase {
+  id: number;
+  /**
+   * Sản phẩm bị báo cáo
+   */
+  product: number | Product;
+  /**
+   * Người dùng đã gửi báo cáo
+   */
+  reporter: number | User;
+  /**
+   * Lý do báo cáo theo FR-22
+   */
+  reason:
+    | 'FILE_CORRUPTED'
+    | 'CONTENT_MISMATCH'
+    | 'COPYRIGHT_VIOLATION'
+    | 'SPAM'
+    | 'PROHIBITED_CONTENT'
+    | 'MISLEADING_PREVIEW'
+    | 'OTHER';
+  /**
+   * Mô tả chi tiết (tuỳ chọn, tối đa 2000 ký tự)
+   */
+  description?: string | null;
+  /**
+   * Trạng thái xử lý hồ sơ kiểm duyệt
+   */
+  status: 'OPEN' | 'IN_REVIEW' | 'RESOLVED' | 'DISMISSED';
+  /**
+   * Kết luận / ghi chú xử lý của ban kiểm duyệt
+   */
+  resolutionNotes?: string | null;
+  /**
+   * Moderator/Admin đã xử lý hồ sơ
+   */
+  resolvedBy?: (number | null) | User;
+  /**
+   * Thời điểm xử lý
+   */
+  resolvedAt?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "form-submissions".
  */
@@ -1854,6 +1906,10 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'tickets';
         value: number | Ticket;
+      } | null)
+    | ({
+        relationTo: 'moderation_cases';
+        value: number | ModerationCase;
       } | null)
     | ({
         relationTo: 'forms';
@@ -2616,6 +2672,22 @@ export interface TicketsSelect<T extends boolean = true> {
         createdAt?: T;
         id?: T;
       };
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "moderation_cases_select".
+ */
+export interface ModerationCasesSelect<T extends boolean = true> {
+  product?: T;
+  reporter?: T;
+  reason?: T;
+  description?: T;
+  status?: T;
+  resolutionNotes?: T;
+  resolvedBy?: T;
+  resolvedAt?: T;
   updatedAt?: T;
   createdAt?: T;
 }

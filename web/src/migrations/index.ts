@@ -9,6 +9,7 @@ import * as migration_20260916_000000_phase6_commission_settings from './2026091
 import * as migration_20260917_000000_phase7_reviews from './20260917_000000_phase7_reviews';
 import * as migration_20260917_010000_phase8_comments from './20260917_010000_phase8_comments';
 import * as migration_20260917_052848_phase9_tickets from './20260917_052848_phase9_tickets';
+import * as migration_20260918_000000_phase10_moderation_cases from './20260918_000000_phase10_moderation_cases';
 
 export const migrations = [
   {
@@ -65,5 +66,10 @@ export const migrations = [
     up: migration_20260917_052848_phase9_tickets.up,
     down: migration_20260917_052848_phase9_tickets.down,
     name: '20260917_052848_phase9_tickets'
+  },
+  {
+    up: migration_20260918_000000_phase10_moderation_cases.up,
+    down: migration_20260918_000000_phase10_moderation_cases.down,
+    name: '20260918_000000_phase10_moderation_cases',
   },
 ];

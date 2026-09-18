@@ -7,6 +7,7 @@ import { ProductDescription } from '@/components/product/ProductDescription'
 import { TechnicalSpecsTable } from '@/components/product/TechnicalSpecsTable'
 import { ProductReviewsSection } from '@/components/product/ProductReviewsSection'
 import { ProductCommentsSection } from '@/components/product/ProductCommentsSection'
+import { ProductReportDialog } from '@/components/product/ProductReportDialog'
 import configPromise from '@payload-config'
 import { getPayload } from 'payload'
 import { draftMode } from 'next/headers'
@@ -195,6 +196,12 @@ export default async function ProductPage({ params }: Args) {
             productTitle={product.title}
             sellerId={typeof product.seller === 'object' && product.seller !== null ? product.seller.id : product.seller}
           />
+        </div>
+
+        {/* Product report entry point (FR-22) — creates a moderation case for the
+            moderation team; it never changes the product's own state. */}
+        <div className="mt-12">
+          <ProductReportDialog productId={product.id} productTitle={product.title} />
         </div>
       </div>
 
