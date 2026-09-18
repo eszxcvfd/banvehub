@@ -22,10 +22,19 @@ export async function seedTestUser(): Promise<void> {
     },
   })
 
-  // Create fresh test user
+  // Create fresh test user.
+  //
+  // The role MUST be set explicitly: the e2e suite runs against the seeded dev database, where the
+  // users table is already populated, so the `ensureFirstUserIsAdmin` hook in
+  // src/collections/Users/hooks/ (which only promotes the FIRST user created while the table is
+  // EMPTY) never fires here. Without `roles` the fixture is a role-less user and Payload answers
+  // "Unauthorized, this user does not have access to the admin panel" on every login.
   await payload.create({
     collection: 'users',
-    data: testUser,
+    data: {
+      ...testUser,
+      roles: ['admin'],
+    },
   })
 }
 

@@ -227,22 +227,54 @@ describe('Phase 6: Compensating Refund Flow & Ledger Immutability (FLOW-U15, BR-
   })
 
   afterAll(async () => {
+    // F1-class cleanup regression (same class as reviews.int.spec.ts). The real `purchaseProduct()`
+    // call creates `order_items` and `seller_earnings` rows that this spec never tracks by id, and
+    // both hold NOT NULL foreign keys to `orders` / `products` / `users` declared as ON DELETE SET
+    // NULL - so the parent deletes were aborted and every run left 3 users / 3 orders /
+    // 3 order_items / 3 products / 3 seller_earnings behind. Resolve the untracked rows through the
+    // orders this spec owns, leaf-first:
+    // seller_earnings -> entitlements -> order_items -> orders -> products -> product_files -> users.
+    const deleteByOrder = async (
+      collection: 'order_items' | 'seller_earnings' | 'entitlements',
+      orderIds: (number | string)[],
+    ) => {
+      for (const orderId of orderIds) {
+        const found = await payload
+          .find({
+            collection: collection as any,
+            where: { order: { equals: orderId } } as any,
+            limit: 0,
+            depth: 0,
+            overrideAccess: true,
+          })
+          .catch(() => null)
+        for (const doc of found?.docs ?? []) {
+          try {
+            await payload.delete({ collection: collection as any, id: doc.id, overrideAccess: true })
+          } catch (_ignore) {}
+        }
+      }
+    }
+
     // Reverse dependency cleanup
     for (const id of cleanup.refunds) {
       try {
         await payload.delete({ collection: 'refunds' as any, id, overrideAccess: true })
       } catch (_ignore) {}
     }
+    await deleteByOrder('seller_earnings', cleanup.orders)
     for (const id of cleanup.sellerEarnings) {
       try {
         await payload.delete({ collection: 'seller_earnings' as any, id, overrideAccess: true })
       } catch (_ignore) {}
     }
+    await deleteByOrder('entitlements', cleanup.orders)
     for (const id of cleanup.entitlements) {
       try {
         await payload.delete({ collection: 'entitlements', id, overrideAccess: true })
       } catch (_ignore) {}
     }
+    await deleteByOrder('order_items', cleanup.orders)
     for (const id of cleanup.orderItems) {
       try {
         await payload.delete({ collection: 'order_items', id, overrideAccess: true })
@@ -268,6 +300,50 @@ describe('Phase 6: Compensating Refund Flow & Ledger Immutability (FLOW-U15, BR-
         await payload.delete({ collection: 'users', id, overrideAccess: true })
       } catch (_ignore) {}
     }
+
+    // R5 hardening: assert by CONTENT table, not only by user. A user-centric check alone exempts
+    // the wallet-bound buyer (whose user row is legitimately undeletable), so a leak living inside
+    // that buyer's own rows would slip through. These are the spec's OWN rows.
+    const countOwned = async (collection: string, where: Record<string, unknown>): Promise<number> => {
+      const found = await payload.find({
+        collection: collection as any,
+        where: where as any,
+        limit: 0,
+        depth: 0,
+        overrideAccess: true,
+      })
+      return found.totalDocs
+    }
+
+    expect(await countOwned('orders', { id: { in: cleanup.orders } })).toBe(0)
+    expect(await countOwned('order_items', { order: { in: cleanup.orders } })).toBe(0)
+    expect(await countOwned('seller_earnings', { order: { in: cleanup.orders } })).toBe(0)
+    expect(await countOwned('entitlements', { user: { in: cleanup.users } })).toBe(0)
+    expect(await countOwned('products', { id: { in: cleanup.products } })).toBe(0)
+    expect(await countOwned('refunds', { buyer: { in: cleanup.users } })).toBe(0)
+
+    // Any remaining fixture user must own a `wallets` row: `wallets.user_id` is NOT NULL and the DB
+    // triggers forbid_wallet_delete / forbid_ledger_mutation (Decision 0002 / BR-03) make wallet
+    // rows undeletable, so their owners can never be removed. BR-03 is NEVER bypassed; any other
+    // survivor is a real cleanup regression and fails loudly here.
+    const survivors = await payload.find({
+      collection: 'users',
+      where: { id: { in: cleanup.users } },
+      limit: 0,
+      depth: 0,
+      overrideAccess: true,
+    })
+    const walletOwners = await payload.find({
+      collection: 'wallets',
+      where: { user: { in: cleanup.users } },
+      limit: 0,
+      depth: 0,
+      overrideAccess: true,
+    })
+    const walletBound = new Set(walletOwners.docs.map((wallet) => String(wallet.user)))
+    expect(
+      survivors.docs.filter((user) => !walletBound.has(String(user.id))).map((user) => user.email),
+    ).toEqual([])
   })
 
   it('Tier 1: Compensating Refund Flow - Credits buyer wallet via reversal ledger entry without mutating original purchase ledger (BR-03)', async () => {

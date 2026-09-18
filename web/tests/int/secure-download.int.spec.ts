@@ -217,6 +217,39 @@ describe('Phase 5: Secure Authenticated Download Engine & Token Rail (BR-06, FR-
   })
 
   afterAll(async () => {
+    // F1-class cleanup regression (same class as reviews.int.spec.ts). Payload declares the foreign
+    // keys to `products` / `users` as ON DELETE SET NULL, but `entitlements.product_id` and
+    // `entitlements.user_id` are NOT NULL, so Postgres aborts the parent delete instead of nulling
+    // the FK - and this hook never even attempted `cleanup.entitlements` / `cleanup.downloadEvents`,
+    // so every run left entitlements + products + users behind on the shared test database.
+    // Leaf-first order: download_events -> entitlements -> products -> product_files -> users.
+    for (const id of cleanup.downloadEvents) {
+      try {
+        await payload.delete({ collection: 'download_events', id, overrideAccess: true })
+      } catch (_ignore) {}
+    }
+    // `download_events` audit rows are written by the download service (src/services/download.ts),
+    // not by this spec, so they are never tracked by id - and a filter on `user` misses the rows
+    // recorded for requests whose `user_id` is NULL. Resolve them through the products this spec
+    // owns instead, BEFORE those products are deleted (download_events.product_id is NOT NULL and
+    // blocks the product delete).
+    const foundDownloadEvents = await payload.find({
+      collection: 'download_events' as any,
+      where: { product: { in: cleanup.products } } as any,
+      limit: 0,
+      depth: 0,
+      overrideAccess: true,
+    })
+    for (const doc of foundDownloadEvents.docs) {
+      try {
+        await payload.delete({ collection: 'download_events' as any, id: doc.id, overrideAccess: true })
+      } catch (_ignore) {}
+    }
+    for (const id of cleanup.entitlements) {
+      try {
+        await payload.delete({ collection: 'entitlements', id, overrideAccess: true })
+      } catch (_ignore) {}
+    }
     for (const id of cleanup.products) {
       try {
         await payload.delete({ collection: 'products', id, overrideAccess: true })
@@ -232,6 +265,47 @@ describe('Phase 5: Secure Authenticated Download Engine & Token Rail (BR-06, FR-
         await payload.delete({ collection: 'users', id, overrideAccess: true })
       } catch (_ignore) {}
     }
+
+    // R5 hardening: assert by CONTENT table, not only by user. A user-centric check alone exempts
+    // the wallet-bound buyer (whose user row is legitimately undeletable), so a leak living inside
+    // that buyer's own rows would slip through. These counts are the spec's OWN rows.
+    const countOwned = async (collection: string, where: Record<string, unknown>): Promise<number> => {
+      const found = await payload.find({
+        collection: collection as any,
+        where: where as any,
+        limit: 0,
+        depth: 0,
+        overrideAccess: true,
+      })
+      return found.totalDocs
+    }
+
+    expect(await countOwned('entitlements', { user: { in: cleanup.users } })).toBe(0)
+    expect(await countOwned('download_events', { product: { in: cleanup.products } })).toBe(0)
+    expect(await countOwned('products', { id: { in: cleanup.products } })).toBe(0)
+
+    // Any remaining fixture user must be an owner of a `wallets` row: `wallets.user_id` is NOT NULL
+    // and the DB triggers forbid_wallet_delete / forbid_ledger_mutation (Decision 0002 / BR-03)
+    // make wallet rows undeletable, so wallet owners can never be removed. BR-03 is NEVER bypassed;
+    // anything else still alive is a real cleanup regression and fails loudly here.
+    const survivors = await payload.find({
+      collection: 'users',
+      where: { id: { in: cleanup.users } },
+      limit: 0,
+      depth: 0,
+      overrideAccess: true,
+    })
+    const walletOwners = await payload.find({
+      collection: 'wallets',
+      where: { user: { in: cleanup.users } },
+      limit: 0,
+      depth: 0,
+      overrideAccess: true,
+    })
+    const walletBound = new Set(walletOwners.docs.map((wallet) => String(wallet.user)))
+    expect(
+      survivors.docs.filter((user) => !walletBound.has(String(user.id))).map((user) => user.email),
+    ).toEqual([])
   })
 
   it('Tier 1: Authenticated user with active entitlement receives signed download token with 5-minute expiry', async () => {

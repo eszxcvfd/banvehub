@@ -30,34 +30,76 @@ export async function getTestPayload(): Promise<Payload> {
   return getPayload({ config })
 }
 
+/**
+ * Race-safe find-or-create for the shared e2e fixtures.
+ *
+ * Playwright runs every spec FILE in its own worker process, and both `catalog.e2e.spec.ts` and
+ * `frontend.e2e.spec.ts` call `seedCatalogData()` in `beforeAll`. A plain find-then-create
+ * therefore races: both workers can observe "no such row", both INSERT, and the loser dies with
+ * `ValidationError: The following field is invalid: <field>` - Payload maps the Postgres unique
+ * violation of `users.email` / `categories.slug` / `products.slug` onto the field. Re-reading after
+ * a failed create lets the loser adopt the winner's row instead of failing its whole file.
+ */
+async function findOrCreate(
+  payload: Payload,
+  collection: 'users' | 'categories' | 'products',
+  where: Record<string, unknown>,
+  create: () => Promise<Record<string, unknown>>,
+  findOptions: Record<string, unknown> = {},
+): Promise<{ doc: Record<string, unknown>; created: boolean }> {
+  const read = async (): Promise<Record<string, unknown>[]> => {
+    const found = (await payload.find({
+      collection,
+      where,
+      limit: 1,
+      overrideAccess: true,
+      ...findOptions,
+    } as never)) as unknown as { docs: Record<string, unknown>[] }
+    return found.docs
+  }
+
+  const existing = await read()
+  if (existing.length > 0) {
+    return { doc: existing[0], created: false }
+  }
+
+  try {
+    return { doc: await create(), created: true }
+  } catch (err) {
+    const raced = await read().catch(() => [])
+    if (raced.length > 0) {
+      return { doc: raced[0], created: false }
+    }
+    throw err
+  }
+}
+
 export async function seedCatalogData(): Promise<SeedCatalogResult> {
   const payload = await getTestPayload()
 
   // 1. Seed or retrieve users
   const users: Record<string, Record<string, unknown>> = {}
   for (const [key, userData] of Object.entries(TEST_USERS)) {
-    const existing = await payload.find({
-      collection: 'users',
-      where: { email: { equals: userData.email } },
-      limit: 1,
-      overrideAccess: true,
-    })
+    const { doc, created } = await findOrCreate(
+      payload,
+      'users',
+      { email: { equals: userData.email } },
+      async () =>
+        (await payload.create({
+          collection: 'users',
+          data: {
+            email: userData.email,
+            password: userData.password,
+            name: `Test ${key}`,
+            roles: [...userData.roles],
+          },
+          overrideAccess: true,
+        })) as unknown as Record<string, unknown>,
+    )
 
-    if (existing.docs.length > 0) {
-      users[key] = existing.docs[0] as unknown as Record<string, unknown>
-    } else {
-      const created = await payload.create({
-        collection: 'users',
-        data: {
-          email: userData.email,
-          password: userData.password,
-          name: `Test ${key}`,
-          roles: [...userData.roles],
-        },
-        overrideAccess: true,
-      })
-      users[key] = created as unknown as Record<string, unknown>
-      createdUserIds.push(created.id)
+    users[key] = doc
+    if (created) {
+      createdUserIds.push(doc.id as string | number)
     }
   }
 
@@ -70,23 +112,21 @@ export async function seedCatalogData(): Promise<SeedCatalogResult> {
 
   const categories: Record<string, Record<string, unknown>> = {}
   for (const cat of categoryDefs) {
-    const existing = await payload.find({
-      collection: 'categories',
-      where: { slug: { equals: cat.slug } },
-      limit: 1,
-      overrideAccess: true,
-    })
+    const { doc, created } = await findOrCreate(
+      payload,
+      'categories',
+      { slug: { equals: cat.slug } },
+      async () =>
+        (await payload.create({
+          collection: 'categories',
+          data: cat,
+          overrideAccess: true,
+        })) as unknown as Record<string, unknown>,
+    )
 
-    if (existing.docs.length > 0) {
-      categories[cat.slug] = existing.docs[0] as unknown as Record<string, unknown>
-    } else {
-      const created = await payload.create({
-        collection: 'categories',
-        data: cat,
-        overrideAccess: true,
-      })
-      categories[cat.slug] = created as unknown as Record<string, unknown>
-      createdCategoryIds.push(created.id)
+    categories[cat.slug] = doc
+    if (created) {
+      createdCategoryIds.push(doc.id as string | number)
     }
   }
 
@@ -150,29 +190,27 @@ export async function seedCatalogData(): Promise<SeedCatalogResult> {
 
   const products: Record<string, Record<string, unknown>> = {}
   for (const prod of productDefs) {
-    const existing = await payload.find({
-      collection: 'products',
-      where: { slug: { equals: prod.slug } },
-      limit: 1,
-      draft: true,
-      overrideAccess: true,
-    })
+    try {
+      const { doc, created } = await findOrCreate(
+        payload,
+        'products',
+        { slug: { equals: prod.slug } },
+        async () =>
+          (await payload.create({
+            collection: 'products',
+            draft: prod._status === 'draft',
+            data: prod as never,
+            overrideAccess: true,
+          })) as unknown as Record<string, unknown>,
+        { draft: true },
+      )
 
-    if (existing.docs.length > 0) {
-      products[prod.slug] = existing.docs[0] as unknown as Record<string, unknown>
-    } else {
-      try {
-        const created = await payload.create({
-          collection: 'products',
-          draft: prod._status === 'draft',
-          data: prod as never,
-          overrideAccess: true,
-        })
-        products[prod.slug] = created as unknown as Record<string, unknown>
-        createdProductIds.push(created.id)
-      } catch (err) {
-        console.warn(`Could not seed product ${prod.slug}:`, err)
+      products[prod.slug] = doc
+      if (created) {
+        createdProductIds.push(doc.id as string | number)
       }
+    } catch (err) {
+      console.warn(`Could not seed product ${prod.slug}:`, err)
     }
   }
 

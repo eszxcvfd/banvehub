@@ -212,6 +212,69 @@ describe('Phase 5: Purchase Workflow & End-to-End Delivery (FR-14, FR-15, FR-18,
   })
 
   afterAll(async () => {
+    // F1-class cleanup regression (same class as reviews.int.spec.ts). This hook deleted ONLY
+    // products / product_files / users, so the `orders`, `entitlements`, `order_items` and
+    // `seller_earnings` rows created by the real `purchaseProduct()` calls were never touched. The
+    // foreign keys involved are declared ON DELETE SET NULL over NOT NULL columns
+    // (`order_items.order_id/.product_id/.seller_id`, `seller_earnings.order_*`, `entitlements
+    // .product_id/.user_id`), so the product and user deletes were aborted as well and every run
+    // left 5 users / 6 orders / 6 order_items / 3 products / 5 seller_earnings / 6 entitlements.
+    // Leaf-first order through the orders this spec owns:
+    // seller_earnings -> entitlements -> order_items -> orders -> products -> product_files -> users.
+    const deleteByOrder = async (
+      collection: 'order_items' | 'seller_earnings' | 'entitlements',
+      orderIds: (number | string)[],
+    ) => {
+      for (const orderId of orderIds) {
+        const found = await payload
+          .find({
+            collection: collection as any,
+            where: { order: { equals: orderId } } as any,
+            limit: 0,
+            depth: 0,
+            overrideAccess: true,
+          })
+          .catch(() => null)
+        for (const doc of found?.docs ?? []) {
+          try {
+            await payload.delete({ collection: collection as any, id: doc.id, overrideAccess: true })
+          } catch (_ignore) {}
+        }
+      }
+    }
+
+    await deleteByOrder('seller_earnings', cleanup.orders)
+    await deleteByOrder('entitlements', cleanup.orders)
+    for (const id of cleanup.entitlements) {
+      try {
+        await payload.delete({ collection: 'entitlements', id, overrideAccess: true })
+      } catch (_ignore) {}
+    }
+    await deleteByOrder('order_items', cleanup.orders)
+    for (const id of cleanup.orders) {
+      try {
+        await payload.delete({ collection: 'orders', id, overrideAccess: true })
+      } catch (_ignore) {}
+    }
+    // `download_events` audit rows are written by the download service, not by this spec, and are
+    // never tracked by id. Resolve them through the products this spec owns BEFORE deleting those
+    // products (`download_events.product_id` is NOT NULL and blocks the product delete).
+    const foundDownloadEvents = await payload.find({
+      collection: 'download_events' as any,
+      where: { product: { in: cleanup.products } } as any,
+      limit: 0,
+      depth: 0,
+      overrideAccess: true,
+    })
+    for (const doc of foundDownloadEvents.docs) {
+      try {
+        await payload.delete({
+          collection: 'download_events' as any,
+          id: doc.id,
+          overrideAccess: true,
+        })
+      } catch (_ignore) {}
+    }
     for (const id of cleanup.products) {
       try {
         await payload.delete({ collection: 'products', id, overrideAccess: true })
@@ -227,6 +290,50 @@ describe('Phase 5: Purchase Workflow & End-to-End Delivery (FR-14, FR-15, FR-18,
         await payload.delete({ collection: 'users', id, overrideAccess: true })
       } catch (_ignore) {}
     }
+
+    // R5 hardening: assert by CONTENT table, not only by user. A user-centric check alone exempts
+    // the wallet-bound buyer (whose user row is legitimately undeletable), so a leak living inside
+    // that buyer's own rows would slip through. These are the spec's OWN rows.
+    const countOwned = async (collection: string, where: Record<string, unknown>): Promise<number> => {
+      const found = await payload.find({
+        collection: collection as any,
+        where: where as any,
+        limit: 0,
+        depth: 0,
+        overrideAccess: true,
+      })
+      return found.totalDocs
+    }
+
+    expect(await countOwned('orders', { id: { in: cleanup.orders } })).toBe(0)
+    expect(await countOwned('order_items', { order: { in: cleanup.orders } })).toBe(0)
+    expect(await countOwned('seller_earnings', { order: { in: cleanup.orders } })).toBe(0)
+    expect(await countOwned('entitlements', { user: { in: cleanup.users } })).toBe(0)
+    expect(await countOwned('download_events', { product: { in: cleanup.products } })).toBe(0)
+    expect(await countOwned('products', { id: { in: cleanup.products } })).toBe(0)
+
+    // Any remaining fixture user must own a `wallets` row: `wallets.user_id` is NOT NULL and the DB
+    // triggers forbid_wallet_delete / forbid_ledger_mutation (Decision 0002 / BR-03) make wallet
+    // rows undeletable, so their owners can never be removed. BR-03 is NEVER bypassed; any other
+    // survivor is a real cleanup regression and fails loudly here.
+    const survivors = await payload.find({
+      collection: 'users',
+      where: { id: { in: cleanup.users } },
+      limit: 0,
+      depth: 0,
+      overrideAccess: true,
+    })
+    const walletOwners = await payload.find({
+      collection: 'wallets',
+      where: { user: { in: cleanup.users } },
+      limit: 0,
+      depth: 0,
+      overrideAccess: true,
+    })
+    const walletBound = new Set(walletOwners.docs.map((wallet) => String(wallet.user)))
+    expect(
+      survivors.docs.filter((user) => !walletBound.has(String(user.id))).map((user) => user.email),
+    ).toEqual([])
   })
 
   it('Tier 1: Complete wallet purchase flow for commercial product debits balance and creates completed order and active entitlement', async () => {
@@ -501,6 +608,10 @@ describe('Phase 5: Purchase Workflow & End-to-End Delivery (FR-14, FR-15, FR-18,
       productId: commercialProduct1.id,
     })
     expect(purchaseResult.success).toBe(true)
+    // Track the rows this purchase created like every other test in this file does - the order,
+    // its order_items/seller_earnings (resolved through the order in afterAll) and the entitlement.
+    cleanup.orders.push(purchaseResult.orderId)
+    cleanup.entitlements.push(purchaseResult.entitlementId)
 
     // 3. Request download token using active entitlement
     const tokenResult = await createDownloadTokenFn(payload, {
