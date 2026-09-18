@@ -11,6 +11,10 @@ import 'dotenv/config'
  */
 export default defineConfig({
   testDir: './tests/e2e',
+  /* Suite-level owner of the shared catalog fixtures: one seed before the first worker, one teardown
+   * after the last one. Spec files must not seed or delete those rows themselves. */
+  globalSetup: './tests/helpers/global-setup.ts',
+  globalTeardown: './tests/helpers/global-teardown.ts',
   /* Fail the build on CI if you accidentally left test.only in the source code. */
   forbidOnly: !!process.env.CI,
   /* Retry on CI only */

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { seedCatalogData, cleanupCatalogData, TEST_USERS } from '../helpers/seedCatalog'
+import { TEST_USERS } from '../helpers/seedCatalog'
 
 const baseURL = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3000'
 
@@ -10,14 +10,14 @@ let adminToken: string = ''
 
 test.describe('KienTaoHub Phase 2: Digital Catalog Marketplace E2E Suite', () => {
   test.beforeAll(async ({ request }) => {
-    // 1. Seed database with catalog fixtures if Payload is initialized
-    try {
-      await seedCatalogData()
-    } catch (err) {
-      console.warn('Catalog seeding skipped (schema reconciliation in progress):', err)
-    }
+    // The shared catalog fixtures are seeded ONCE for the whole suite by
+    // tests/helpers/global-setup.ts and removed ONCE after the last worker by
+    // tests/helpers/global-teardown.ts (both wired in playwright.config.ts). This file must not
+    // seed or delete them itself: Playwright runs spec files in parallel workers, so a per-file
+    // teardown here deleted rows (fixture users included) while sibling files were still using
+    // them, and a per-file seed left residue behind whenever another file had seeded first.
 
-    // 2. Obtain auth tokens for role-based testing
+    // Obtain auth tokens for role-based testing
     async function loginUser(email: string, password: string): Promise<string> {
       try {
         const res = await request.post(`${baseURL}/api/users/login`, {
@@ -39,13 +39,7 @@ test.describe('KienTaoHub Phase 2: Digital Catalog Marketplace E2E Suite', () =>
     buyerToken = await loginUser(TEST_USERS.buyer.email, TEST_USERS.buyer.password)
   })
 
-  test.afterAll(async () => {
-    try {
-      await cleanupCatalogData()
-    } catch {
-      // Ignored
-    }
-  })
+  // No `afterAll` teardown here on purpose: this file is not the owner of the shared fixtures.
 
   // =========================================================================
   // TIER 1: CORE FEATURE COVERAGE

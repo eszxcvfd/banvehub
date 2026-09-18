@@ -1,9 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import {
-  getTestPayload,
-  seedCatalogData,
-  TEST_USERS,
-} from '../helpers/seedCatalog'
+import { getTestPayload, TEST_USERS } from '../helpers/seedCatalog'
 
 /**
  * Storefront journey e2e for THIS repository (KienTaoHub digital CAD/BIM marketplace).
@@ -46,7 +42,8 @@ import {
 
 const baseURL = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3000'
 
-// Fixtures created by tests/helpers/seedCatalog.ts (idempotent: reused if already present).
+// Fixtures owned by the shared e2e lifecycle (tests/helpers/seedCatalog.ts, seeded once by
+// tests/helpers/global-setup.ts before any worker starts).
 const SEEDED_PAID_PRODUCT = {
   title: 'Biệt thự hiện đại 3 tầng 5x20m',
   slug: 'biet-thu-hien-dai-3-tang',
@@ -62,17 +59,14 @@ async function loginViaUI(page: Page, email: string, password: string): Promise<
 }
 
 test.describe('KienTaoHub storefront journey', () => {
-  test.beforeAll(async () => {
-    await seedCatalogData()
-  })
-
-  // The catalog fixtures are SHARED with `catalog.e2e.spec.ts`, which Playwright runs in a parallel
-  // worker. This file has only 9 tests, so it finishes (and would tear down) long before that
-  // 48-test file does: calling `cleanupCatalogData()` here deletes the shared fixture users /
-  // products while `catalog.e2e.spec.ts` is still using them, and its later RBAC tests then fail
-  // with 403 for a token whose user row no longer exists (observed as a flaky
-  // `T1-F5-05: Seller role is permitted to create products`). This spec is therefore a CONSUMER of
-  // the shared fixtures: it ensures they exist and leaves the teardown to the file that owns them.
+  // The shared catalog fixtures are seeded ONCE for the whole suite by
+  // tests/helpers/global-setup.ts and removed ONCE after the last worker by
+  // tests/helpers/global-teardown.ts (both wired in playwright.config.ts). This spec is a CONSUMER:
+  // Playwright runs spec files in parallel workers, so this file must never seed or delete the
+  // shared rows - a per-file teardown here deleted fixtures that the 48-test `catalog.e2e.spec.ts`
+  // sibling was still using (observed as a 403 flake in
+  // `T1-F5-05: Seller role is permitted to create products`), and a per-file seed is redundant now
+  // that the fixtures exist before the first worker starts.
   // Per-test residue created by a test itself (the sign-up account) is still removed inline below.
 
   test('homepage renders the KienTaoHub landing page', async ({ page }) => {
