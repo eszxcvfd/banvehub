@@ -7,6 +7,7 @@ import { PATCH, DELETE } from '@/app/api/v1/products/[id]/comments/[commentId]/r
 
 describe('Product Comments & Q&A Subsystem (FR-21)', () => {
   let payload: Payload
+  let bootstrapUser: User
   let sellerUser: User
   let regularUser1: User
   let regularUser2: User
@@ -43,10 +44,32 @@ describe('Product Comments & Q&A Subsystem (FR-21)', () => {
     payload = await getPayload({ config })
     const timestamp = Date.now()
 
+    // `ensureFirstUserIsAdmin` (src/collections/Users/hooks) appends 'admin' to the roles of the
+    // FIRST user created while the users table is EMPTY - which is exactly the CI state: CI applies
+    // only the versioned migrations and every spec's afterAll deletes its own users, so each spec
+    // file can start from an empty table. Absorb that promotion with a throwaway user BEFORE the
+    // role-sensitive fixtures below. Without it `sellerUser` is silently ['seller', 'admin'], the
+    // role badge computed for its replies is 'Quản trị viên' instead of 'Tác giả / Người bán' and
+    // the seller-reply assertions pass for the wrong reason (they would describe an admin).
+    bootstrapUser = await createUser(
+      `bootstrap-com-${timestamp}-${getSeq()}@kientaohub.local`,
+      ['buyer'],
+    )
+
     sellerUser = await createUser(`seller-com-${timestamp}-${getSeq()}@kientaohub.local`, ['seller'])
     regularUser1 = await createUser(`buyer1-com-${timestamp}-${getSeq()}@kientaohub.local`, ['buyer'])
     regularUser2 = await createUser(`buyer2-com-${timestamp}-${getSeq()}@kientaohub.local`, ['buyer'])
     adminUser = await createUser(`admin-com-${timestamp}-${getSeq()}@kientaohub.local`, ['admin'])
+
+    // Guard: the fixtures must hold EXACTLY the roles they declare, whether or not the users table
+    // started empty (the bootstrap user above owns the first-user promotion). If the promotion ever
+    // lands on one of them again, these assertions fail loudly instead of letting the role-badge
+    // and permission assertions silently lose their meaning.
+    expect(sellerUser.roles).toEqual(['seller'])
+    expect(sellerUser.roles).not.toContain('admin')
+    expect(regularUser1.roles).toEqual(['buyer'])
+    expect(regularUser2.roles).toEqual(['buyer'])
+    expect(adminUser.roles).toEqual(['admin'])
 
     // Primary product
     const prodDoc = await payload.create({

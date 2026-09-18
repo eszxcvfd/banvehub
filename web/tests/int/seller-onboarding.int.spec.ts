@@ -5,6 +5,7 @@ import type { User } from '@/payload-types'
 
 describe('Seller Onboarding & Profiles Integration Tests (PLAN.md FR-24, FLOW-U10)', () => {
   let payload: Payload
+  let bootstrapUser: User
 
   const cleanup = {
     sellerProfiles: [] as (number | string)[],
@@ -31,6 +32,19 @@ describe('Seller Onboarding & Profiles Integration Tests (PLAN.md FR-24, FLOW-U1
 
   beforeAll(async () => {
     payload = await getPayload({ config })
+    const timestamp = Date.now()
+
+    // `ensureFirstUserIsAdmin` (src/collections/Users/hooks) appends 'admin' to the roles of the
+    // FIRST user created while the users table is EMPTY - which is exactly the CI state: CI applies
+    // only the versioned migrations and every spec's afterAll deletes its own users, so each spec
+    // file can start from an empty table. This suite builds its fixtures inside the tests below, so
+    // the very first `createUser()` of the file would be promoted; absorb the promotion here with a
+    // throwaway user BEFORE any test runs, otherwise `buyerUser` is silently ['buyer', 'admin'] and
+    // the onboarding eligibility rule this suite proves is evaluated against an admin account.
+    bootstrapUser = await createUser(
+      `bootstrap-onboard-${timestamp}-${getSeq()}@kientaohub.local`,
+      ['buyer'],
+    )
   })
 
   afterAll(async () => {
@@ -48,6 +62,13 @@ describe('Seller Onboarding & Profiles Integration Tests (PLAN.md FR-24, FLOW-U1
 
   it('allows an authenticated buyer to submit a seller profile with terms accepted', async () => {
     const buyerUser = await createUser(`buyer-onboard-${Date.now()}-${getSeq()}@kientaohub.local`, ['buyer'])
+    // Guard: the fixture must hold EXACTLY the role it declares, whether or not the users table
+    // started empty (the bootstrap user in beforeAll owns the first-user promotion). If the
+    // promotion ever lands here again this fails loudly instead of silently exercising the
+    // onboarding flow as an admin.
+    expect(buyerUser.roles).toEqual(['buyer'])
+    expect(buyerUser.roles).not.toContain('admin')
+
     const slug = `bim-studio-pro-${Date.now()}-${getSeq()}`
 
     const profile = await payload.create({

@@ -43,6 +43,7 @@ describe('Phase 6: Multi-Actor Revenue Lifecycle & RBAC Matrix (FLOW-U12, FLOW-U
   let payload: Payload
 
   // Principals
+  let bootstrapUser: User
   let buyer1: User
   let seller1: User
   let seller2: User
@@ -177,12 +178,39 @@ describe('Phase 6: Multi-Actor Revenue Lifecycle & RBAC Matrix (FLOW-U12, FLOW-U
     adminRefundRoute = await import(/* @vite-ignore */ adminRefundRoutePath).catch(() => null)
 
     const timestamp = Date.now()
+
+    // `ensureFirstUserIsAdmin` (src/collections/Users/hooks) appends 'admin' to the roles of the
+    // FIRST user created while the users table is EMPTY - which is exactly the CI state: CI applies
+    // only the versioned migrations and every spec's afterAll deletes its own users, so each spec
+    // file can start from an empty table. Absorb that promotion with a throwaway user BEFORE the
+    // role-sensitive fixtures below. Without it `buyer1` is silently ['buyer', 'admin'] and the
+    // "Buyer cannot approve withdrawal" / "Buyer cannot initiate refund" RBAC assertions below
+    // never reach the authorization branch they claim to test (the role gate lets the buyer
+    // through and the assertion only sees a downstream "Not Found").
+    bootstrapUser = await createUser(
+      `bootstrap-e2e-${timestamp}-${getSeq()}@kientaohub.local`,
+      ['buyer'],
+    )
+
     buyer1 = await createUser(`buyer1-e2e-${timestamp}-${getSeq()}@kientaohub.local`, ['buyer'])
     seller1 = await createUser(`seller1-e2e-${timestamp}-${getSeq()}@kientaohub.local`, ['seller'])
     seller2 = await createUser(`seller2-e2e-${timestamp}-${getSeq()}@kientaohub.local`, ['seller'])
     moderator1 = await createUser(`mod1-e2e-${timestamp}-${getSeq()}@kientaohub.local`, ['moderator'])
     financeAdmin1 = await createUser(`fin1-e2e-${timestamp}-${getSeq()}@kientaohub.local`, ['financeAdmin'])
     _admin1 = await createUser(`admin1-e2e-${timestamp}-${getSeq()}@kientaohub.local`, ['admin'])
+
+    // Guard: the RBAC principals must hold EXACTLY the roles they declare, whether or not the users
+    // table started empty (the bootstrap user above owns the first-user promotion). If the
+    // promotion ever lands on one of them again, these assertions fail loudly instead of letting
+    // the RBAC matrix silently lose its meaning.
+    expect(buyer1.roles).toEqual(['buyer'])
+    expect(buyer1.roles).not.toContain('admin')
+    expect(seller1.roles).toEqual(['seller'])
+    expect(seller1.roles).not.toContain('admin')
+    expect(seller2.roles).toEqual(['seller'])
+    expect(moderator1.roles).toEqual(['moderator'])
+    expect(financeAdmin1.roles).toEqual(['financeAdmin'])
+    expect(_admin1.roles).toEqual(['admin'])
 
     _buyer1Wallet = await getOrCreateWallet(payload, { userId: buyer1.id })
 

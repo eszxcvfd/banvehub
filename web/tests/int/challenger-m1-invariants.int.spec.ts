@@ -5,6 +5,7 @@ import type { Order, OrderItem, Product, User } from '@/payload-types'
 
 describe('Adversarial Challenge: Milestone 1 Invariants & Data Integrity', () => {
   let payload: Payload
+  let bootstrapUser: User
   let sellerUser: User
   let buyerUser: User
   let thirdPartyUser: User
@@ -27,6 +28,24 @@ describe('Adversarial Challenge: Milestone 1 Invariants & Data Integrity', () =>
   beforeAll(async () => {
     payload = await getPayload({ config })
     const timestamp = Date.now()
+
+    // `ensureFirstUserIsAdmin` (src/collections/Users/hooks) appends 'admin' to the roles of the
+    // FIRST user created while the users table is EMPTY - which is exactly the CI state: CI applies
+    // only the versioned migrations and every spec's afterAll deletes its own users, so each spec
+    // file can start from an empty table. Absorb that promotion with a throwaway user BEFORE the
+    // role-sensitive fixtures below, otherwise `sellerUser` is silently ['seller', 'admin'] and the
+    // adversarial ownership/authorization invariants below are evaluated against an admin account.
+    bootstrapUser = (await payload.create({
+      collection: 'users',
+      data: {
+        email: `challenger-bootstrap-${timestamp}@test.local`,
+        password: 'Password123!',
+        name: 'Challenger Bootstrap',
+        roles: ['buyer'],
+      },
+      overrideAccess: true,
+    })) as User
+    cleanup.users.push(bootstrapUser.id)
 
     sellerUser = (await payload.create({
       collection: 'users',
@@ -63,6 +82,15 @@ describe('Adversarial Challenge: Milestone 1 Invariants & Data Integrity', () =>
       overrideAccess: true,
     })) as User
     cleanup.users.push(thirdPartyUser.id)
+
+    // Guard: the fixtures must hold EXACTLY the roles they declare, whether or not the users table
+    // started empty (the bootstrap user above owns the first-user promotion). If the promotion ever
+    // lands on one of them again, these assertions fail loudly instead of letting the adversarial
+    // data-integrity invariants silently lose their meaning.
+    expect(sellerUser.roles).toEqual(['seller'])
+    expect(sellerUser.roles).not.toContain('admin')
+    expect(buyerUser.roles).toEqual(['buyer'])
+    expect(thirdPartyUser.roles).toEqual(['seller'])
 
     testProduct = (await payload.create({
       collection: 'products',

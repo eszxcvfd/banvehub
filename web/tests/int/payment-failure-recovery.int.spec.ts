@@ -12,6 +12,7 @@ import { getOrCreateWallet } from '@/services/wallet'
 
 describe('Phase 4: Payment Failure Scenarios & Recovery (§21, Decision 0005)', () => {
   let payload: Payload
+  let bootstrapUser: User
   let buyerUser: User
   const cleanup = {
     users: [] as (number | string)[],
@@ -27,6 +28,25 @@ describe('Phase 4: Payment Failure Scenarios & Recovery (§21, Decision 0005)', 
     payload = await getPayload({ config })
 
     const timestamp = Date.now()
+
+    // `ensureFirstUserIsAdmin` (src/collections/Users/hooks) appends 'admin' to the roles of the
+    // FIRST user created while the users table is EMPTY - which is exactly the CI state: CI applies
+    // only the versioned migrations and every spec's afterAll deletes its own users, so each spec
+    // file can start from an empty table. Absorb that promotion with a throwaway user BEFORE the
+    // fixtures below so `buyerUser` cannot silently become ['buyer', 'admin'] and invalidate the
+    // role assumptions this suite is built on.
+    bootstrapUser = (await payload.create({
+      collection: 'users',
+      data: {
+        email: `bootstrap-failure-${timestamp}@kientaohub.local`,
+        password: 'test-password-payment-123',
+        name: 'Bootstrap Failure Tester',
+        roles: ['buyer'],
+      },
+      overrideAccess: true,
+    })) as User
+    cleanup.users.push(bootstrapUser.id)
+
     buyerUser = (await payload.create({
       collection: 'users',
       data: {
@@ -38,6 +58,12 @@ describe('Phase 4: Payment Failure Scenarios & Recovery (§21, Decision 0005)', 
       overrideAccess: true,
     })) as User
     cleanup.users.push(buyerUser.id)
+
+    // Guard: the fixture must hold EXACTLY the role it declares, whether or not the users table
+    // started empty. If the first-user promotion ever lands on it again this fails loudly instead
+    // of silently changing the actor every authorization assumption is anchored to.
+    expect(buyerUser.roles).toEqual(['buyer'])
+    expect(buyerUser.roles).not.toContain('admin')
   })
 
   afterAll(async () => {

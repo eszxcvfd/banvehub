@@ -16,6 +16,7 @@ export interface PurchaseResult {
 
 describe('Phase 5: Purchase Invariants & Financial Integrity (BR-04, BR-07, Decision 0002, Decision 0003)', () => {
   let payload: Payload
+  let bootstrapUser: User
   let sellerUser: User
   let buyerUser: User
   let poorBuyerUser: User
@@ -101,9 +102,28 @@ describe('Phase 5: Purchase Invariants & Financial Integrity (BR-04, BR-07, Deci
     }
 
     const timestamp = Date.now()
+
+    // `ensureFirstUserIsAdmin` (src/collections/Users/hooks) appends 'admin' to the roles of the
+    // FIRST user created while the users table is EMPTY - which is exactly the CI state: CI applies
+    // only the versioned migrations and every spec's afterAll deletes its own users, so each spec
+    // file can start from an empty table. Absorb that promotion with a throwaway user BEFORE the
+    // role-sensitive fixtures below, otherwise `sellerUser` is silently ['seller', 'admin'] and the
+    // "seller cannot buy their own product" style invariants below are evaluated against an admin
+    // account instead of the seller they claim to test.
+    bootstrapUser = await createUser(`bootstrap-inv-${timestamp}@kientaohub.local`, ['buyer'])
+
     sellerUser = await createUser(`seller-inv-${timestamp}@kientaohub.local`, ['seller'])
     buyerUser = await createUser(`buyer-inv-${timestamp}@kientaohub.local`, ['buyer'])
     poorBuyerUser = await createUser(`poor-buyer-inv-${timestamp}@kientaohub.local`, ['buyer'])
+
+    // Guard: the fixtures must hold EXACTLY the roles they declare, whether or not the users table
+    // started empty (the bootstrap user above owns the first-user promotion). If the promotion ever
+    // lands on one of them again, these assertions fail loudly instead of letting the purchase
+    // invariants silently lose their meaning.
+    expect(sellerUser.roles).toEqual(['seller'])
+    expect(sellerUser.roles).not.toContain('admin')
+    expect(buyerUser.roles).toEqual(['buyer'])
+    expect(poorBuyerUser.roles).toEqual(['buyer'])
 
     sellerWallet = await getOrCreateWallet(payload, { userId: sellerUser.id })
     poorWallet = await getOrCreateWallet(payload, { userId: poorBuyerUser.id })

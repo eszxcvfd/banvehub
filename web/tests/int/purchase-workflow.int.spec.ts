@@ -16,6 +16,7 @@ export interface PurchaseResult {
 
 describe('Phase 5: Purchase Workflow & End-to-End Delivery (FR-14, FR-15, FR-18, Decision 0002)', () => {
   let payload: Payload
+  let bootstrapUser: User
   let sellerUser: User
   let buyerUser: User
   let buyerUser2: User
@@ -112,10 +113,29 @@ describe('Phase 5: Purchase Workflow & End-to-End Delivery (FR-14, FR-15, FR-18,
     }
 
     const timestamp = Date.now()
+
+    // `ensureFirstUserIsAdmin` (src/collections/Users/hooks) appends 'admin' to the roles of the
+    // FIRST user created while the users table is EMPTY - which is exactly the CI state: CI applies
+    // only the versioned migrations and every spec's afterAll deletes its own users, so each spec
+    // file can start from an empty table. Absorb that promotion with a throwaway user BEFORE the
+    // role-sensitive fixtures below, otherwise `sellerUser` is silently ['seller', 'admin'] and the
+    // buyer/seller authorization assumptions of this end-to-end flow are invalidated.
+    bootstrapUser = await createUser(`bootstrap-flow-${timestamp}@kientaohub.local`, ['buyer'])
+
     sellerUser = await createUser(`seller-flow-${timestamp}@kientaohub.local`, ['seller'])
     buyerUser = await createUser(`buyer-flow-${timestamp}@kientaohub.local`, ['buyer'])
     buyerUser2 = await createUser(`buyer2-flow-${timestamp}@kientaohub.local`, ['buyer'])
     freeBuyerUser = await createUser(`freebuyer-flow-${timestamp}@kientaohub.local`, ['buyer'])
+
+    // Guard: the fixtures must hold EXACTLY the roles they declare, whether or not the users table
+    // started empty (the bootstrap user above owns the first-user promotion). If the promotion ever
+    // lands on one of them again, these assertions fail loudly instead of letting the end-to-end
+    // flow silently lose its meaning.
+    expect(sellerUser.roles).toEqual(['seller'])
+    expect(sellerUser.roles).not.toContain('admin')
+    expect(buyerUser.roles).toEqual(['buyer'])
+    expect(buyerUser2.roles).toEqual(['buyer'])
+    expect(freeBuyerUser.roles).toEqual(['buyer'])
 
     _buyerWallet = await getOrCreateWallet(payload, { userId: buyerUser.id })
 

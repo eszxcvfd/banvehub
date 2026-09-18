@@ -197,6 +197,42 @@ describe('Reviews & Ratings System (FR-20, BR-05, FLOW-U08)', () => {
   })
 
   afterAll(async () => {
+    // F1 regression fix. The dependency order below is the whole point: Payload declares the
+    // foreign keys from `order_items`, `seller_earnings` and `orders` back to `users` / `orders` /
+    // `products` as ON DELETE SET NULL, but the referencing columns are NOT NULL, so Postgres
+    // aborts the parent delete instead of nulling the FK. The old version of this hook deleted
+    // `products` before `order_items`, deleted `orders` before `seller_earnings`, and swallowed
+    // every failure with `try {} catch {}`. Raw effect on a freshly migrated DB: one run left
+    // `users = 2` plus one orphan row each in `products`, `order_items`, `orders` and
+    // `seller_earnings`, so a second run no longer started from an empty users table - the ambient
+    // state that makes this file green for the wrong reason.
+    //
+    // Leaf-first order (verified against pg_constraint / information_schema.columns):
+    //   seller_earnings -> order_items -> orders -> products -> users
+    // `seller_earnings` and `order_items` are created by the real `purchaseProduct()` call in the
+    // e2e test and are not tracked by id, so they are resolved through the orders this spec owns.
+    const deleteByOrder = async (
+      collection: 'order_items' | 'seller_earnings',
+      orderIds: (number | string)[],
+    ) => {
+      for (const orderId of orderIds) {
+        const found = await payload
+          .find({
+            collection,
+            where: { order: { equals: orderId } },
+            limit: 0,
+            depth: 0,
+            overrideAccess: true,
+          })
+          .catch(() => null)
+        for (const doc of found?.docs ?? []) {
+          try {
+            await payload.delete({ collection, id: doc.id, overrideAccess: true })
+          } catch {}
+        }
+      }
+    }
+
     for (const id of cleanup.reviews) {
       try {
         await payload.delete({ collection: 'reviews', id, overrideAccess: true })
@@ -207,14 +243,18 @@ describe('Reviews & Ratings System (FR-20, BR-05, FLOW-U08)', () => {
         await payload.delete({ collection: 'entitlements', id, overrideAccess: true })
       } catch {}
     }
-    for (const id of cleanup.products) {
-      try {
-        await payload.delete({ collection: 'products', id, overrideAccess: true })
-      } catch {}
-    }
+    // seller_earnings.order_id / .order_item_id / .product_id are NOT NULL -> must go first.
+    await deleteByOrder('seller_earnings', cleanup.orders)
+    // order_items.order_id / .product_id / .seller_id are NOT NULL -> before orders and products.
+    await deleteByOrder('order_items', cleanup.orders)
     for (const id of cleanup.orders) {
       try {
         await payload.delete({ collection: 'orders', id, overrideAccess: true })
+      } catch {}
+    }
+    for (const id of cleanup.products) {
+      try {
+        await payload.delete({ collection: 'products', id, overrideAccess: true })
       } catch {}
     }
     for (const id of cleanup.users) {
@@ -222,6 +262,32 @@ describe('Reviews & Ratings System (FR-20, BR-05, FLOW-U08)', () => {
         await payload.delete({ collection: 'users', id, overrideAccess: true })
       } catch {}
     }
+
+    // Do not swallow the outcome silently again. The ONLY users allowed to survive are the owners
+    // of a `wallets` row: `wallets.user_id` is NOT NULL and the DB triggers `forbid_wallet_delete`
+    // (wallets) / `forbid_ledger_mutation` (wallet_ledger) - Decision 0002 / BR-03 - make wallet and
+    // wallet_ledger rows undeletable, so the buyer created by the wallet e2e purchase in this file
+    // can never be removed. Any other survivor is a real cleanup regression and fails loudly here
+    // instead of quietly polluting the shared test database.
+    const survivors = await payload.find({
+      collection: 'users',
+      where: { id: { in: cleanup.users } },
+      limit: 0,
+      depth: 0,
+      overrideAccess: true,
+    })
+    const walletOwners = await payload.find({
+      collection: 'wallets',
+      where: { user: { in: cleanup.users } },
+      limit: 0,
+      depth: 0,
+      overrideAccess: true,
+    })
+    const walletBound = new Set(walletOwners.docs.map((wallet) => String(wallet.user)))
+    const unexpectedSurvivors = survivors.docs
+      .filter((user) => !walletBound.has(String(user.id)))
+      .map((user) => user.email)
+    expect(unexpectedSurvivors).toEqual([])
   })
 
   // Helper context generator

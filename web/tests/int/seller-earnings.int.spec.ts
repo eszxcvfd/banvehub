@@ -41,6 +41,7 @@ export interface PurchaseResult {
 
 describe('Phase 6: Commission Calculation & Seller Earnings Lifecycle (FR-31, BR-07, Decision 0002, Decision 0005)', () => {
   let payload: Payload
+  let bootstrapUser: User
   let sellerUser: User
   let sellerWithOverrideUser: User
   let buyerUser: User
@@ -134,10 +135,32 @@ describe('Phase 6: Commission Calculation & Seller Earnings Lifecycle (FR-31, BR
     }
 
     const timestamp = Date.now()
+
+    // `ensureFirstUserIsAdmin` (src/collections/Users/hooks) appends 'admin' to the roles of the
+    // FIRST user created while the users table is EMPTY - which is exactly the CI state: CI applies
+    // only the versioned migrations and every spec's afterAll deletes its own users, so each spec
+    // file can start from an empty table. Absorb that promotion with a throwaway user BEFORE the
+    // role-sensitive fixtures below, otherwise `sellerUser` is silently ['seller', 'admin'] and the
+    // seller-scoped earnings/ownership assertions are evaluated against an admin account.
+    bootstrapUser = await createUser(
+      `bootstrap-earn-${timestamp}-${getSeq()}@kientaohub.local`,
+      ['buyer'],
+    )
+
     sellerUser = await createUser(`seller-earn-${timestamp}-${getSeq()}@kientaohub.local`, ['seller'])
     sellerWithOverrideUser = await createUser(`seller-override-${timestamp}-${getSeq()}@kientaohub.local`, ['seller'])
     buyerUser = await createUser(`buyer-earn-${timestamp}-${getSeq()}@kientaohub.local`, ['buyer'])
     _financeAdminUser = await createUser(`finance-earn-${timestamp}-${getSeq()}@kientaohub.local`, ['financeAdmin'])
+
+    // Guard: the fixtures must hold EXACTLY the roles they declare, whether or not the users table
+    // started empty (the bootstrap user above owns the first-user promotion). If the promotion ever
+    // lands on one of them again, these assertions fail loudly instead of letting the seller-scoped
+    // earnings assertions silently lose their meaning.
+    expect(sellerUser.roles).toEqual(['seller'])
+    expect(sellerUser.roles).not.toContain('admin')
+    expect(sellerWithOverrideUser.roles).toEqual(['seller'])
+    expect(buyerUser.roles).toEqual(['buyer'])
+    expect(_financeAdminUser.roles).toEqual(['financeAdmin'])
 
     // Prepare buyer wallet
     await getOrCreateWallet(payload, { userId: buyerUser.id })

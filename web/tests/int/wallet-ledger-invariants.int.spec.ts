@@ -12,6 +12,7 @@ import {
 
 describe('Phase 4: Wallet & Ledger Invariants (BR-01, BR-03, Decision 0002)', () => {
   let payload: Payload
+  let bootstrapUser: User
   let buyerUser: User
   let adminUser: User
   let wallet: Wallet
@@ -24,6 +25,25 @@ describe('Phase 4: Wallet & Ledger Invariants (BR-01, BR-03, Decision 0002)', ()
     payload = await getPayload({ config })
 
     const timestamp = Date.now()
+
+    // `ensureFirstUserIsAdmin` (src/collections/Users/hooks) appends 'admin' to the roles of the
+    // FIRST user created while the users table is EMPTY - which is exactly the CI state: CI applies
+    // only the versioned migrations and every spec's afterAll deletes its own users, so each spec
+    // file can start from an empty table. Absorb that promotion with a throwaway user BEFORE the
+    // role-sensitive fixtures below, otherwise `buyerUser` is silently ['buyer', 'admin'] and the
+    // "direct writes are denied" assertions that pass `buyerUser` are really evaluating an admin.
+    bootstrapUser = (await payload.create({
+      collection: 'users',
+      data: {
+        email: `bootstrap-invariant-${timestamp}@kientaohub.local`,
+        password: 'test-password-payment-123',
+        name: 'Bootstrap Invariant Tester',
+        roles: ['buyer'],
+      },
+      overrideAccess: true,
+    })) as User
+    cleanup.users.push(bootstrapUser.id)
+
     buyerUser = (await payload.create({
       collection: 'users',
       data: {
@@ -47,6 +67,14 @@ describe('Phase 4: Wallet & Ledger Invariants (BR-01, BR-03, Decision 0002)', ()
       overrideAccess: true,
     })) as User
     cleanup.users.push(adminUser.id)
+
+    // Guard: the fixtures must hold EXACTLY the roles they declare, whether or not the users table
+    // started empty (the bootstrap user above owns the first-user promotion). If the promotion ever
+    // lands on one of them again, these assertions fail loudly instead of letting the BR-03
+    // "denied for every principal" assertions silently lose their meaning.
+    expect(buyerUser.roles).toEqual(['buyer'])
+    expect(buyerUser.roles).not.toContain('admin')
+    expect(adminUser.roles).toEqual(['admin'])
 
     wallet = await getOrCreateWallet(payload, { userId: buyerUser.id })
   })

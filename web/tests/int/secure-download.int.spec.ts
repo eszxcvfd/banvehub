@@ -22,6 +22,7 @@ export interface StreamResult {
 
 describe('Phase 5: Secure Authenticated Download Engine & Token Rail (BR-06, FR-17, Decision 0006)', () => {
   let payload: Payload
+  let bootstrapUser: User
   let sellerUser: User
   let entitledBuyer: User
   let unentitledBuyer: User
@@ -104,10 +105,29 @@ describe('Phase 5: Secure Authenticated Download Engine & Token Rail (BR-06, FR-
     }
 
     const timestamp = Date.now()
+
+    // `ensureFirstUserIsAdmin` (src/collections/Users/hooks) appends 'admin' to the roles of the
+    // FIRST user created while the users table is EMPTY - which is exactly the CI state: CI applies
+    // only the versioned migrations and every spec's afterAll deletes its own users, so each spec
+    // file can start from an empty table. Absorb that promotion with a throwaway user BEFORE the
+    // role-sensitive fixtures below, otherwise `sellerUser` is silently ['seller', 'admin'] and the
+    // ownership/authorization assertions of this download rail are evaluated against an admin.
+    bootstrapUser = await createUser(`bootstrap-dl-${timestamp}@kientaohub.local`, ['buyer'])
+
     sellerUser = await createUser(`seller-dl-${timestamp}@kientaohub.local`, ['seller'])
     entitledBuyer = await createUser(`buyer-entitled-${timestamp}@kientaohub.local`, ['buyer'])
     unentitledBuyer = await createUser(`buyer-unentitled-${timestamp}@kientaohub.local`, ['buyer'])
     revokedBuyer = await createUser(`buyer-revoked-${timestamp}@kientaohub.local`, ['buyer'])
+
+    // Guard: the fixtures must hold EXACTLY the roles they declare, whether or not the users table
+    // started empty (the bootstrap user above owns the first-user promotion). If the promotion ever
+    // lands on one of them again, these assertions fail loudly instead of letting the download
+    // authorization assertions silently lose their meaning.
+    expect(sellerUser.roles).toEqual(['seller'])
+    expect(sellerUser.roles).not.toContain('admin')
+    expect(entitledBuyer.roles).toEqual(['buyer'])
+    expect(unentitledBuyer.roles).toEqual(['buyer'])
+    expect(revokedBuyer.roles).toEqual(['buyer'])
 
     // Create private original design file
     uploadedFile = await createProductFileHelper(

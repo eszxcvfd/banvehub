@@ -7,6 +7,7 @@ import { getOrCreateWallet } from '@/services/wallet'
 
 describe('Phase 4: Duplicate Webhook Idempotency (BR-02, Case 1, Scenario C)', () => {
   let payload: Payload
+  let bootstrapUser: User
   let buyerUser: User
   const cleanup = {
     users: [] as (number | string)[],
@@ -29,6 +30,25 @@ describe('Phase 4: Duplicate Webhook Idempotency (BR-02, Case 1, Scenario C)', (
 
     const timestamp = Date.now()
     sharedTxId = `TX_${timestamp}_${Math.floor(Math.random() * 1000000)}`
+
+    // `ensureFirstUserIsAdmin` (src/collections/Users/hooks) appends 'admin' to the roles of the
+    // FIRST user created while the users table is EMPTY - which is exactly the CI state: CI applies
+    // only the versioned migrations and every spec's afterAll deletes its own users, so each spec
+    // file can start from an empty table. Absorb that promotion with a throwaway user BEFORE the
+    // fixtures below so `buyerUser` cannot silently become ['buyer', 'admin'] and invalidate the
+    // role assumptions this suite is built on.
+    bootstrapUser = (await payload.create({
+      collection: 'users',
+      data: {
+        email: `bootstrap-webhook-${timestamp}@kientaohub.local`,
+        password: 'test-password-payment-123',
+        name: 'Bootstrap Webhook Tester',
+        roles: ['buyer'],
+      },
+      overrideAccess: true,
+    })) as User
+    cleanup.users.push(bootstrapUser.id)
+
     buyerUser = (await payload.create({
       collection: 'users',
       data: {
@@ -40,6 +60,12 @@ describe('Phase 4: Duplicate Webhook Idempotency (BR-02, Case 1, Scenario C)', (
       overrideAccess: true,
     })) as User
     cleanup.users.push(buyerUser.id)
+
+    // Guard: the fixture must hold EXACTLY the role it declares, whether or not the users table
+    // started empty. If the first-user promotion ever lands on it again this fails loudly instead
+    // of silently changing the actor every wallet/webhook assertion is anchored to.
+    expect(buyerUser.roles).toEqual(['buyer'])
+    expect(buyerUser.roles).not.toContain('admin')
   })
 
   afterAll(async () => {

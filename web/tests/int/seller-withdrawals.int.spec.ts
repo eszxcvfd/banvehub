@@ -34,6 +34,7 @@ export interface SellerBalanceSummary {
 
 describe('Phase 6: Seller Withdrawal Workflow, Balance Reservation & Anti-Race (FR-32, Threat T7, Decision 0005)', () => {
   let payload: Payload
+  let bootstrapUser: User
   let sellerUser: User
   let sellerZeroBalanceUser: User
   let financeAdminUser: User
@@ -181,11 +182,34 @@ describe('Phase 6: Seller Withdrawal Workflow, Balance Reservation & Anti-Race (
     }
 
     const timestamp = Date.now()
+
+    // `ensureFirstUserIsAdmin` (src/collections/Users/hooks) appends 'admin' to the roles of the
+    // FIRST user created while the users table is EMPTY - which is exactly the CI state: CI applies
+    // only the versioned migrations and every spec's afterAll deletes its own users, so each spec
+    // file can start from an empty table. Absorb that promotion with a throwaway user BEFORE the
+    // role-sensitive fixtures below, otherwise `sellerUser` is silently ['seller', 'admin'] and the
+    // "seller cannot act on another seller's withdrawal" style assertions are evaluated against an
+    // admin account.
+    bootstrapUser = await createUser(
+      `bootstrap-wth-${timestamp}-${getSeq()}@kientaohub.local`,
+      ['buyer'],
+    )
+
     sellerUser = await createUser(`seller-wth-${timestamp}-${getSeq()}@kientaohub.local`, ['seller'])
     sellerZeroBalanceUser = await createUser(`seller-zero-${timestamp}-${getSeq()}@kientaohub.local`, ['seller'])
     financeAdminUser = await createUser(`finance-wth-${timestamp}-${getSeq()}@kientaohub.local`, ['financeAdmin'])
     _adminUser = await createUser(`admin-wth-${timestamp}-${getSeq()}@kientaohub.local`, ['admin'])
     _buyerUser = await createUser(`buyer-wth-${timestamp}-${getSeq()}@kientaohub.local`, ['buyer'])
+
+    // Guard: the fixtures must hold EXACTLY the roles they declare, whether or not the users table
+    // started empty (the bootstrap user above owns the first-user promotion). If the promotion ever
+    // lands on one of them again, these assertions fail loudly instead of letting the withdrawal
+    // authorization matrix silently lose its meaning.
+    expect(sellerUser.roles).toEqual(['seller'])
+    expect(sellerUser.roles).not.toContain('admin')
+    expect(sellerZeroBalanceUser.roles).toEqual(['seller'])
+    expect(financeAdminUser.roles).toEqual(['financeAdmin'])
+    expect(_buyerUser.roles).toEqual(['buyer'])
 
     // Seed 2,000,000 VND available earnings for sellerUser
     await seedAvailableEarning(sellerUser.id, 2000000)

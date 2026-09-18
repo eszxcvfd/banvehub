@@ -41,6 +41,7 @@ export interface SellerBalanceSummary {
 
 describe('Phase 6: Compensating Refund Flow & Ledger Immutability (FLOW-U15, BR-03, Decision 0002)', () => {
   let payload: Payload
+  let bootstrapUser: User
   let sellerUser: User
   let buyerUser: User
   let buyerUser2: User
@@ -133,11 +134,33 @@ describe('Phase 6: Compensating Refund Flow & Ledger Immutability (FLOW-U15, BR-
     }
 
     const timestamp = Date.now()
+
+    // `ensureFirstUserIsAdmin` (src/collections/Users/hooks) appends 'admin' to the roles of the
+    // FIRST user created while the users table is EMPTY - which is exactly the CI state: CI applies
+    // only the versioned migrations and every spec's afterAll deletes its own users, so each spec
+    // file can start from an empty table. Absorb that promotion with a throwaway user BEFORE the
+    // role-sensitive fixtures below, otherwise `sellerUser` is silently ['seller', 'admin'] and the
+    // refund authorization matrix of this suite is evaluated against an admin account.
+    bootstrapUser = await createUser(
+      `bootstrap-ref-${timestamp}-${getSeq()}@kientaohub.local`,
+      ['buyer'],
+    )
+
     sellerUser = await createUser(`seller-ref-${timestamp}-${getSeq()}@kientaohub.local`, ['seller'])
     buyerUser = await createUser(`buyer-ref-${timestamp}-${getSeq()}@kientaohub.local`, ['buyer'])
     buyerUser2 = await createUser(`buyer2-ref-${timestamp}-${getSeq()}@kientaohub.local`, ['buyer'])
     financeAdminUser = await createUser(`finance-ref-${timestamp}-${getSeq()}@kientaohub.local`, ['financeAdmin'])
     _adminUser = await createUser(`admin-ref-${timestamp}-${getSeq()}@kientaohub.local`, ['admin'])
+
+    // Guard: the fixtures must hold EXACTLY the roles they declare, whether or not the users table
+    // started empty (the bootstrap user above owns the first-user promotion). If the promotion ever
+    // lands on one of them again, these assertions fail loudly instead of letting the refund ledger
+    // assertions silently lose their meaning.
+    expect(sellerUser.roles).toEqual(['seller'])
+    expect(sellerUser.roles).not.toContain('admin')
+    expect(buyerUser.roles).toEqual(['buyer'])
+    expect(buyerUser2.roles).toEqual(['buyer'])
+    expect(financeAdminUser.roles).toEqual(['financeAdmin'])
 
     buyerWallet = await getOrCreateWallet(payload, { userId: buyerUser.id })
     await getOrCreateWallet(payload, { userId: buyerUser2.id })

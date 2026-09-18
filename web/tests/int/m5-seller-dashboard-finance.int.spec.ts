@@ -11,6 +11,7 @@ import { requestWithdrawal, approveWithdrawal } from '@/services/withdrawal'
 
 describe('Phase 6 Milestone 5: Seller Earnings API & Finance Admin Operations Routes', () => {
   let payload: Payload
+  let bootstrapUser: User
   let sellerUser: User
   let seller2User: User
   let buyerUser: User
@@ -123,11 +124,35 @@ describe('Phase 6 Milestone 5: Seller Earnings API & Finance Admin Operations Ro
     payload = await getPayload({ config })
     const timestamp = Date.now()
 
+    // `ensureFirstUserIsAdmin` (src/collections/Users/hooks) appends 'admin' to the roles of the
+    // FIRST user created while the users table is EMPTY - which is exactly the CI state: CI applies
+    // only the versioned migrations and every spec's afterAll deletes its own users, so each spec
+    // file can start from an empty table. Absorb that promotion with a throwaway user BEFORE the
+    // role-sensitive fixtures below. Without it `buyerUser` is silently ['buyer', 'admin'] and the
+    // "returns 403 when authenticated caller is not a seller or admin (e.g. buyer)" assertion below
+    // receives a 200 instead of a 403 - the permission boundary it claims to guard is not guarded.
+    bootstrapUser = await createUser(
+      `bootstrap-m5-${timestamp}-${getSeq()}@kientaohub.local`,
+      ['buyer'],
+    )
+
     buyerUser = await createUser(`buyer-m5-${timestamp}-${getSeq()}@kientaohub.local`, ['buyer'])
     sellerUser = await createUser(`seller1-m5-${timestamp}-${getSeq()}@kientaohub.local`, ['seller'])
     seller2User = await createUser(`seller2-m5-${timestamp}-${getSeq()}@kientaohub.local`, ['seller'])
     financeAdminUser = await createUser(`fin-m5-${timestamp}-${getSeq()}@kientaohub.local`, ['financeAdmin'])
     adminUser = await createUser(`admin-m5-${timestamp}-${getSeq()}@kientaohub.local`, ['admin'])
+
+    // Guard: the fixtures must hold EXACTLY the roles they declare, whether or not the users table
+    // started empty (the bootstrap user above owns the first-user promotion). If the promotion ever
+    // lands on one of them again, these assertions fail loudly instead of letting the RBAC
+    // assertions silently lose their meaning.
+    expect(buyerUser.roles).toEqual(['buyer'])
+    expect(buyerUser.roles).not.toContain('admin')
+    expect(sellerUser.roles).toEqual(['seller'])
+    expect(sellerUser.roles).not.toContain('admin')
+    expect(seller2User.roles).toEqual(['seller'])
+    expect(financeAdminUser.roles).toEqual(['financeAdmin'])
+    expect(adminUser.roles).toEqual(['admin'])
 
     // Seed 1,000,000 VND available for sellerUser
     await seedAvailableEarning(sellerUser.id, 1000000)
