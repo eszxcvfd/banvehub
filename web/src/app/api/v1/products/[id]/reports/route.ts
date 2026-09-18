@@ -6,6 +6,7 @@ import {
   MODERATION_CASE_REASONS,
   isModerationCaseReason,
 } from '@/collections/ModerationCases/reasons'
+import { storefrontProductWhere } from '@/utilities/storefrontVisibility'
 
 type RouteContext = {
   params: Promise<{
@@ -19,24 +20,14 @@ const OPEN_CASE_STATUSES = ['OPEN', 'IN_REVIEW']
 const MAX_DESCRIPTION_LENGTH = 2000
 
 /**
- * The storefront visibility rule, mirrored from `queryProductBySlug` in
- * `src/app/(app)/products/[slug]/page.tsx`: outside draft-preview mode the catalog is
- * only readable when `_status` is `published`.
- *
- * The report route has no draft-preview mode (that surface belongs to the page's
- * `draftMode()` path), so it applies the published-only rule unconditionally. An
- * unpublished product is therefore reported as `404 PRODUCT_NOT_FOUND`, exactly like a
- * product that does not exist — without this filter, an attacker could enumerate
- * draft/rejected ids and slugs by telling `201`/`409` apart from `404`.
- *
- * A fresh object is returned per call because the where clause is handed to the query
- * builder (which may annotate it).
- */
-const storefrontVisibilityWhere = () => ({ _status: { equals: 'published' } })
-
-/**
  * Resolve the product from a route param that may be either the numeric id or the slug.
- * Only published products resolve (see `storefrontVisibilityWhere`).
+ *
+ * Only products the storefront shows resolve: the where-clause comes from
+ * `@/utilities/storefrontVisibility`, the single owner of that rule, and this route
+ * deliberately runs it WITHOUT `draftMode` — a report has no staff-preview mode, so an
+ * unpublished product is answered `404 PRODUCT_NOT_FOUND` exactly like an unknown one.
+ * Without the filter an attacker could enumerate draft/rejected ids and slugs by telling
+ * `201`/`409` apart from `404`.
  */
 async function resolveProductId(payload: any, paramId: string): Promise<number | null> {
   const trimmed = paramId?.trim()
@@ -47,9 +38,7 @@ async function resolveProductId(payload: any, paramId: string): Promise<number |
     if (id > 0) {
       const prodRes = await payload.find({
         collection: 'products',
-        where: {
-          and: [{ id: { equals: id } }, storefrontVisibilityWhere()],
-        },
+        where: storefrontProductWhere({ id }),
         limit: 1,
         depth: 0,
         overrideAccess: true,
@@ -62,9 +51,7 @@ async function resolveProductId(payload: any, paramId: string): Promise<number |
 
   const prods = await payload.find({
     collection: 'products',
-    where: {
-      and: [{ slug: { equals: trimmed } }, storefrontVisibilityWhere()],
-    },
+    where: storefrontProductWhere({ slug: trimmed }),
     limit: 1,
     depth: 0,
     overrideAccess: true,

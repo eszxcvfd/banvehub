@@ -8,6 +8,7 @@ import { TechnicalSpecsTable } from '@/components/product/TechnicalSpecsTable'
 import { ProductReviewsSection } from '@/components/product/ProductReviewsSection'
 import { ProductCommentsSection } from '@/components/product/ProductCommentsSection'
 import { ProductReportDialog } from '@/components/product/ProductReportDialog'
+import { storefrontProductWhere } from '@/utilities/storefrontVisibility'
 import configPromise from '@payload-config'
 import { getPayload } from 'payload'
 import { draftMode } from 'next/headers'
@@ -26,7 +27,8 @@ type Args = {
 
 export async function generateMetadata({ params }: Args): Promise<Metadata> {
   const { slug } = await params
-  const product = await queryProductBySlug({ slug })
+  const { isEnabled: isDraftPreview } = await draftMode()
+  const product = await queryProductBySlug({ slug, isDraftPreview })
 
   if (!product) return notFound()
 
@@ -117,7 +119,10 @@ export async function generateMetadata({ params }: Args): Promise<Metadata> {
 
 export default async function ProductPage({ params }: Args) {
   const { slug } = await params
-  const product = await queryProductBySlug({ slug })
+  // Draft-preview mode is decided on the SERVER and drives both the catalog query and
+  // whether the report entry point is rendered at all (see the report section below).
+  const { isEnabled: isDraftPreview } = await draftMode()
+  const product = await queryProductBySlug({ slug, isDraftPreview })
 
   if (!product) return notFound()
 
@@ -199,10 +204,16 @@ export default async function ProductPage({ params }: Args) {
         </div>
 
         {/* Product report entry point (FR-22) — creates a moderation case for the
-            moderation team; it never changes the product's own state. */}
-        <div className="mt-12">
-          <ProductReportDialog productId={product.id} productTitle={product.title} />
-        </div>
+            moderation team; it never changes the product's own state.
+            Hidden in draft-preview mode: the report route only accepts products the
+            storefront shows, so the control would lead to a guaranteed 404. The decision
+            is made on the server from `draftMode().isEnabled` — never by hiding it in
+            the client component. */}
+        {isDraftPreview ? null : (
+          <div className="mt-12">
+            <ProductReportDialog productId={product.id} productTitle={product.title} />
+          </div>
+        )}
       </div>
 
       {product.layout?.length ? <RenderBlocks blocks={product.layout} /> : <></>}
@@ -246,28 +257,31 @@ function RelatedProducts({ products }: { products: Product[] }) {
   )
 }
 
-const queryProductBySlug = async ({ slug }: { slug: string }) => {
-  const { isEnabled: draft } = await draftMode()
-
+/**
+ * Load a product for the storefront detail page (and its metadata).
+ *
+ * The visibility clause comes from `@/utilities/storefrontVisibility`, the single owner
+ * of the rule the report route also uses; here it is applied with the page's own
+ * draft-preview flag, so staff previews keep showing unpublished products while ordinary
+ * visitors (and the report route) do not.
+ */
+const queryProductBySlug = async ({
+  slug,
+  isDraftPreview = false,
+}: {
+  slug: string
+  isDraftPreview?: boolean
+}) => {
   const payload = await getPayload({ config: configPromise })
 
   const result = await payload.find({
     collection: 'products',
     depth: 3,
-    draft,
+    draft: isDraftPreview,
     limit: 1,
-    overrideAccess: draft,
+    overrideAccess: isDraftPreview,
     pagination: false,
-    where: {
-      and: [
-        {
-          slug: {
-            equals: slug,
-          },
-        },
-        ...(draft ? [] : [{ _status: { equals: 'published' } }]),
-      ],
-    },
+    where: storefrontProductWhere({ slug }, { draftMode: isDraftPreview }),
   })
 
   return result.docs?.[0] || null

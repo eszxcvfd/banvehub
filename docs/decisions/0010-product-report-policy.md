@@ -88,16 +88,22 @@ Tradeoffs:
   product. This closed the enumeration channel that the first release left open
   (`201`/`409` versus `404`), measured as review finding F3 and shipped in the
   follow-up repair round of 2026-09-18.
-- The visibility rule is currently written in two places — `queryProductBySlug` in
-  `web/src/app/(app)/products/[slug]/page.tsx:249-274` and
-  `storefrontVisibilityWhere` in the report route — because the repair was scoped to
-  the route. Review finding R1 records the drift risk: the agreement assertion binds
-  them by substring and does not detect a separately tightened page rule, so the rule
-  should be single-sourced in a shared module with a behavioural agreement check.
-- In draft-preview mode the product page still renders the report entry point, whose
-  `POST` now answers `404` for the unpublished product being previewed. Review finding
-  R2 records this and asks for the section to be hidden when
-  `draftMode().isEnabled`.
+- The visibility rule has a single owner: `web/src/utilities/storefrontVisibility.ts`,
+  imported by both the report route and the product-detail page. It was first written in
+  two places because the F3 repair was scoped to the route; review finding R1 measured
+  that the agreement assertion then bound the copies by substring only and survived a
+  separately tightened page rule, so the rule was single-sourced and the assertion
+  replaced by a behavioural agreement suite (real page render versus real route) in the
+  round-3 repair of 2026-09-18.
+- Draft preview no longer shows the report entry point: the page gates it on a
+  server-side `draftMode().isEnabled` read, so the control is absent from the rendered
+  HTML rather than merely hidden. Consequence, deliberate: a *published* product viewed
+  in draft preview also hides the control. Review finding R2, shipped in the same round.
+- Drift protection is behavioural, not structural. A consumer that re-introduces an
+  *equivalent* copy of the rule cannot change behaviour and therefore cannot fail a
+  behavioural test; only a structural check would catch it, and that check needs its own
+  accepted authority before it can be added (review finding R3-1's proposal, recorded
+  under Follow-Up rather than invented here).
 - Rate limiting is still absent (NFR-17), so the dedupe rule is today's only
   anti-abuse measure for this surface.
 - A reporter can see only the fact that their report exists; the case is not
@@ -106,9 +112,12 @@ Tradeoffs:
 
 ## Follow-Up
 
-- R1: single-source the visibility rule and assert page↔route agreement behaviourally
-  instead of by substring.
-- R2: hide the report entry point while the page is in draft-preview mode.
+- R3-1: the agreement matrix keys both surfaces on `_status` only, so a rule that also
+  narrowed on `moderationStatus` in the non-preview branch would still pass. Add one
+  matrix row with `_status = 'published'` and a non-approved `moderationStatus`; it
+  passes today and would catch that narrowing.
+- Structural guard for the equivalent-literal residual: optional, and only after
+  authority is accepted for it, per `docs/patterns/encoding-invariants.md` §2-§3.
 - F2 from the first review round: assert the rendered `#report-section` entry point in
   the committed e2e suite (`web/tests/e2e/frontend.e2e.spec.ts`), which today covers
   cart machinery only.

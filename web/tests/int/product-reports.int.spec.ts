@@ -9,6 +9,7 @@ import {
   MODERATION_CASE_REASON_OPTIONS,
   MODERATION_CASE_REASONS,
 } from '@/collections/ModerationCases/reasons'
+import { storefrontProductWhere } from '@/utilities/storefrontVisibility'
 
 // ---------------------------------------------------------------------------
 // The storefront entry point (FR-22) is a client component: mock its collaborators so
@@ -177,6 +178,11 @@ describe('Product reports → moderation cases (FR-22)', () => {
   }
 
   /** Exactly the storefront product-detail query (`draft = false`). */
+  /**
+   * The storefront product-detail query, built from the SAME visibility module the page
+   * and the report route use (`@/utilities/storefrontVisibility`) so this spec never
+   * carries a private copy of the rule.
+   */
   const storefrontQuery = async (slug: string) => {
     const res = await payload.find({
       collection: 'products',
@@ -185,9 +191,7 @@ describe('Product reports → moderation cases (FR-22)', () => {
       limit: 1,
       overrideAccess: false,
       pagination: false,
-      where: {
-        and: [{ slug: { equals: slug } }, { _status: { equals: 'published' } }],
-      },
+      where: storefrontProductWhere({ slug }),
     })
     return res.totalDocs
   }
@@ -1249,13 +1253,14 @@ describe('Product reports → moderation cases (FR-22)', () => {
   // Repair (t4 / finding F3) — unpublished products are indistinguishable from unknown
   // -------------------------------------------------------------------------
   describe('Repair F3: unpublished products resolve like unknown products (anti-enumeration)', () => {
-    // Mutation check (repair t4/F3): on a transient scratch copy of the route with
-    // `storefrontVisibilityWhere()` removed from both lookups (the pre-repair behaviour),
-    // the same unpublished fixture answered `201` with a real created case
-    // (`{"success":true,"case":{"id":…,"status":"OPEN"}}`) while the real route answers
-    // `404 {"error":"PRODUCT_NOT_FOUND",…}` — so the F3a assertion
+    // Mutation check (repair t4/F3, rule now owned by `@/utilities/storefrontVisibility`):
+    // on a transient scratch copy of the route with the visibility clause dropped from
+    // both lookups (the pre-repair behaviour), the same unpublished fixture answered `201`
+    // with a real created case (`{"success":true,"case":{"id":…,"status":"OPEN"}}`) while
+    // the real route answers `404 {"error":"PRODUCT_NOT_FOUND",…}` — so the F3a assertion
     // `expect(byId.status).toBe(404)` fails against the unfiltered route, and the
-    // enumeration channel the finding described did exist.
+    // enumeration channel the finding described did exist. The drift-sensitivity of the
+    // shared rule itself is proven in tests/int/product-report-agreement.int.spec.ts.
     let draftProduct: Product
     const UNPUBLISHED_STATES = ['draft', 'submitted', 'in_review', 'changes_requested', 'rejected']
 
@@ -1348,24 +1353,10 @@ describe('Product reports → moderation cases (FR-22)', () => {
       expect(draftByIdBody).toBe(unknownBySlugBody)
     })
 
-    it('F3c: the filter matches the storefront rule, and published products still report (201 then 409)', async () => {
-      const fs = await import('node:fs/promises')
-      const path = await import('node:path')
-      const routeSource = await fs.readFile(
-        path.resolve(process.cwd(), 'src/app/api/v1/products/[id]/reports/route.ts'),
-        'utf8',
-      )
-      const pageSource = await fs.readFile(
-        path.resolve(process.cwd(), 'src/app/(app)/products/[slug]/page.tsx'),
-        'utf8',
-      )
-      // The route reuses the storefront rule verbatim — no bespoke visibility rule.
-      expect(pageSource).toContain("_status: { equals: 'published' }")
-      expect(routeSource).toContain("_status: { equals: 'published' }")
-      expect(routeSource).toContain('storefrontVisibilityWhere')
-
+    it('F3c: the storefront query and the route agree on the same fixtures, and published products still report (201 then 409)', async () => {
       // Behavioural agreement on the same fixtures: the route hides exactly what the
-      // storefront query hides, and serves what it serves.
+      // storefront query hides, and serves what it serves. (The page⇄route agreement is
+      // proven at render level in tests/int/product-report-agreement.int.spec.ts.)
       await rawSql(
         `UPDATE products SET _status = 'draft', moderation_status = 'rejected' WHERE id = ${draftProduct.id};`,
       )
