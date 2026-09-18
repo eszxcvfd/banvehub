@@ -1,7 +1,7 @@
-# BRIEFING — 2026-09-17T04:14:00Z
+# BRIEFING — 2026-09-17T05:23:00Z
 
 ## Mission
-Oversee implementation and integration of the Product Comments & Q&A subsystem (FR-21) for KienTaoHub via SWE Light orchestrator (teamwork_preview_swe), monitoring progress and executing independent victory audit upon completion.
+Oversee implementation and integration of the Support Tickets & File Dispute System (FLOW-U09 & FR-23) for KienTaoHub via SWE Light orchestrator (teamwork_preview_swe), monitoring progress and executing independent victory audit upon completion.
 
 ## 🔒 My Identity
 - Archetype: sentinel
@@ -29,6 +29,10 @@ Oversee implementation and integration of the Product Comments & Q&A subsystem (
 - Progress Reporting Cron Task (Gen 6): task-30 (cancelled upon completion)
 - Liveness Check Cron Task (Gen 6): task-32 (cancelled upon completion)
 - Victory Auditor Sentinel Gen 6: f7ab0840-cae4-4d63-99c7-3b8da451c684 (.agents/victory_auditor_sentinel_gen6 - VICTORY CONFIRMED)
+- SWE Orchestrator Gen 7: 3465f6a7-77ef-48eb-9e8b-24d6dc6b4ee0 (.agents/swe_orchestrator_gen7)
+- Progress Reporting Cron Task (Gen 7): task-26
+- Liveness Check Cron Task (Gen 7): task-28
+- Victory Auditor Sentinel Gen 7: [to be spawned on victory claim]
 
 ## 🔒 Key Constraints
 - No technical decisions — relay only
@@ -40,30 +44,24 @@ Oversee implementation and integration of the Product Comments & Q&A subsystem (
 - Non-regression & Quality Gates: 419 integration tests must pass, pnpm lint 0 errors, pnpm build 0 errors (42/42 routes).
 - Reviews & Ratings: BR-05 entitlement-backed reviews only; 1 review per buyer/product; rating 1-5; 401/403/409/400 validation; full stats aggregation.
 - FR-21 Product Comments & Q&A subsystem: Payload Comments collection, secure REST APIs, storefront Q&A on /products/[slug], 1-level reply nesting, role badges, strict validation, full test suites, non-regression across existing 455 integration tests.
+- FLOW-U09 & FR-23 Support Tickets & File Dispute System: Payload Tickets collection, secure REST endpoints (/api/v1/tickets, /api/v1/tickets/[id], /api/v1/tickets/[id]/messages, /api/v1/tickets/[id] PATCH), order ownership verification (403 on non-owner), conversation thread, status lifecycle (OPEN, IN_PROGRESS, WAITING_USER, RESOLVED, CLOSED), storefront dispute modal on /orders/[id] and /orders, integration & challenger test suites, non-regression across existing 496 tests, pnpm lint 0 errors, pnpm build 0 errors.
 
 ## User Context
-- **Last user request**: Implement and integrate the Product Comments & Q&A subsystem (FR-21) for KienTaoHub: create Payload CMS `Comments` collection, build REST endpoints (`GET`, `POST`, `PATCH`), integrate Q&A section into `/products/[slug]`, and provide automated integration & challenger tests.
+- **Last user request**: Implement and integrate Support Tickets & File Dispute System (FLOW-U09 & FR-23) for KienTaoHub: Payload `Tickets` collection, REST endpoints, storefront dispute modal on orders, automated test suite, quality/build gates.
 - **Routing**: SWE Light path -> `teamwork_preview_swe`
 - **Routing rationale**: Single self-contained feature, user explicitly requested "Small, focused team (SWE Light: one implementing agent plus repeated adversarial review)".
 - **Pending clarifications**: none
-- **Delivered results**:
-  - `Comments` collection registered in Payload CMS with relationships (`product`, `user`, self-referencing `parent` for 1-level reply nesting), access controls (`commentAccess.ts`), anti-spoofing and invariant hooks (`enforceCommentInvariants.ts`), and status cascading (`cascadeCommentStatus.ts`).
-  - Migration `20260917_010000_phase8_comments.ts` created and applied with compound index on `(product_id, status)`.
-  - Secure REST API routes: `GET /api/v1/products/[id]/comments`, `POST /api/v1/products/[id]/comments`, `PATCH /api/v1/products/[id]/comments/[commentId]`, and `DELETE` supporting role context detection ("Tác giả / Người bán", "Quản trị viên"), strict input validation, and 1-level reply hierarchy.
-  - Storefront Q&A section integrated on `/products/[slug]` via `ProductCommentsSection.tsx` and linked from `ProductDescription.tsx`, with author badges, interactive question form, inline reply actions, and keyboard shortcuts.
-  - Automated test suites: 41/41 comments integration tests pass, 12/12 comments challenger tests pass, 496/496 total repository integration tests pass across 30 files (zero regressions), 165/165 seed/trigger invariants pass, 0 lint errors, clean build (43/43 Next.js routes).
+- **Delivered results**: [pending SWE Orchestrator Gen 7 completion and Victory Audit]
 
 ## Project Status
-- **Phase**: complete (VICTORY CONFIRMED by Independent Victory Auditor f7ab0840-cae4-4d63-99c7-3b8da451c684; all crons and subagents terminated)
+- **Phase**: in progress (SWE Orchestrator Gen 7 dispatched; progress & liveness crons running)
 
 ## Victory Audit Status
-- **Triggered**: yes
-- **Auditor**: f7ab0840-cae4-4d63-99c7-3b8da451c684 (.agents/victory_auditor_sentinel_gen6)
-- **Verdict**: VICTORY CONFIRMED
+- **Triggered**: no
+- **Verdict**: pending
 - **Retry count**: 0
 
 ## Artifact Index
 - /home/trung/Documents/2026/project/test-v6/.agents/ORIGINAL_REQUEST.md — Authoritative record of user requests
-- /home/trung/Documents/2026/project/test-v6/.agents/swe_orchestrator_gen6/handoff.md — SWE Orchestrator Gen 6 Handoff
-- /home/trung/Documents/2026/project/test-v6/.agents/victory_auditor_sentinel_gen6/handoff.md — Independent Victory Auditor Gen 6 Report
-- /home/trung/Documents/2026/project/test-v6/.agents/sentinel/handoff.md — Sentinel Completion Handoff
+- /home/trung/Documents/2026/project/test-v6/.agents/swe_orchestrator_gen7 — SWE Orchestrator Gen 7 working directory
+- /home/trung/Documents/2026/project/test-v6/.agents/sentinel/BRIEFING.md — Sentinel Briefing

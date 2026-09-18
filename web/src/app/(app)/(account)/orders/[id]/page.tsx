@@ -11,6 +11,8 @@ import configPromise from '@payload-config'
 import { getPayload } from 'payload'
 import { OrderStatus } from '@/components/OrderStatus'
 import { DownloadButton } from '@/components/download/DownloadButton'
+import { OrderDisputeModal } from '@/components/dispute/OrderDisputeModal'
+import { OrderTicketsSection } from '@/components/dispute/OrderTicketsSection'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,6 +37,7 @@ export default async function OrderPage({ params }: PageProps) {
 
   let order: any = null
   let orderItems: any[] = []
+  let tickets: any[] = []
 
   try {
     order = await payload.findByID({
@@ -61,110 +64,154 @@ export default async function OrderPage({ params }: PageProps) {
     })
 
     orderItems = itemsResult?.docs || []
+
+    // Fetch existing dispute tickets for this order
+    const ticketsResult = await payload.find({
+      collection: 'tickets',
+      where: {
+        order: {
+          equals: orderId,
+        },
+      },
+      sort: '-createdAt',
+      depth: 2,
+      overrideAccess: true,
+    })
+    tickets = ticketsResult?.docs || []
   } catch (error) {
     console.error('Error loading order:', error)
     notFound()
   }
 
-  const orderIdentifier = order.code || `#${order.id}`
+  const productsList = orderItems.map((item) => {
+    const product = typeof item.product === 'object' ? item.product : null
+    const productId = product ? product.id : item.product
+    return {
+      id: productId,
+      title: product?.title || `Sản phẩm #${productId}`,
+    }
+  })
 
-  return (
-    <div className="space-y-6">
-      <div className="flex gap-4 justify-between items-center">
-        <Button asChild variant="ghost" size="sm">
-          <Link href="/orders" className="flex items-center gap-1">
-            <ChevronLeftIcon className="w-4 h-4" />
-            Tất cả đơn hàng
-          </Link>
-        </Button>
+    const orderIdentifier = order.code || `#${order.id}`
 
-        <h1 className="text-sm font-mono px-3 py-1 bg-primary/10 rounded-full tracking-wider font-semibold">
-          {orderIdentifier}
-        </h1>
-      </div>
+    return (
+      <div className="space-y-6">
+        <div className="flex gap-4 justify-between items-center">
+          <Button asChild variant="ghost" size="sm">
+            <Link href="/orders" className="flex items-center gap-1">
+              <ChevronLeftIcon className="w-4 h-4" />
+              Tất cả đơn hàng
+            </Link>
+          </Button>
 
-      <div className="bg-card border rounded-xl p-6 md:p-8 flex flex-col gap-8 shadow-sm">
-        {/* Order Header Summary */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 pb-6 border-b">
-          <div>
-            <p className="font-mono uppercase text-muted-foreground text-xs font-semibold">Ngày đặt</p>
-            <p className="text-base font-medium mt-1">
-              <time dateTime={order.createdAt}>
-                {formatDateTime({ date: order.createdAt, format: 'dd/MM/yyyy HH:mm' })}
-              </time>
-            </p>
-          </div>
-
-          <div>
-            <p className="font-mono uppercase text-muted-foreground text-xs font-semibold">Tổng thanh toán</p>
-            <p className="text-xl font-bold font-mono text-primary mt-1">
-              {order.totalAmount !== undefined && (
-                <Price as="span" amount={order.totalAmount} currencyCode={order.currency ?? 'VND'} />
-              )}
-            </p>
-          </div>
-
-          <div>
-            <p className="font-mono uppercase text-muted-foreground text-xs font-semibold mb-1">Trạng thái</p>
-            <OrderStatus status={order.status} />
+          <div className="flex items-center gap-3">
+            <OrderDisputeModal
+              orderId={orderId}
+              orderCode={order.code || undefined}
+              products={productsList}
+              buttonVariant="outline"
+              buttonSize="sm"
+            />
+            <h1 className="text-sm font-mono px-3 py-1 bg-primary/10 rounded-full tracking-wider font-semibold">
+              {orderIdentifier}
+            </h1>
           </div>
         </div>
 
-        {/* Digital Items List */}
-        <div>
-          <h2 className="text-base font-semibold mb-4 flex items-center gap-2">
-            <FileCode className="w-5 h-5 text-primary" />
-            Tài nguyên kỹ thuật số ({orderItems.length})
-          </h2>
+        <div className="bg-card border rounded-xl p-6 md:p-8 flex flex-col gap-8 shadow-sm">
+          {/* Order Header Summary */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 pb-6 border-b">
+            <div>
+              <p className="font-mono uppercase text-muted-foreground text-xs font-semibold">Ngày đặt</p>
+              <p className="text-base font-medium mt-1">
+                <time dateTime={order.createdAt}>
+                  {formatDateTime({ date: order.createdAt, format: 'dd/MM/yyyy HH:mm' })}
+                </time>
+              </p>
+            </div>
 
-          {orderItems.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Không có mục chi tiết đơn hàng.</p>
-          ) : (
-            <ul className="flex flex-col divide-y border rounded-lg overflow-hidden bg-background">
-              {orderItems.map((item) => {
-                const product = typeof item.product === 'object' ? item.product : null
-                const productId = product ? product.id : item.product
-                const productTitle = product?.title || `Sản phẩm #${productId}`
+            <div>
+              <p className="font-mono uppercase text-muted-foreground text-xs font-semibold">Tổng thanh toán</p>
+              <p className="text-xl font-bold font-mono text-primary mt-1">
+                {order.totalAmount !== undefined && (
+                  <Price as="span" amount={order.totalAmount} currencyCode={order.currency ?? 'VND'} />
+                )}
+              </p>
+            </div>
 
-                return (
-                  <li
-                    key={item.id}
-                    className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                  >
-                    <div className="space-y-1">
-                      <Link
-                        href={`/products/${product?.slug || productId}`}
-                        className="font-semibold hover:text-primary transition-colors line-clamp-1"
-                      >
-                        {productTitle}
-                      </Link>
-                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                        <span>Đơn giá: {item.salePrice?.toLocaleString('vi-VN')} ₫</span>
-                        <span>•</span>
-                        <span className="flex items-center gap-1 text-emerald-600 font-medium">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          Đã cấp quyền tải vĩnh viễn
-                        </span>
+            <div>
+              <p className="font-mono uppercase text-muted-foreground text-xs font-semibold mb-1">Trạng thái</p>
+              <OrderStatus status={order.status} />
+            </div>
+          </div>
+
+          {/* Digital Items List */}
+          <div>
+            <h2 className="text-base font-semibold mb-4 flex items-center gap-2">
+              <FileCode className="w-5 h-5 text-primary" />
+              Tài nguyên kỹ thuật số ({orderItems.length})
+            </h2>
+
+            {orderItems.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Không có mục chi tiết đơn hàng.</p>
+            ) : (
+              <ul className="flex flex-col divide-y border rounded-lg overflow-hidden bg-background">
+                {orderItems.map((item) => {
+                  const product = typeof item.product === 'object' ? item.product : null
+                  const productId = product ? product.id : item.product
+                  const productTitle = product?.title || `Sản phẩm #${productId}`
+
+                  return (
+                    <li
+                      key={item.id}
+                      className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                    >
+                      <div className="space-y-1">
+                        <Link
+                          href={`/products/${product?.slug || productId}`}
+                          className="font-semibold hover:text-primary transition-colors line-clamp-1"
+                        >
+                          {productTitle}
+                        </Link>
+                        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                          <span>Đơn giá: {item.salePrice?.toLocaleString('vi-VN')} ₫</span>
+                          <span>•</span>
+                          <span className="flex items-center gap-1 text-emerald-600 font-medium">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            Đã cấp quyền tải vĩnh viễn
+                          </span>
+                        </div>
                       </div>
-                    </div>
 
-                    <div className="shrink-0">
-                      <DownloadButton
-                        productId={productId}
-                        productTitle={productTitle}
-                        buttonText="Tải tệp ngay"
-                        size="sm"
-                      />
-                    </div>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
+                      <div className="shrink-0 flex items-center gap-2">
+                        <OrderDisputeModal
+                          orderId={orderId}
+                          orderCode={order.code || undefined}
+                          products={productsList}
+                          preselectedProductId={productId}
+                          buttonVariant="ghost"
+                          buttonSize="sm"
+                          buttonText="Báo lỗi"
+                        />
+                        <DownloadButton
+                          productId={productId}
+                          productTitle={productTitle}
+                          buttonText="Tải tệp ngay"
+                          size="sm"
+                        />
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
         </div>
+
+        {/* Existing dispute tickets & message thread */}
+        <OrderTicketsSection orderId={orderId} initialTickets={tickets as any} />
       </div>
-    </div>
-  )
+    )
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {

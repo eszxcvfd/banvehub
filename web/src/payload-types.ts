@@ -92,6 +92,7 @@ export interface Config {
     refunds: Refund;
     reviews: Review;
     comments: Comment;
+    tickets: Ticket;
     forms: Form;
     'form-submissions': FormSubmission;
     addresses: Address;
@@ -140,6 +141,7 @@ export interface Config {
     refunds: RefundsSelect<false> | RefundsSelect<true>;
     reviews: ReviewsSelect<false> | ReviewsSelect<true>;
     comments: CommentsSelect<false> | CommentsSelect<true>;
+    tickets: TicketsSelect<false> | TicketsSelect<true>;
     forms: FormsSelect<false> | FormsSelect<true>;
     'form-submissions': FormSubmissionsSelect<false> | FormSubmissionsSelect<true>;
     addresses: AddressesSelect<false> | AddressesSelect<true>;
@@ -1602,6 +1604,73 @@ export interface Comment {
   createdAt: string;
 }
 /**
+ * Hệ thống yêu cầu hỗ trợ và khiếu nại tài nguyên kỹ thuật số (FLOW-U09 & FR-23)
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "tickets".
+ */
+export interface Ticket {
+  id: number;
+  /**
+   * Mã định danh khiếu nại duy nhất (VD: TCK-YYYYMMDD-XXXXXX)
+   */
+  code: string;
+  /**
+   * Người dùng gửi yêu cầu hỗ trợ / khiếu nại
+   */
+  user: number | User;
+  /**
+   * Người bán liên quan đến sản phẩm được khiếu nại
+   */
+  seller?: (number | null) | User;
+  /**
+   * Đơn hàng liên quan (nếu có)
+   */
+  order?: (number | null) | Order;
+  /**
+   * Sản phẩm liên quan đến sự cố
+   */
+  product?: (number | null) | Product;
+  /**
+   * Phân loại lý do khiếu nại
+   */
+  reason: 'FILE_CORRUPTED' | 'MISLEADING_CONTENT' | 'DOWNLOAD_ERROR' | 'BILLING_DISPUTE' | 'OTHER';
+  /**
+   * Tiêu đề ngắn gọn tóm tắt sự cố
+   */
+  subject: string;
+  /**
+   * Mô tả chi tiết sự cố gặp phải
+   */
+  description: string;
+  /**
+   * Trạng thái vòng đời hỗ trợ
+   */
+  status: 'OPEN' | 'IN_PROGRESS' | 'WAITING_USER' | 'RESOLVED' | 'CLOSED';
+  /**
+   * Mức độ ưu tiên xử lý
+   */
+  priority: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
+  /**
+   * Kết quả xử lý khiếu nại
+   */
+  resolution?: ('EXPLAINED' | 'FIX_PROVIDED' | 'REFUNDED' | 'REJECTED') | null;
+  /**
+   * Chuỗi tin nhắn trao đổi giữa các bên (chỉ ghi thêm, không sửa/xoá)
+   */
+  messages?:
+    | {
+        sender: number | User;
+        senderRole: 'buyer' | 'seller' | 'admin';
+        message: string;
+        createdAt?: string | null;
+        id?: string | null;
+      }[]
+    | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "form-submissions".
  */
@@ -1781,6 +1850,10 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'comments';
         value: number | Comment;
+      } | null)
+    | ({
+        relationTo: 'tickets';
+        value: number | Ticket;
       } | null)
     | ({
         relationTo: 'forms';
@@ -2515,6 +2588,34 @@ export interface CommentsSelect<T extends boolean = true> {
   status?: T;
   isSellerReply?: T;
   isAdminReply?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "tickets_select".
+ */
+export interface TicketsSelect<T extends boolean = true> {
+  code?: T;
+  user?: T;
+  seller?: T;
+  order?: T;
+  product?: T;
+  reason?: T;
+  subject?: T;
+  description?: T;
+  status?: T;
+  priority?: T;
+  resolution?: T;
+  messages?:
+    | T
+    | {
+        sender?: T;
+        senderRole?: T;
+        message?: T;
+        createdAt?: T;
+        id?: T;
+      };
   updatedAt?: T;
   createdAt?: T;
 }

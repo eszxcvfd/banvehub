@@ -8,6 +8,7 @@ import { creditWallet } from '@/services/wallet'
 
 describe('Reviews & Ratings System (FR-20, BR-05, FLOW-U08)', () => {
   let payload: Payload
+  let bootstrapUser: User
   let sellerUser: User
   let entitledBuyer1: User
   let entitledBuyer2: User
@@ -49,12 +50,38 @@ describe('Reviews & Ratings System (FR-20, BR-05, FLOW-U08)', () => {
     payload = await getPayload({ config })
     const timestamp = Date.now()
 
+    // `ensureFirstUserIsAdmin` (src/collections/Users/hooks) appends 'admin' to the roles of
+    // the FIRST user created while the users table is EMPTY - which is exactly the CI state:
+    // .github/workflows/ci.yml applies only the versioned migrations (no seed) and every
+    // spec's afterAll deletes its users, so each spec file starts from an empty table.
+    // Absorb that promotion with a throwaway user BEFORE the role-sensitive fixtures below.
+    // Without it `sellerUser` is silently ['seller','admin'], and the "a seller must not be
+    // able to tamper with a buyer's review" assertions would pass for the wrong reason
+    // (they would be testing an admin) - a false green.
+    bootstrapUser = await createUser(
+      `bootstrap-rev-${timestamp}-${getSeq()}@kientaohub.local`,
+      ['buyer'],
+    )
+
     sellerUser = await createUser(`seller-rev-${timestamp}-${getSeq()}@kientaohub.local`, ['seller'])
     entitledBuyer1 = await createUser(`buyer1-rev-${timestamp}-${getSeq()}@kientaohub.local`, ['buyer'])
     entitledBuyer2 = await createUser(`buyer2-rev-${timestamp}-${getSeq()}@kientaohub.local`, ['buyer'])
     entitledBuyer3 = await createUser(`buyer3-rev-${timestamp}-${getSeq()}@kientaohub.local`, ['buyer'])
     unentitledUser = await createUser(`unentitled-rev-${timestamp}-${getSeq()}@kientaohub.local`, ['buyer'])
     adminUser = await createUser(`admin-rev-${timestamp}-${getSeq()}@kientaohub.local`, ['admin'])
+
+    // Guard: the fixtures must hold EXACTLY the roles they declare, whether or not the users
+    // table started empty. If the first-user promotion ever lands on one of them again, these
+    // assertions fail loudly instead of letting the authorization tests silently lose meaning.
+    expect(sellerUser.roles).toEqual(['seller'])
+    expect(sellerUser.roles).not.toContain('admin')
+    expect(sellerUser.roles).not.toContain('moderator')
+    expect(sellerUser.roles).not.toContain('financeAdmin')
+    expect(entitledBuyer1.roles).toEqual(['buyer'])
+    expect(entitledBuyer2.roles).toEqual(['buyer'])
+    expect(entitledBuyer3.roles).toEqual(['buyer'])
+    expect(unentitledUser.roles).toEqual(['buyer'])
+    expect(adminUser.roles).toEqual(['admin'])
 
     // Create primary test product
     const prodDoc = await payload.create({
@@ -861,6 +888,13 @@ describe('Reviews & Ratings System (FR-20, BR-05, FLOW-U08)', () => {
       const originalContent = review.content
 
       // Seller attempts to tamper with rating to 1 and change content
+      // The tampering attempt must be judged as a SELLER: this assertion makes the test
+      // self-guarding, so a re-appearance of the first-user promotion fails here instead of
+      // silently turning this test into an admin-vs-review test (false green).
+      expect(sellerUser.roles ?? []).not.toContain('admin')
+      expect(sellerUser.roles ?? []).not.toContain('moderator')
+      expect(sellerUser.roles ?? []).not.toContain('financeAdmin')
+
       const tampered = await payload.update({
         collection: 'reviews',
         id: review.id,
