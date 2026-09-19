@@ -123,49 +123,49 @@ export async function up({ db, payload, req }: MigrateUpArgs): Promise<void> {
 
 export async function down({ db, payload, req }: MigrateDownArgs): Promise<void> {
   await db.execute(sql`
-   ALTER TABLE "product_files" DISABLE ROW LEVEL SECURITY;
-  ALTER TABLE "products_moderation_history" DISABLE ROW LEVEL SECURITY;
-  ALTER TABLE "_products_v_version_moderation_history" DISABLE ROW LEVEL SECURITY;
-  ALTER TABLE "seller_profiles" DISABLE ROW LEVEL SECURITY;
-  DROP TABLE "product_files" CASCADE;
-  DROP TABLE "products_moderation_history" CASCADE;
-  DROP TABLE "_products_v_version_moderation_history" CASCADE;
-  DROP TABLE "seller_profiles" CASCADE;
-  ALTER TABLE "products" DROP CONSTRAINT "products_seller_id_users_id_fk";
+   ALTER TABLE IF EXISTS "product_files" DISABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS "products_moderation_history" DISABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS "_products_v_version_moderation_history" DISABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS "seller_profiles" DISABLE ROW LEVEL SECURITY;
+  DROP TABLE IF EXISTS "product_files" CASCADE;
+  DROP TABLE IF EXISTS "products_moderation_history" CASCADE;
+  DROP TABLE IF EXISTS "_products_v_version_moderation_history" CASCADE;
+  DROP TABLE IF EXISTS "seller_profiles" CASCADE;
+  ALTER TABLE IF EXISTS "products" DROP CONSTRAINT IF EXISTS "products_seller_id_users_id_fk";
   
-  ALTER TABLE "products_rels" DROP CONSTRAINT "products_rels_product_files_fk";
+  ALTER TABLE IF EXISTS "products_rels" DROP CONSTRAINT IF EXISTS "products_rels_product_files_fk";
   
-  ALTER TABLE "_products_v" DROP CONSTRAINT "_products_v_version_seller_id_users_id_fk";
+  ALTER TABLE IF EXISTS "_products_v" DROP CONSTRAINT IF EXISTS "_products_v_version_seller_id_users_id_fk";
   
-  ALTER TABLE "_products_v_rels" DROP CONSTRAINT "_products_v_rels_product_files_fk";
+  ALTER TABLE IF EXISTS "_products_v_rels" DROP CONSTRAINT IF EXISTS "_products_v_rels_product_files_fk";
   
-  ALTER TABLE "payload_locked_documents_rels" DROP CONSTRAINT "payload_locked_documents_rels_product_files_fk";
+  ALTER TABLE IF EXISTS "payload_locked_documents_rels" DROP CONSTRAINT IF EXISTS "payload_locked_documents_rels_product_files_fk";
   
-  ALTER TABLE "payload_locked_documents_rels" DROP CONSTRAINT "payload_locked_documents_rels_seller_profiles_fk";
+  ALTER TABLE IF EXISTS "payload_locked_documents_rels" DROP CONSTRAINT IF EXISTS "payload_locked_documents_rels_seller_profiles_fk";
   
-  DROP INDEX "products_seller_idx";
-  DROP INDEX "products_rels_product_files_id_idx";
-  DROP INDEX "_products_v_version_version_seller_idx";
-  DROP INDEX "_products_v_rels_product_files_id_idx";
-  DROP INDEX "payload_locked_documents_rels_product_files_id_idx";
-  DROP INDEX "payload_locked_documents_rels_seller_profiles_id_idx";
-  ALTER TABLE "products" DROP COLUMN "seller_id";
-  ALTER TABLE "products" DROP COLUMN "moderation_status";
-  ALTER TABLE "products" DROP COLUMN "moderation_notes";
-  ALTER TABLE "products" DROP COLUMN "copyright_declared";
-  ALTER TABLE "products_rels" DROP COLUMN "product_files_id";
-  ALTER TABLE "_products_v" DROP COLUMN "version_seller_id";
-  ALTER TABLE "_products_v" DROP COLUMN "version_moderation_status";
-  ALTER TABLE "_products_v" DROP COLUMN "version_moderation_notes";
-  ALTER TABLE "_products_v" DROP COLUMN "version_copyright_declared";
-  ALTER TABLE "_products_v_rels" DROP COLUMN "product_files_id";
-  ALTER TABLE "payload_locked_documents_rels" DROP COLUMN "product_files_id";
-  ALTER TABLE "payload_locked_documents_rels" DROP COLUMN "seller_profiles_id";
-  DROP TYPE "public"."enum_product_files_virus_scan_status";
-  DROP TYPE "public"."enum_product_files_status";
-  DROP TYPE "public"."enum_products_moderation_history_action";
-  DROP TYPE "public"."enum_products_moderation_status";
-  DROP TYPE "public"."enum__products_v_version_moderation_history_action";
-  DROP TYPE "public"."enum__products_v_version_moderation_status";
-  DROP TYPE "public"."enum_seller_profiles_status";`)
+  DROP INDEX IF EXISTS "products_seller_idx";
+  DROP INDEX IF EXISTS "products_rels_product_files_id_idx";
+  DROP INDEX IF EXISTS "_products_v_version_version_seller_idx";
+  DROP INDEX IF EXISTS "_products_v_rels_product_files_id_idx";
+  DROP INDEX IF EXISTS "payload_locked_documents_rels_product_files_id_idx";
+  DROP INDEX IF EXISTS "payload_locked_documents_rels_seller_profiles_id_idx";
+  ALTER TABLE IF EXISTS "products" DROP COLUMN IF EXISTS "seller_id";
+  ALTER TABLE IF EXISTS "products" DROP COLUMN IF EXISTS "moderation_status";
+  ALTER TABLE IF EXISTS "products" DROP COLUMN IF EXISTS "moderation_notes";
+  ALTER TABLE IF EXISTS "products" DROP COLUMN IF EXISTS "copyright_declared";
+  ALTER TABLE IF EXISTS "products_rels" DROP COLUMN IF EXISTS "product_files_id";
+  ALTER TABLE IF EXISTS "_products_v" DROP COLUMN IF EXISTS "version_seller_id";
+  ALTER TABLE IF EXISTS "_products_v" DROP COLUMN IF EXISTS "version_moderation_status";
+  ALTER TABLE IF EXISTS "_products_v" DROP COLUMN IF EXISTS "version_moderation_notes";
+  ALTER TABLE IF EXISTS "_products_v" DROP COLUMN IF EXISTS "version_copyright_declared";
+  ALTER TABLE IF EXISTS "_products_v_rels" DROP COLUMN IF EXISTS "product_files_id";
+  ALTER TABLE IF EXISTS "payload_locked_documents_rels" DROP COLUMN IF EXISTS "product_files_id";
+  ALTER TABLE IF EXISTS "payload_locked_documents_rels" DROP COLUMN IF EXISTS "seller_profiles_id";
+  DROP TYPE IF EXISTS "public"."enum_product_files_virus_scan_status";
+  DROP TYPE IF EXISTS "public"."enum_product_files_status";
+  DROP TYPE IF EXISTS "public"."enum_products_moderation_history_action";
+  DROP TYPE IF EXISTS "public"."enum_products_moderation_status";
+  DROP TYPE IF EXISTS "public"."enum__products_v_version_moderation_history_action";
+  DROP TYPE IF EXISTS "public"."enum__products_v_version_moderation_status";
+  DROP TYPE IF EXISTS "public"."enum_seller_profiles_status";`)
 }

@@ -60,18 +60,23 @@ export async function up({ db, payload, req }: MigrateUpArgs): Promise<void> {
 }
 
 export async function down({ db, payload, req }: MigrateDownArgs): Promise<void> {
+  // Every drop is guarded, because `DROP TABLE ... CASCADE` below removes the
+  // `payload_locked_documents_rels_tickets_fk` constraint and the `tickets_id` index for us:
+  // an unguarded DROP then fails with `constraint ... does not exist` and the whole
+  // rollback aborts, leaving this migration applied and the chain blocked (finding F4).
+  // The same style the FR-22 migration uses (`20260918_000000_phase10_moderation_cases.ts`).
   await db.execute(sql`
-   ALTER TABLE "tickets_messages" DISABLE ROW LEVEL SECURITY;
-  ALTER TABLE "tickets" DISABLE ROW LEVEL SECURITY;
-  DROP TABLE "tickets_messages" CASCADE;
-  DROP TABLE "tickets" CASCADE;
-  ALTER TABLE "payload_locked_documents_rels" DROP CONSTRAINT "payload_locked_documents_rels_tickets_fk";
-  
-  DROP INDEX "payload_locked_documents_rels_tickets_id_idx";
-  ALTER TABLE "payload_locked_documents_rels" DROP COLUMN "tickets_id";
-  DROP TYPE "public"."enum_tickets_messages_sender_role";
-  DROP TYPE "public"."enum_tickets_reason";
-  DROP TYPE "public"."enum_tickets_status";
-  DROP TYPE "public"."enum_tickets_priority";
-  DROP TYPE "public"."enum_tickets_resolution";`)
+   ALTER TABLE IF EXISTS "tickets_messages" DISABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS "tickets" DISABLE ROW LEVEL SECURITY;
+  DROP TABLE IF EXISTS "tickets_messages" CASCADE;
+  DROP TABLE IF EXISTS "tickets" CASCADE;
+  ALTER TABLE "payload_locked_documents_rels" DROP CONSTRAINT IF EXISTS "payload_locked_documents_rels_tickets_fk";
+
+  DROP INDEX IF EXISTS "payload_locked_documents_rels_tickets_id_idx";
+  ALTER TABLE "payload_locked_documents_rels" DROP COLUMN IF EXISTS "tickets_id";
+  DROP TYPE IF EXISTS "public"."enum_tickets_messages_sender_role";
+  DROP TYPE IF EXISTS "public"."enum_tickets_reason";
+  DROP TYPE IF EXISTS "public"."enum_tickets_status";
+  DROP TYPE IF EXISTS "public"."enum_tickets_priority";
+  DROP TYPE IF EXISTS "public"."enum_tickets_resolution";`)
 }

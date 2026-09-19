@@ -167,45 +167,45 @@ export async function down({ db, payload, req }: MigrateDownArgs): Promise<void>
   DROP TRIGGER IF EXISTS forbid_wallet_delete ON "wallets";
   DROP TRIGGER IF EXISTS forbid_wallet_truncate ON "wallets";
   DROP FUNCTION IF EXISTS forbid_financial_mutation();
-  ALTER TABLE "wallets" DISABLE ROW LEVEL SECURITY;
-  ALTER TABLE "wallet_ledger" DISABLE ROW LEVEL SECURITY;
-  ALTER TABLE "payment_intents" DISABLE ROW LEVEL SECURITY;
-  ALTER TABLE "payment_transactions" DISABLE ROW LEVEL SECURITY;
-  ALTER TABLE "payment_webhook_events" DISABLE ROW LEVEL SECURITY;
-  DROP TABLE "wallets" CASCADE;
-  DROP TABLE "wallet_ledger" CASCADE;
-  DROP TABLE "payment_intents" CASCADE;
-  DROP TABLE "payment_transactions" CASCADE;
-  DROP TABLE "payment_webhook_events" CASCADE;
-  ALTER TABLE "payload_locked_documents_rels" DROP CONSTRAINT "payload_locked_documents_rels_wallets_fk";
+  ALTER TABLE IF EXISTS "wallets" DISABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS "wallet_ledger" DISABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS "payment_intents" DISABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS "payment_transactions" DISABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS "payment_webhook_events" DISABLE ROW LEVEL SECURITY;
+  DROP TABLE IF EXISTS "wallets" CASCADE;
+  DROP TABLE IF EXISTS "wallet_ledger" CASCADE;
+  DROP TABLE IF EXISTS "payment_intents" CASCADE;
+  DROP TABLE IF EXISTS "payment_transactions" CASCADE;
+  DROP TABLE IF EXISTS "payment_webhook_events" CASCADE;
+  ALTER TABLE IF EXISTS "payload_locked_documents_rels" DROP CONSTRAINT IF EXISTS "payload_locked_documents_rels_wallets_fk";
   
-  ALTER TABLE "payload_locked_documents_rels" DROP CONSTRAINT "payload_locked_documents_rels_wallet_ledger_fk";
+  ALTER TABLE IF EXISTS "payload_locked_documents_rels" DROP CONSTRAINT IF EXISTS "payload_locked_documents_rels_wallet_ledger_fk";
   
-  ALTER TABLE "payload_locked_documents_rels" DROP CONSTRAINT "payload_locked_documents_rels_payment_intents_fk";
+  ALTER TABLE IF EXISTS "payload_locked_documents_rels" DROP CONSTRAINT IF EXISTS "payload_locked_documents_rels_payment_intents_fk";
   
-  ALTER TABLE "payload_locked_documents_rels" DROP CONSTRAINT "payload_locked_documents_rels_payment_transactions_fk";
+  ALTER TABLE IF EXISTS "payload_locked_documents_rels" DROP CONSTRAINT IF EXISTS "payload_locked_documents_rels_payment_transactions_fk";
   
-  ALTER TABLE "payload_locked_documents_rels" DROP CONSTRAINT "payload_locked_documents_rels_payment_webhook_events_fk";
+  ALTER TABLE IF EXISTS "payload_locked_documents_rels" DROP CONSTRAINT IF EXISTS "payload_locked_documents_rels_payment_webhook_events_fk";
   
   DROP INDEX IF EXISTS "payload_locked_documents_rels_wallets_id_idx";
   DROP INDEX IF EXISTS "payload_locked_documents_rels_wallet_ledger_id_idx";
   DROP INDEX IF EXISTS "payload_locked_documents_rels_payment_intents_id_idx";
   DROP INDEX IF EXISTS "payload_locked_documents_rels_payment_transactions_id_idx";
   DROP INDEX IF EXISTS "payload_locked_documents_rels_payment_webhook_events_id_idx";
-  ALTER TABLE "payload_locked_documents_rels" DROP COLUMN "wallets_id";
-  ALTER TABLE "payload_locked_documents_rels" DROP COLUMN "wallet_ledger_id";
-  ALTER TABLE "payload_locked_documents_rels" DROP COLUMN "payment_intents_id";
-  ALTER TABLE "payload_locked_documents_rels" DROP COLUMN "payment_transactions_id";
-  ALTER TABLE "payload_locked_documents_rels" DROP COLUMN "payment_webhook_events_id";
-  DROP TYPE "public"."enum_wallets_currency";
-  DROP TYPE "public"."enum_wallets_status";
-  DROP TYPE "public"."enum_wallet_ledger_type";
-  DROP TYPE "public"."enum_wallet_ledger_direction";
-  DROP TYPE "public"."enum_wallet_ledger_reference_type";
-  DROP TYPE "public"."enum_payment_intents_provider";
-  DROP TYPE "public"."enum_payment_intents_currency";
-  DROP TYPE "public"."enum_payment_intents_status";
-  DROP TYPE "public"."enum_payment_transactions_status";
-  DROP TYPE "public"."enum_payment_webhook_events_status";`)
+  ALTER TABLE IF EXISTS "payload_locked_documents_rels" DROP COLUMN IF EXISTS "wallets_id";
+  ALTER TABLE IF EXISTS "payload_locked_documents_rels" DROP COLUMN IF EXISTS "wallet_ledger_id";
+  ALTER TABLE IF EXISTS "payload_locked_documents_rels" DROP COLUMN IF EXISTS "payment_intents_id";
+  ALTER TABLE IF EXISTS "payload_locked_documents_rels" DROP COLUMN IF EXISTS "payment_transactions_id";
+  ALTER TABLE IF EXISTS "payload_locked_documents_rels" DROP COLUMN IF EXISTS "payment_webhook_events_id";
+  DROP TYPE IF EXISTS "public"."enum_wallets_currency";
+  DROP TYPE IF EXISTS "public"."enum_wallets_status";
+  DROP TYPE IF EXISTS "public"."enum_wallet_ledger_type";
+  DROP TYPE IF EXISTS "public"."enum_wallet_ledger_direction";
+  DROP TYPE IF EXISTS "public"."enum_wallet_ledger_reference_type";
+  DROP TYPE IF EXISTS "public"."enum_payment_intents_provider";
+  DROP TYPE IF EXISTS "public"."enum_payment_intents_currency";
+  DROP TYPE IF EXISTS "public"."enum_payment_intents_status";
+  DROP TYPE IF EXISTS "public"."enum_payment_transactions_status";
+  DROP TYPE IF EXISTS "public"."enum_payment_webhook_events_status";`)
 }
 
