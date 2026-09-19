@@ -78,5 +78,13 @@ jobs:
       - name: Build and type check
         run: pnpm build
 
+      # `web/vitest.setup.ts` redirects the integration suite to a separate database
+      # (`kientaohub_test`) so tests never touch development data. The migration step above
+      # only migrates `kientaohub`, so CI must provision and migrate the test database the
+      # same way a developer does with `pnpm test:db:setup`. Without this step the suite
+      # runs against a database with no schema and fails with `relation ... does not exist`.
+      - name: Bootstrap the test database
+        run: pnpm test:db:setup
+
       - name: Integration tests
         run: pnpm test:int

@@ -26,10 +26,20 @@ function executePostgresSql(sql: string): string {
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim()
   } catch (_dockerErr) {
-    return execSync(`psql -h 127.0.0.1 -p 5433 -U payload -d postgres -t -A -c "${sql}"`, {
-      encoding: 'utf8',
-      env: { ...process.env, PGPASSWORD: 'payload' },
-    }).trim()
+    // No matching container (CI runs PostgreSQL as a service, not in Docker), so reach the
+    // server over the network using the same connection the application uses. The host,
+    // port, user and password come from DATABASE_URL rather than being hard-coded, because
+    // CI serves PostgreSQL on 127.0.0.1:5432 while local development uses :5433.
+    const { host, port, username, password } = new URL(
+      process.env.DATABASE_URL || 'postgres://payload:payload@127.0.0.1:5433/kientaohub',
+    )
+    return execSync(
+      `psql -h ${host || '127.0.0.1'} -p ${port || '5433'} -U ${username || 'payload'} -d postgres -t -A -c "${sql}"`,
+      {
+        encoding: 'utf8',
+        env: { ...process.env, PGPASSWORD: password || 'payload' },
+      },
+    ).trim()
   }
 }
 

@@ -75,7 +75,19 @@ pnpm test:db:setup
 This runs `web/scripts/bootstrap-test-db.mts`, which:
 1. Connects to PostgreSQL and checks if database `kientaohub_test` exists.
 2. Creates `kientaohub_test` if missing.
-3. Applies all 8 Payload migrations (`pnpm payload migrate`) against `kientaohub_test`.
+3. Applies every Payload migration (`pnpm payload migrate`) against `kientaohub_test` — the
+   same 12 that `kientaohub` carries, so a freshly bootstrapped test database has all 103
+   tables.
+
+Connection details come from `DATABASE_URL`: the script prefers `docker exec kientaohub-postgres`
+locally and otherwise reaches the server over the network with the URL's host, port, user and
+password. That second path is what CI uses, where PostgreSQL runs as a service container on
+`127.0.0.1:5432` instead of the local `127.0.0.1:5433` container.
+
+**CI contract:** `.github/workflows/ci.yml` runs `pnpm test:db:setup` before `pnpm test:int`,
+because the migration step in that workflow only migrates `kientaohub`. Skipping the bootstrap
+makes the suite run against a database with no schema, and the failures surface as unrelated
+`relation "..." does not exist` errors across every spec.
 
 ### Runtime Test Isolation
 `web/vitest.setup.ts` automatically redirects `process.env.DATABASE_URL` to `kientaohub_test`:
