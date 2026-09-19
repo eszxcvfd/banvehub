@@ -99,17 +99,17 @@ Tradeoffs:
   server-side `draftMode().isEnabled` read, so the control is absent from the rendered
   HTML rather than merely hidden. Consequence, deliberate: a *published* product viewed
   in draft preview also hides the control. Review finding R2, shipped in the same round.
-- Drift protection is behavioural, not structural. A consumer that re-introduces an
-  *equivalent* copy of the rule cannot change behaviour and therefore cannot fail a
-  behavioural test; only a structural check would catch it, and that check needs its own
-  accepted authority before it can be added (recorded under Follow-Up rather than
-  invented here).
+- Drift protection is behavioural *and* structural. Behaviour alone cannot catch a
+  consumer that re-introduces an *equivalent* copy of the rule, because the copy cannot
+  change behaviour; the structural guard below covers that residual, and it was accepted
+  by the owner on 2026-09-19 before it was written, per
+  `docs/patterns/encoding-invariants.md` §2-§3.
 - The agreement matrix also pins a second column: a row with `_status = 'published'` and
   `moderationStatus = 'submitted'` fails if either surface narrows its rule to
   `moderationStatus = 'approved'` — measured under mutation `N3` (page) and `N3b` (route)
   and shipped in the round-4 repair of 2026-09-18. Honest boundary: the matrix pins this
   one second-column value, so a condition that excluded some other pair would still
-  escape, and that residual is what the structural guard would cover.
+  escape; that residual is the structural guard's job.
 - Rate limiting is still absent (NFR-17), so the dedupe rule is today's only
   anti-abuse measure for this surface.
 - A reporter can see only the fact that their report exists; the case is not
@@ -118,13 +118,22 @@ Tradeoffs:
 
 ## Follow-Up
 
-- Structural guard for the equivalent-literal residual: optional, and only after
-  authority is accepted for it, per `docs/patterns/encoding-invariants.md` §2-§3.
 - §13 notifications remain out of P0 per decision 0003, so reporters are not yet
   told the outcome of their report.
 
 Closed after this record was written:
 
+- **Structural guard (accepted 2026-09-19).** Any file under `web/src` that queries
+  `collection: 'products'` and also inlines `_status: { equals: 'published' }` must import
+  `@/utilities/storefrontVisibility`; the owner module is the one legitimate holder. It
+  lives in `web/tests/int/storefront-visibility-single-source.int.spec.ts`, so it runs
+  under the repository's existing `pnpm --prefix web test:int`, which
+  `.github/workflows/ci.yml` invokes on every pull request and on pushes to `main` — CI
+  enforcement, not a local convention. No git hook is installed and branch protection is
+  not verifiable from this repository. Proof: the current tree passes; a planted products
+  query with the inline literal fails with a diagnostic naming the file, the rule and the
+  fix; the same literal for the `pages` collection is correctly not flagged, which is why
+  the check keys on the products collection instead of the literal alone.
 - F2 (assert the rendered `#report-section` entry point in the committed e2e suite)
   shipped in `ba99819`: the storefront journey now checks the guest invitation, the
   signed-in trigger, exactly seven reasons, and that opening the dialog writes nothing.
