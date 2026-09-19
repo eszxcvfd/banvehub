@@ -120,12 +120,18 @@ Tradeoffs:
 
 - Structural guard for the equivalent-literal residual: optional, and only after
   authority is accepted for it, per `docs/patterns/encoding-invariants.md` §2-§3.
-- F2 from the first review round: assert the rendered `#report-section` entry point in
-  the committed e2e suite (`web/tests/e2e/frontend.e2e.spec.ts`), which today covers
-  cart machinery only.
-- F4/F5 hygiene from the first review round: `migrate:down` of
-  `web/src/migrations/20260917_052848_phase9_tickets.ts` fails on an unguarded
-  `DROP CONSTRAINT`, and `.lit/evidence/verifier-t2-http.log` holds an inert JWT that
-  must be redacted before any `.lit/` commit (`.lit/` is untracked scratch today).
 - §13 notifications remain out of P0 per decision 0003, so reporters are not yet
   told the outcome of their report.
+
+Closed after this record was written:
+
+- F2 (assert the rendered `#report-section` entry point in the committed e2e suite)
+  shipped in `ba99819`: the storefront journey now checks the guest invitation, the
+  signed-in trigger, exactly seven reasons, and that opening the dialog writes nothing.
+- F4 (a broken `migrate:down`) shipped in `0d29332`. The reported failure was
+  `phase9_tickets`; testing the whole chain found the same unguarded-drop defect in
+  `phase2_digital_catalog`, `phase3_seller_moderation` and `phase4_payment_wallet`, and
+  all four down paths are now idempotent. Validated on a scratch database: 12 down runs
+  reach an empty schema, then 12 up runs restore 103 public tables, matching development.
+- F5 (an inert JWT in `.lit/evidence/verifier-t2-http.log`) was redacted, and the
+  unredacted original deleted rather than retained; no token value remains under `.lit/`.
