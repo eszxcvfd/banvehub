@@ -102,8 +102,14 @@ Tradeoffs:
 - Drift protection is behavioural, not structural. A consumer that re-introduces an
   *equivalent* copy of the rule cannot change behaviour and therefore cannot fail a
   behavioural test; only a structural check would catch it, and that check needs its own
-  accepted authority before it can be added (review finding R3-1's proposal, recorded
-  under Follow-Up rather than invented here).
+  accepted authority before it can be added (recorded under Follow-Up rather than
+  invented here).
+- The agreement matrix also pins a second column: a row with `_status = 'published'` and
+  `moderationStatus = 'submitted'` fails if either surface narrows its rule to
+  `moderationStatus = 'approved'` — measured under mutation `N3` (page) and `N3b` (route)
+  and shipped in the round-4 repair of 2026-09-18. Honest boundary: the matrix pins this
+  one second-column value, so a condition that excluded some other pair would still
+  escape, and that residual is what the structural guard would cover.
 - Rate limiting is still absent (NFR-17), so the dedupe rule is today's only
   anti-abuse measure for this surface.
 - A reporter can see only the fact that their report exists; the case is not
@@ -112,10 +118,6 @@ Tradeoffs:
 
 ## Follow-Up
 
-- R3-1: the agreement matrix keys both surfaces on `_status` only, so a rule that also
-  narrowed on `moderationStatus` in the non-preview branch would still pass. Add one
-  matrix row with `_status = 'published'` and a non-approved `moderationStatus`; it
-  passes today and would catch that narrowing.
 - Structural guard for the equivalent-literal residual: optional, and only after
   authority is accepted for it, per `docs/patterns/encoding-invariants.md` §2-§3.
 - F2 from the first review round: assert the rendered `#report-section` entry point in

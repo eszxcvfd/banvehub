@@ -37,6 +37,12 @@ import ProductPage from '@/app/(app)/products/[slug]/page'
 //    non-staff readers, so the page's decision does not change. The explicit shared
 //    clause is what keeps the page's decision identical to the route's independently of
 //    that access rule (M2b shows the consequence when both are gone).
+//  - N3 "page's non-preview branch tightened with `moderationStatus = 'approved'`"
+//    (page copy whose non-preview clause adds that extra condition): the four
+//    `_status`-only rows stay GREEN — which is why this drift class escaped round 3 — and
+//    the R3-1 row below is RED (`expected 'notFound' to be 'rendered'`), because its
+//    fixture is `_status = 'published'` with `moderation_status = 'submitted'`. That row
+//    exists to pin the second column.
 // ---------------------------------------------------------------------------
 const { draftState, mockUseAuth, mockToast } = vi.hoisted(() => ({
   draftState: { isEnabled: false },
@@ -94,6 +100,8 @@ describe('FR-22 storefront page ⇔ report route agreement (repair R1/R2)', () =
   let bootstrapUser: User
   let publishedProduct: Product
   let unpublishedProduct: Product
+  /** R3-1 matrix row: `_status = 'published'` with a non-approved moderation verdict. */
+  let publishedUnapprovedProduct: Product
 
   let seq = 0
   const getSeq = () => ++seq
@@ -120,6 +128,17 @@ describe('FR-22 storefront page ⇔ report route agreement (repair R1/R2)', () =
       `SELECT count(*)::int AS n FROM moderation_cases WHERE ${where};`,
     )
     return rows[0]?.n ?? -1
+  }
+
+  /**
+   * Raw visibility state of a product row. Both surfaces currently key on `_status`, so a
+   * matrix row must be able to prove which `(_status, moderation_status)` pair it pinned.
+   */
+  const productRowState = async (id: number | string) => {
+    const rows = await rawSql<{ _status: string; moderation_status: string }>(
+      `SELECT _status, moderation_status FROM products WHERE id = ${id};`,
+    )
+    return rows[0]
   }
 
   const makeContext = (id: string | number) => ({
@@ -201,7 +220,11 @@ describe('FR-22 storefront page ⇔ report route agreement (repair R1/R2)', () =
     expect(bootstrapUser.roles).toEqual(['buyer'])
     expect(sellerUser.roles).toEqual(['seller'])
 
-    const mkProduct = async (slug: string, status: 'draft' | 'published') => {
+    const mkProduct = async (
+      slug: string,
+      status: 'draft' | 'published',
+      moderationStatus?: Product['moderationStatus'],
+    ) => {
       const product = (await payload.create({
         collection: 'products',
         data: {
@@ -210,7 +233,7 @@ describe('FR-22 storefront page ⇔ report route agreement (repair R1/R2)', () =
           price: 120000,
           seller: sellerUser.id,
           copyrightDeclared: true,
-          moderationStatus: status === 'published' ? 'approved' : 'draft',
+          moderationStatus: moderationStatus ?? (status === 'published' ? 'approved' : 'draft'),
           _status: status,
         },
         overrideAccess: true,
@@ -221,6 +244,14 @@ describe('FR-22 storefront page ⇔ report route agreement (repair R1/R2)', () =
 
     publishedProduct = await mkProduct(`fr22-agreement-published-${timestamp}`, 'published')
     unpublishedProduct = await mkProduct(`fr22-agreement-unpublished-${timestamp}`, 'draft')
+    // R3-1 matrix row: PUBLISHED (what both surfaces currently key on) but the moderation
+    // verdict is a different column and is NOT `approved`. A surface that tightened its
+    // non-preview rule to `moderationStatus === 'approved'` must fail on this fixture.
+    publishedUnapprovedProduct = await mkProduct(
+      `fr22-agreement-published-unapproved-${timestamp}`,
+      'published',
+      'submitted',
+    )
   })
 
   afterAll(async () => {
@@ -294,6 +325,49 @@ describe('FR-22 storefront page ⇔ report route agreement (repair R1/R2)', () =
     // Of the six states only the published one may have produced a case: every hidden
     // state wrote nothing, so the fixture owns exactly one case.
     expect(await countCases(`product_id = ${unpublishedProduct.id}`)).toBe(1)
+  })
+
+  it('R3-1: a published product that is not moderation-approved is still shown and still reportable', async () => {
+    // The other rows only ever pin `_status` (the column both surfaces key on): every
+    // unpublished case is paired with `_status = 'draft'`. This row additionally pins a
+    // *different* column — `moderation_status = 'submitted'` — so a surface that silently
+    // tightened its non-preview rule to `moderationStatus === 'approved'` (the round-3
+    // drift) diverges here instead of escaping the matrix.
+    const row = await productRowState(publishedUnapprovedProduct.id)
+    expect(row._status).toBe('published')
+    expect(row.moderation_status).toBe('submitted')
+    expect(row.moderation_status).not.toBe('approved')
+
+    // Surface 1 — the real storefront page, non-preview.
+    const page = await renderPage(publishedUnapprovedProduct.slug as string, false)
+    expect(page.outcome).toBe('rendered')
+    expect(page.html).toContain('id="report-section"')
+
+    // Surface 2 — the real report route, same fixture.
+    const reporter = await createUser(
+      `r3-1-${Date.now()}-${getSeq()}@kientaohub.local`,
+      ['buyer'],
+    )
+    actAs(reporter)
+
+    const first = await reportProduct(
+      reportRequest(publishedUnapprovedProduct.id, { reason: 'MISLEADING_PREVIEW' }),
+      makeContext(publishedUnapprovedProduct.id),
+    )
+    expect(first.status).toBe(201)
+    const firstBody = await first.json()
+    caseIds.push(firstBody.case.id)
+    expect(firstBody.case.status).toBe('OPEN')
+
+    const second = await reportProduct(
+      reportRequest(publishedUnapprovedProduct.id, { reason: 'SPAM' }),
+      makeContext(publishedUnapprovedProduct.id),
+    )
+    expect(second.status).toBe(409)
+    expect((await second.json()).error).toBe('DUPLICATE_REPORT')
+
+    // The row's agreement invariant, in the same style as the matrix above.
+    expect(page.outcome === 'rendered').toBe(first.status === 201)
   })
 
   it('R1b: a product the storefront shows is reportable — 201 first, then 409 for the same user', async () => {
