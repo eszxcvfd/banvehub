@@ -106,6 +106,58 @@ test.describe('KienTaoHub storefront journey', () => {
     await expect(page.getByText('Mua ngay').first()).toBeVisible()
   })
 
+  test('the FR-22 report entry point is the rendered one, and opening it writes nothing', async ({
+    page,
+  }) => {
+    const productUrl = `${baseURL}/products/${SEEDED_PAID_PRODUCT.slug}`
+
+    // A guest receives the section as an invitation to sign in, never the form
+    // (owner policy 2026-09-18: reports are authenticated-only).
+    await page.goto(productUrl)
+    await expect(page.locator('#report-section')).toBeVisible()
+    await expect(page.locator('#report-section')).toContainText('Chỉ người dùng đã đăng nhập')
+    await expect(page.locator('#report-reason')).toHaveCount(0)
+
+    await loginViaUI(page, TEST_USERS.buyer.email, TEST_USERS.buyer.password)
+    await page.goto(productUrl)
+
+    // Assert the entry point where it is actually rendered. Review finding F2: the committed
+    // e2e asserted cart machinery only, and the wiring was covered by a source-text match.
+    const section = page.locator('#report-section')
+    await expect(section).toBeVisible()
+    await section.getByRole('button', { name: 'Báo cáo sản phẩm' }).click()
+
+    // The dialog offers exactly the seven FR-22 reasons (PLAN.md:797-810) and nothing else.
+    const reason = page.locator('#report-reason')
+    await expect(reason).toBeVisible()
+    await expect(reason.locator('option')).toHaveCount(7)
+
+    // Opening the dialog must not write a moderation case: only the route creates one.
+    const payload = await getTestPayload()
+    const product = await payload.find({
+      collection: 'products',
+      where: { slug: { equals: SEEDED_PAID_PRODUCT.slug } },
+      limit: 1,
+      depth: 0,
+      overrideAccess: true,
+    })
+    const productId = product.docs[0]?.id
+    const countCases = async () =>
+      (
+        await payload.count({
+          collection: 'moderation_cases',
+          where: { product: { equals: productId } },
+          overrideAccess: true,
+        })
+      ).totalDocs
+    const before = await countCases()
+
+    await page.getByRole('button', { name: 'Hủy' }).click()
+    await expect(reason).toHaveCount(0)
+
+    expect(await countCases()).toBe(before)
+  })
+
   test('a new visitor can create an account and is logged in afterwards', async ({ page }) => {
     const email = `e2e-signup-${Date.now()}@kientaohub.test`
     const password = 'e2e-Signup-Password-2026'
