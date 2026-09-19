@@ -205,10 +205,14 @@ describe('Product reports → moderation cases (FR-22)', () => {
 
     const timestamp = Date.now()
 
-    // `ensureFirstUserIsAdmin` appends 'admin' to the FIRST user created while the users
-    // table is empty (the CI state: only migrations ran and every spec cleans up after
-    // itself). Absorb that promotion with a throwaway fixture so the role assertions
-    // below describe real roles instead of the bootstrap side effect.
+    // `ensureFirstUserIsAdmin` appends 'admin' to whichever user is created first while the
+    // users table is empty. That is the state of a freshly migrated database, and whether
+    // this spec is the one that hits it depends on file order and on whether earlier specs
+    // left a user behind — which is why asserting on the first user made CI fail while a
+    // local run passed. Create an explicit throwaway sentinel first so the promotion lands
+    // on a row nothing asserts about; `createUser` tracks it for removal in `afterAll`.
+    await createUser(`sentinel-fr22-${timestamp}-${getSeq()}@kientaohub.local`, ['buyer'])
+
     bootstrapUser = await createUser(
       `bootstrap-fr22-${timestamp}-${getSeq()}@kientaohub.local`,
       ['buyer'],
