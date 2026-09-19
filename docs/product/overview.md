@@ -1,13 +1,19 @@
 # Product Overview
 
-Date: 2026-09-15
+Date: 2026-09-18 (refreshed; the previous revision was dated 2026-09-15)
 
 This document maps the product and states what is observable today. It is not
 the product contract: **`PLAN.md` at the repository root is the source of record
 for product intent** (scope, functional requirements FR-01–FR-32,
-non-functional requirements NFR-01–15, business rules BR-01–09, flows FLOW-U01–15,
-roadmap §27). Where this document and `PLAN.md` disagree, `PLAN.md` wins and this
-document is wrong.
+non-functional requirements NFR-01–NFR-19, business rules BR-01–BR-09, flows
+FLOW-U01–U15, roadmap §27). Where this document and `PLAN.md` disagree,
+`PLAN.md` wins and this document is wrong.
+
+Everything below was re-measured against the repository at commit `d7c81f8` and
+against the development database on 2026-09-18. Each claim names the commit, file
+or query that produced it, so a reader can re-derive it instead of trusting this
+page. The previous revision claimed Phase 6 and the community surfaces were
+unbuilt; they had already shipped, which is why this page was refreshed.
 
 ## Product
 
@@ -39,25 +45,32 @@ Recorded in `docs/decisions/`:
   `buyer` as the default (decision 0008).
 - Seller revenue policy: withdrawal bounds, per-earning hold period, commission
   precedence, and the tax-inclusive earning equation (decision 0009).
+- Product reports: signed-in users only, a report never changes the product, and
+  one open case per `(reporter, product)` (decision 0010).
 
-## Observable Today
+## What Runs Today
 
-Verified live on 2026-09-15 against `web/` on PostgreSQL:
+Measured on 2026-09-18. The row counts come from
+`docker exec -i kientaohub-postgres psql -U payload -d kientaohub` against the
+seeded development database, so they describe that database, not production
+capacity.
 
-| Surface | Result |
+| Surface | Measured |
 |---|---|
-| `GET /` (storefront) | 200, template storefront, `<title>Payload Ecommerce Template</title>` |
-| `GET /admin` | 200, Payload admin |
-| `GET /admin/create-first-user` | 200 |
-| `GET /api/products` | 200, `{"docs":[],"totalDocs":0,...}` — the catalog is empty |
-| Database | PostgreSQL 16.15 in container `kientaohub-postgres` on `127.0.0.1:5433`, 87 base tables, applied through `web/src/migrations` |
-| Roles | `admin`, `buyer`, `seller`, `moderator`, `financeAdmin` (decision 0008); default `buyer`; first user promoted to admin |
-| Access rules | product create is Seller or Admin and product update is Moderator or Admin, per `PLAN.md` §22; 14 matrix tests pass (`web/tests/int/rbac.int.spec.ts`) |
+| Application | Next.js 16 + Payload CMS 3.89 in one process: Payload admin at `/admin`, collection REST at `/api/<collection>`, GraphQL at `/api/graphql`, and the KienTaoHub storefront |
+| Storefront identity | `KienTaoHub - Sàn giao dịch tài nguyên bản vẽ & mô hình kỹ thuật số` (`web/src/app/(app)/layout.tsx`); the template's physical-goods collections (`variants`, `carts`, `addresses`) no longer exist |
+| Schema | 103 tables in `public`, 27 Payload collections, 12 versioned migrations in `web/src/migrations` |
+| Seeded data | products 161 · users 56 · orders 253 · entitlements 188 · wallet_ledger 201 · seller_earnings 145 · withdrawals 8 · refunds 16 |
+| Empty by design | reviews 0 · comments 0 · tickets 0 · moderation_cases 0 — these surfaces are delivered but the seed does not populate them |
+| Money integrity | append-only triggers installed in the database: `forbid_ledger_mutation`, `forbid_ledger_truncate`, `forbid_wallet_delete`, `forbid_wallet_truncate`, `enforce_br04_seller_anti_self_purchase` |
+| Roles | `admin`, `buyer`, `seller`, `moderator`, `financeAdmin`; default `buyer`; first user promoted to admin (decision 0008) |
+| Tests | `test:int` 33 files / 591 tests · `test:challenger` 101 · `test:e2e` 60 (desktop Chrome, channel override via `PLAYWRIGHT_CHANNEL`) · `test:stress` a separate config |
+| CI | lint, `pnpm audit --audit-level=high`, migrations, build/type-check, integration tests (`.github/workflows/ci.yml`) |
 
-The running application is the Payload ecommerce template, not the product. It
-sells physical goods with variants, carts, shipping addresses, USD-style
-currency presentation, English copy, and Stripe checkout. None of that is
-KienTaoHub behaviour; it is the starting point recorded in decision 0001.
+The running application is KienTaoHub, not the template: the storefront is
+Vietnamese, prices are integer VND with `₫` formatting, and purchase, entitlement
+and download all run through the digital-product flow (`fbd210d`). The template's
+physical-goods shape was removed rather than repurposed.
 
 ## Built
 
@@ -66,37 +79,54 @@ Delivered in phases, each with a green check suite recorded in
 
 | Phase | Commit | Surface |
 |---|---|---|
-| 2 Catalog | `000e372` | digital catalog, product/files/previews/software types/tags, RBAC, storefront, SEO |
+| 2 Catalog | `000e372` | digital catalog, products/files/previews/software types/tags, RBAC, storefront, SEO |
 | 3 Seller & moderation | `caaae36` | seller profiles, upload, private originals, moderation workflow |
-| 4 Payment & wallet | `a7a506f` | internal wallet, append-only ledger, payment intents and transactions, SePay webhook rail |
+| 4 Payment & wallet | `a7a506f` | internal wallet, append-only ledger with triggers, payment intents and transactions, SePay webhook rail |
 | 5 Purchase & download | `2ea1dee` | orders and order items with fee snapshots, entitlements, download events, tokenised download route |
+| 6 Seller revenue | `a3ff032`, `030ac47`, `e12dbf2` | commission resolution, earnings pipeline and hold period, withdrawal request/approval, compensating refunds, seller dashboard and finance admin screens (decision 0009) |
+| Community | `e271c29`, `6f04b54`, `0b3acc5` | reviews with verified purchase (FR-20, BR-05), comments and Q&A (FR-21), support tickets and file disputes (FR-23, FLOW-U09) |
+| Product reports (FR-22) | `ebaac32`, `7647e95`, `3b38d03`, `d7c81f8` | report a product → `moderation_cases`, dedupe per `(reporter, product)`, unpublished products answer like nonexistent ones, entry point hidden in draft preview (decision 0010) |
+| Storefront & data | `fbd210d`, `d41313f` | digital purchase/entitlement/download flow in the storefront; realistic seed with a causal timeline |
 
-26 integration suites in `web/tests/int/` cover these surfaces, including RBAC,
-ledger invariants, webhook duplication, purchase invariants, and secure
-download.
+`web/tests/int/` holds the integration suites for these surfaces — RBAC, ledger
+invariants, webhook duplication, purchase invariants, secure download, seller
+onboarding and revenue, withdrawals, refunds, reviews, comments, tickets and the
+report/visibility agreement matrix. `web/tests/e2e/` drives the storefront,
+catalog and admin in a real browser.
 
 ## Not Built
 
-- Seller earnings, withdrawals, withdrawal events, and refunds are **present on
-  disk but uncommitted and unverified**: the Phase 6 Milestone 1 collections,
-  access rules, and migration Batch 7 exist in the working tree and no
-  environment has applied that migration. Treat them as unimplemented until
-  the milestone's verification gate closes.
-- Commission calculation, the earnings pipeline, withdrawal request and
-  approval, compensating refunds, and the seller dashboard and finance admin
-  screens.
-- Reviews, comments, tickets, and disputes.
-- Object storage and Redis.
-- Email delivery, deployment, TLS, CDN, and backups.
+- **Notifications (§13).** No in-app delivery and no email: the template's
+  Nodemailer adapter is still commented out (`web/src/payload.config.ts:137`).
+  Email is out of launch-blocking scope per decision 0003, and decision 0010
+  records that reporters are not told the outcome of their report.
+- **Object storage, Redis, queue/worker.** No async jobs, no malware scanning, no
+  presigned URLs; media and private originals live on local disk.
+- **Observability and abuse protection.** No structured logging configuration,
+  metrics, tracing or alerting (NFR-08), and no rate limiting on any surface
+  (NFR-17), including the payment webhook route.
+- **Deployment.** No TLS, CDN, WAF, backups, staging, or immutable image builds.
+  CI stops at lint, dependency audit, migrations, build and integration tests: it
+  has no unit-test job and no e2e job, which `PLAN.md` §36 lists for pull
+  requests, and no merge-to-main or production pipeline exists.
+- **P1/P2 scope from §26** — direct payment, coupons, an external search engine,
+  collections, web push, seller analytics, automated payout, watermarking,
+  recommendations — is untouched.
 
 ## Open Owner Decisions
 
-- The site-wide default commission rate, its storage, and `policyVersion`
-  issuance. Decision 0009 fixes the precedence and the snapshot rule but no
-  rate exists yet, so commission cannot be computed.
-- Top-up bounds; secure-download token lifetime; whether email re-enters
-  launch scope; VND presentation and Vietnamese copy. Commission rate and hold
-  period were listed here and are now resolved by decision 0009 — the hold
-  period as a per-earning snapshot defaulting to 7 days, and commission only
-  partially, since the site default is still unset.
-
+- **Top-up upper bound.** A minimum is enforced (`amount < 10000` rejected in
+  `web/src/app/api/v1/payments/topup/route.ts`); no maximum was found, so the
+  upper bound §26 requires is still unstated.
+- **Email re-entering launch scope.** Decision 0003 defers it and decision 0010
+  keeps notifications out of P0; only the owner can move it back in.
+- **Secure-download token lifetime.** Decision 0006 leaves the exact value to
+  owner policy (one to ten minutes). The implementation uses 300 seconds
+  (`web/src/services/download.ts:142`); confirm that as policy or change it.
+- **Commission default and hold period — resolved.** `commission_settings.defaultRate`
+  is `0.30` (`web/src/globals/CommissionSettings.ts`) and the hold period is a
+  per-earning snapshot defaulting to 7 days (decision 0009). The seeded database
+  preserves `0.30`, with three seller profiles carrying a custom rate.
+- **Vietnamese copy and VND presentation — delivered.** The storefront is
+  Vietnamese with integer-VND `₫` formatting; no decision record pins the
+  presentation conventions, so a future change to them has no written authority.
