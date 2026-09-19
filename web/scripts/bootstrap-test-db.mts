@@ -30,11 +30,12 @@ function executePostgresSql(sql: string): string {
     // server over the network using the same connection the application uses. The host,
     // port, user and password come from DATABASE_URL rather than being hard-coded, because
     // CI serves PostgreSQL on 127.0.0.1:5432 while local development uses :5433.
-    const { host, port, username, password } = new URL(
+    // `hostname`, not `host`: the WHATWG URL `host` includes the port, which psql rejects.
+    const { hostname, port, username, password } = new URL(
       process.env.DATABASE_URL || 'postgres://payload:payload@127.0.0.1:5433/kientaohub',
     )
     return execSync(
-      `psql -h ${host || '127.0.0.1'} -p ${port || '5433'} -U ${username || 'payload'} -d postgres -t -A -c "${sql}"`,
+      `psql -h ${hostname || '127.0.0.1'} -p ${port || '5433'} -U ${username || 'payload'} -d postgres -t -A -c "${sql}"`,
       {
         encoding: 'utf8',
         env: { ...process.env, PGPASSWORD: password || 'payload' },
