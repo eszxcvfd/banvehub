@@ -59,12 +59,12 @@ capacity.
 |---|---|
 | Application | Next.js 16 + Payload CMS 3.89 in one process: Payload admin at `/admin`, collection REST at `/api/<collection>`, GraphQL at `/api/graphql`, and the KienTaoHub storefront |
 | Storefront identity | `KienTaoHub - Sàn giao dịch tài nguyên bản vẽ & mô hình kỹ thuật số` (`web/src/app/(app)/layout.tsx`); the template's physical-goods collections (`variants`, `carts`, `addresses`) no longer exist |
-| Schema | 103 tables in `public`, 27 Payload collections, 12 versioned migrations in `web/src/migrations` |
+| Schema | 104 tables in `public`, 28 Payload collections, 13 versioned migrations in `web/src/migrations` |
 | Seeded data | products 161 · users 56 · orders 253 · entitlements 188 · wallet_ledger 201 · seller_earnings 145 · withdrawals 8 · refunds 16 |
-| Empty by design | reviews 0 · comments 0 · tickets 0 · moderation_cases 0 — these surfaces are delivered but the seed does not populate them |
+| Empty by design | reviews 0 · comments 0 · tickets 0 · moderation_cases 0 · notifications 0 — these surfaces are delivered but the seed does not populate them |
 | Money integrity | append-only triggers installed in the database: `forbid_ledger_mutation`, `forbid_ledger_truncate`, `forbid_wallet_delete`, `forbid_wallet_truncate`, `enforce_br04_seller_anti_self_purchase` |
 | Roles | `admin`, `buyer`, `seller`, `moderator`, `financeAdmin`; default `buyer`; first user promoted to admin (decision 0008) |
-| Tests | `test:int` 33 files / 591 tests · `test:challenger` 101 · `test:e2e` 60 (desktop Chrome, channel override via `PLAYWRIGHT_CHANNEL`) · `test:stress` a separate config |
+| Tests | `test:int` 36 files / 630 tests · `test:challenger` 101 · `test:e2e` 62 (desktop Chrome, channel override via `PLAYWRIGHT_CHANNEL`) · `test:stress` a separate config |
 | CI | lint, `pnpm audit --audit-level=high`, migrations, build/type-check, integration tests (`.github/workflows/ci.yml`) |
 
 The running application is KienTaoHub, not the template: the storefront is
