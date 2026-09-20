@@ -191,6 +191,26 @@ Tradeoffs:
   pg-pool arms its timer with, so it cannot drift from what is enforced. Its two low findings —
   wording that still claimed a connection of its own, and a cleanup that swallowed its own
   errors while stranding fixtures — are carried into the increment's final round.
+- R3-1 (wording outside the header) and R3-2 (a cleanup that swallowed its own errors while
+  stranding fixtures) were closed in `4679671`: five emit-site comments, two spots inside
+  `notifications.ts` and the products hook now state what is true — no transaction join, no pool
+  of its own, a shared pool with a bounded wait — with the money-service edits comment-only; and
+  the probe's sweep now collects and re-throws failures and counts its marker rows afterwards, so
+  a cleanup that removes nothing fails the spec instead of reading as success.
+- The same commit records a defect nobody reported: on a **freshly migrated** database the suite
+  was not green, because `tests/int/notification-events.int.spec.ts` asserted its first-user
+  sentinel's roles were `['buyer']` — false exactly when the users table is empty, since
+  `ensureFirstUserIsAdmin` promotes that row. CI passed only because its database was not empty
+  at that moment; on a fresh clone the file's `beforeAll` threw and 18 tests were skipped. The
+  spec now follows the pattern `tests/int/product-reports.int.spec.ts` already records. Verified
+  on a scratch database created fresh for the run: `test:int` 37 files / 634 tests passing where
+  the identical run failed before the fix, `lint` 0 errors, `build` exit 0, `payload migrate`
+  exit 0 with 104 public tables.
+- **Assurance note, recorded rather than implied.** The AgentTeams team for this increment was
+  disbanded mid-round, so R3-1/R3-2 never received the independent review they were queued for.
+  That final round is the captain's own bounded change, verified by the gates above and by
+  inspection — which is weaker evidence than the three independent rounds before it, and is
+  stated here so no future reader mistakes it for a fourth review pass.
 - Evidence availability, stated plainly: the reviewer and verifier trees under `.lit/evidence/`
   are workspace-only scratch. The owner's cleanup during the session removed round 1's tree
   (`reviewer-t4`) and the verifier's (`s13-verify`); round 2's report
