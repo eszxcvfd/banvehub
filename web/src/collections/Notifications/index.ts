@@ -34,6 +34,10 @@ import { NOTIFICATION_TYPE_OPTIONS } from './types'
  * and allow the same business event to be announced twice.
  */
 export const Notifications: CollectionConfig = {
+  labels: {
+    singular: 'Notification',
+    plural: 'Notifications',
+  },
   slug: 'notifications',
   access: {
     create: notificationCreateAccess,

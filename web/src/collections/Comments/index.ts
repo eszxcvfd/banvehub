@@ -9,6 +9,10 @@ import { enforceCommentInvariants } from './hooks/enforceCommentInvariants'
 import { cascadeCommentStatus } from './hooks/cascadeCommentStatus'
 
 export const Comments: CollectionConfig = {
+  labels: {
+    singular: 'Comment',
+    plural: 'Comments',
+  },
   slug: 'comments',
   access: {
     create: commentCreateAccess,

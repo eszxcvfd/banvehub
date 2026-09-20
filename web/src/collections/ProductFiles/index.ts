@@ -14,6 +14,10 @@ const filename = fileURLToPath(import.meta.url)
 const dirname = path.dirname(filename)
 
 export const ProductFiles: CollectionConfig = {
+  labels: {
+    singular: 'Product file',
+    plural: 'Product files',
+  },
   slug: 'product_files',
   access: {
     create: adminOrSeller,

@@ -12,6 +12,10 @@ import { adminOnly } from '@/access/adminOnly'
 import { publicAccess } from '@/access/publicAccess'
 
 export const Categories: CollectionConfig = {
+  labels: {
+    singular: 'Category',
+    plural: 'Categories',
+  },
   slug: 'categories',
   access: {
     create: adminOnly,

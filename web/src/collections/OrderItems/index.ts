@@ -9,6 +9,10 @@ import { validateAntiSelfPurchase } from './hooks/validateAntiSelfPurchase'
 import { preventOrderItemMutation } from './hooks/preventOrderItemMutation'
 
 export const OrderItems: CollectionConfig = {
+  labels: {
+    singular: 'Order item',
+    plural: 'Order items',
+  },
   slug: 'order_items',
   access: {
     create: orderItemCreateAccess,

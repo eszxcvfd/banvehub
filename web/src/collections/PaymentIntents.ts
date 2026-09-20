@@ -10,6 +10,10 @@ import { paymentIntentReadAccess } from '@/access/financialAccess'
  * CREATED, PENDING, PAID, EXPIRED, FAILED, CANCELLED, REFUNDED.
  */
 export const PaymentIntents: CollectionConfig = {
+  labels: {
+    singular: 'Payment intent',
+    plural: 'Payment intents',
+  },
   slug: 'payment_intents',
   access: {
     create: ({ req: { user } }) => Boolean(user),

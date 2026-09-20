@@ -7,6 +7,10 @@ import {
 import { enforceEntitlementInvariants } from './hooks/enforceEntitlementInvariants'
 
 export const Entitlements: CollectionConfig = {
+  labels: {
+    singular: 'Entitlement',
+    plural: 'Entitlements',
+  },
   slug: 'entitlements',
   access: {
     create: entitlementNoDirectWrite,

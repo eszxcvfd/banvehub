@@ -6,6 +6,10 @@ import { adminOrSeller } from '@/access/adminOrSeller'
 import { publicAccess } from '@/access/publicAccess'
 
 export const Tags: CollectionConfig = {
+  labels: {
+    singular: 'Tag',
+    plural: 'Tags',
+  },
   slug: 'tags',
   access: {
     create: adminOrSeller,

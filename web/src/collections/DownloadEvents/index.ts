@@ -5,6 +5,10 @@ import {
 } from '@/access/downloadEventAccess'
 
 export const DownloadEvents: CollectionConfig = {
+  labels: {
+    singular: 'Download event',
+    plural: 'Download events',
+  },
   slug: 'download_events',
   access: {
     create: downloadEventNoDirectWrite,

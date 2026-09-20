@@ -14,6 +14,10 @@ const filename = fileURLToPath(import.meta.url)
 const dirname = path.dirname(filename)
 
 export const Media: CollectionConfig = {
+  labels: {
+    singular: 'Media',
+    plural: 'Media',
+  },
   admin: {
     group: 'Content',
   },

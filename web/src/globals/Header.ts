@@ -4,6 +4,7 @@ import { adminOnly } from '@/access/adminOnly'
 import { link } from '@/fields/link'
 
 export const Header: GlobalConfig = {
+  label: 'Header',
   slug: 'header',
   access: {
     read: () => true,

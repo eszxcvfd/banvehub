@@ -10,6 +10,10 @@ import { paymentTransactionReadAccess } from '@/access/financialAccess'
  * Webhook replay cannot record duplicate success transactions or double-credit money.
  */
 export const PaymentTransactions: CollectionConfig = {
+  labels: {
+    singular: 'Payment transaction',
+    plural: 'Payment transactions',
+  },
   slug: 'payment_transactions',
   access: {
     create: canEditMoney,

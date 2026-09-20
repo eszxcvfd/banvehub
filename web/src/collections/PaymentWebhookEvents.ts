@@ -9,6 +9,10 @@ import { webhookEventReadAccess } from '@/access/financialAccess'
  * Stores masked raw payloads, validation results, and processing outcomes.
  */
 export const PaymentWebhookEvents: CollectionConfig = {
+  labels: {
+    singular: 'Payment webhook event',
+    plural: 'Payment webhook events',
+  },
   slug: 'payment_webhook_events',
   access: {
     create: canEditMoney,

@@ -11,6 +11,10 @@ import { walletReadAccess } from '@/access/financialAccess'
  * and pair with an append-only ledger row in the same transaction.
  */
 export const Wallets: CollectionConfig = {
+  labels: {
+    singular: 'Wallet',
+    plural: 'Wallets',
+  },
   slug: 'wallets',
   access: {
     create: canEditMoney,

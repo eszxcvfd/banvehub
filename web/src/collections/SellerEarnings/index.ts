@@ -6,6 +6,10 @@ import { preventEarningMutation } from './hooks/preventEarningMutation'
 import { validateEarningMath } from './hooks/validateEarningMath'
 
 export const SellerEarnings: CollectionConfig = {
+  labels: {
+    singular: 'Seller earning',
+    plural: 'Seller earnings',
+  },
   slug: 'seller_earnings',
   access: {
     create: canEditMoney,

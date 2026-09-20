@@ -23,6 +23,10 @@ import {
 import { revalidatePage, revalidateDelete } from './hooks/revalidatePage'
 
 export const Pages: CollectionConfig = {
+  labels: {
+    singular: 'Page',
+    plural: 'Pages',
+  },
   slug: 'pages',
   access: {
     create: adminOnly,

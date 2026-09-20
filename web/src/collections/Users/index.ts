@@ -9,6 +9,10 @@ import { checkRole } from '@/access/utilities'
 import { ensureFirstUserIsAdmin } from './hooks/ensureFirstUserIsAdmin'
 
 export const Users: CollectionConfig = {
+  labels: {
+    singular: 'User',
+    plural: 'Users',
+  },
   slug: 'users',
   access: {
     admin: ({ req: { user } }) => checkRole(['admin'], user),

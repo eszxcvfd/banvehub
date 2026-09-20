@@ -8,6 +8,10 @@ import {
 import { enforceReviewInvariants } from './hooks/enforceReviewInvariants'
 
 export const Reviews: CollectionConfig = {
+  labels: {
+    singular: 'Review',
+    plural: 'Reviews',
+  },
   slug: 'reviews',
   access: {
     create: reviewCreateAccess,

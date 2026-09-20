@@ -8,6 +8,10 @@ import {
 } from '@/access/orderAccess'
 
 export const Orders: CollectionConfig = {
+  labels: {
+    singular: 'Order',
+    plural: 'Orders',
+  },
   slug: 'orders',
   access: {
     create: orderCreateAccess,

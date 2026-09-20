@@ -3,7 +3,7 @@ import { adminOnly } from '@/access/adminOnly'
 
 export const CommissionSettings: GlobalConfig = {
   slug: 'commission_settings',
-  label: 'Cài đặt hoa hồng nền tảng',
+  label: 'Commission settings',
   access: {
     read: () => true,
     update: adminOnly,

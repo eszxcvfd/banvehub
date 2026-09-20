@@ -5,6 +5,10 @@ import { adminOrSeller } from '@/access/adminOrSeller'
 import { publicAccess } from '@/access/publicAccess'
 
 export const ProductPreviews: CollectionConfig = {
+  labels: {
+    singular: 'Product preview',
+    plural: 'Product previews',
+  },
   slug: 'product_previews',
   access: {
     create: adminOrSeller,

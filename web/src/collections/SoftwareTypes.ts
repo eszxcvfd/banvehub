@@ -5,6 +5,10 @@ import { adminOnly } from '@/access/adminOnly'
 import { publicAccess } from '@/access/publicAccess'
 
 export const SoftwareTypes: CollectionConfig = {
+  labels: {
+    singular: 'Software type',
+    plural: 'Software types',
+  },
   slug: 'software_types',
   access: {
     create: adminOnly,

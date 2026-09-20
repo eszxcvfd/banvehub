@@ -27,6 +27,10 @@ import { enforceModerationState } from './hooks/enforceModerationState'
 import { announceModerationVerdict } from './hooks/announceModerationVerdict'
 
 export const Products: CollectionConfig = {
+  labels: {
+    singular: 'Product',
+    plural: 'Products',
+  },
   slug: 'products',
   access: {
     create: adminOrSeller,

@@ -11,6 +11,10 @@ import {
 } from '@/access/sellerProfileAccess'
 
 export const SellerProfiles: CollectionConfig = {
+  labels: {
+    singular: 'Seller profile',
+    plural: 'Seller profiles',
+  },
   slug: 'seller_profiles',
   access: {
     create: ({ req: { user } }) => Boolean(user),

@@ -12,6 +12,10 @@ import {
 } from './hooks/validateWithdrawalInvariants'
 
 export const Withdrawals: CollectionConfig = {
+  labels: {
+    singular: 'Withdrawal',
+    plural: 'Withdrawals',
+  },
   slug: 'withdrawals',
   access: {
     create: withdrawalCreateAccess,

@@ -35,6 +35,10 @@ export const plugins: Plugin[] = [
       payment: false,
     },
     formSubmissionOverrides: {
+      labels: {
+        singular: 'Form submission',
+        plural: 'Form submissions',
+      },
       access: {
         delete: isAdmin,
         read: isAdmin,
@@ -45,6 +49,10 @@ export const plugins: Plugin[] = [
       },
     },
     formOverrides: {
+      labels: {
+        singular: 'Form',
+        plural: 'Forms',
+      },
       access: {
         delete: isAdmin,
         read: isAdmin,
@@ -92,6 +100,12 @@ export const plugins: Plugin[] = [
     transactions: {
       transactionsCollectionOverride: ({ defaultCollection }) => ({
         ...defaultCollection,
+        // Same display format as every other admin item, so the one plugin-provided collection
+        // does not read differently from the rest (see the collections' `labels` blocks).
+        labels: {
+          singular: 'Transaction',
+          plural: 'Transactions',
+        },
         fields: defaultCollection.fields.filter(
           (field) => !('name' in field && field.name === 'cart'),
         ),

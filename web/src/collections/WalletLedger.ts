@@ -10,6 +10,10 @@ import { walletLedgerReadAccess } from '@/access/financialAccess'
  * Corrections use reversal or adjustment entries instead.
  */
 export const WalletLedger: CollectionConfig = {
+  labels: {
+    singular: 'Wallet ledger',
+    plural: 'Wallet ledgers',
+  },
   slug: 'wallet_ledger',
   access: {
     create: canEditMoney,

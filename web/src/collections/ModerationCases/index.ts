@@ -29,6 +29,10 @@ const adminOnlyFieldAccess: FieldAccess = ({ req: { user } }) =>
   checkRole(['admin'], user as any)
 
 export const ModerationCases: CollectionConfig = {
+  labels: {
+    singular: 'Moderation case',
+    plural: 'Moderation cases',
+  },
   slug: 'moderation_cases',
   access: {
     create: moderationCaseCreateAccess,

@@ -11,6 +11,10 @@ import {
 } from './hooks/preventWithdrawalEventMutation'
 
 export const WithdrawalEvents: CollectionConfig = {
+  labels: {
+    singular: 'Withdrawal event',
+    plural: 'Withdrawal events',
+  },
   slug: 'withdrawal_events',
   access: {
     create: withdrawalEventCreateAccess,
