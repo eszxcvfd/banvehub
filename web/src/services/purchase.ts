@@ -309,9 +309,10 @@ export async function purchaseProduct(
     //
     // Placed AFTER the commit (when this function owns the transaction) so the buyer and the
     // seller are only told about an order that actually committed. Fire-and-forget in both
-    // directions: `createNotification` writes on its own pooled connection and swallows every
-    // failure, so it can neither change this function's result nor roll back the money-path
-    // rows above — which is why no caller-side guard is needed here.
+    // directions: `createNotification` does not join this transaction and does not own a pool —
+    // it draws a connection from the shared pool, waiting at most `POOL_ACQUISITION_TIMEOUT_MS`
+    // (payload.config.ts) — and it swallows every failure, so it can neither change this
+    // function's result nor roll back the money-path rows above; no caller-side guard is needed.
     //
     // Each order is announced exactly once: the dedupeKey is the immutable order code (BR-07
     // snapshot) and `(recipient, type, dedupeKey)` is UNIQUE.

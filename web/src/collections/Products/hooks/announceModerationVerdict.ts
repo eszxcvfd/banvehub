@@ -28,8 +28,10 @@ import { createNotification } from '@/services/notifications'
  * (`previousDoc`), never from the incoming `data`, so a message can never describe a value that
  * was not persisted.
  *
- * FIRE-AND-FORGET: `createNotification` writes on its own pooled connection and swallows every
- * failure, so the verdict update's result can never depend on the notification succeeding. The
+ * FIRE-AND-FORGET: `createNotification` does not join this operation's transaction and does not
+ * own a pool — it draws a connection from the shared pool, waiting at most
+ * `POOL_ACQUISITION_TIMEOUT_MS` (payload.config.ts) — and it swallows every failure, so the
+ * verdict update's result can never depend on the notification succeeding. The
  * dedupeKey is `product:<id>:<verdict>`, so a re-approval or re-rejection of the same product is
  * a no-op instead of a second announcement (verified: the key is not consumed by a rejected
  * write any more).
@@ -61,9 +63,9 @@ import { createNotification } from '@/services/notifications'
  *
  *    What the bound does NOT buy: with a saturated pool a verdict update can still be delayed by
  *    up to that bound before it proceeds, and the unbounded wait returns if the bound is ever
- *    removed from the pool configuration. If verdict updates become a hot path, give the
- *    notification path its own pool or emit without awaiting (at the cost of the deterministic
- *    assertions these tests rely on) — do not silently drop the bound.
+ *    removed from the pool configuration. If verdict updates become a hot path, provision a
+ *    dedicated pool for the notification path or emit without awaiting (at the cost of the
+ *    deterministic assertions these tests rely on) — do not silently drop the bound.
  */
 const ANNOUNCED_VERDICTS: Record<
   string,

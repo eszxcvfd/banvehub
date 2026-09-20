@@ -71,7 +71,6 @@ describe('§13 in-app notifications — emissions, API and invariants', () => {
   let seq = 0
   const getSeq = () => ++seq
 
-  let sentinel: User
   let buyer1: User
   let buyer2: User
   let seller1: User
@@ -250,10 +249,13 @@ describe('§13 in-app notifications — emissions, API and invariants', () => {
 
     vi.spyOn(payload, 'auth').mockImplementation(async () => ({ user: currentUser }) as any)
 
-    // `ensureFirstUserIsAdmin` promotes the first user created while the users table is empty;
-    // absorb it with a throwaway sentinel before the role-sensitive fixtures (the pattern used by
-    // tests/int/product-reports.int.spec.ts), then assert the roles this spec depends on.
-    sentinel = await createUser('sentinel-notif-events', ['buyer'])
+    // `ensureFirstUserIsAdmin` appends 'admin' to whichever user is created first while the users
+    // table is empty. That is the state of a freshly migrated database, and whether this spec hits
+    // it depends on file order and on whether earlier specs left a user behind — which is why
+    // asserting on the first user made CI fail while a local run passed. Create an explicit
+    // throwaway sentinel first, and assert nothing about it, so the promotion lands on a row no
+    // test depends on (the pattern recorded in tests/int/product-reports.int.spec.ts).
+    await createUser('sentinel-notif-events', ['buyer'])
     buyer1 = await createUser('buyer1-notif-events', ['buyer'])
     buyer2 = await createUser('buyer2-notif-events', ['buyer'])
     seller1 = await createUser('seller1-notif-events', ['seller'])
@@ -261,7 +263,6 @@ describe('§13 in-app notifications — emissions, API and invariants', () => {
     moderator = await createUser('mod-notif-events', ['moderator'])
     financeAdmin = await createUser('finance-notif-events', ['financeAdmin'])
 
-    expect(sentinel.roles).toEqual(['buyer'])
     expect(buyer1.roles).toEqual(['buyer'])
     expect(buyer2.roles).toEqual(['buyer'])
     expect(seller1.roles).toEqual(['seller'])

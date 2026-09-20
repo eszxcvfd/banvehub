@@ -261,8 +261,10 @@ export async function processRefund(
   })
 
   // g) §13 in-app channel (added): the compensating credit is applied and the refund audit
-  // row exists, so tell the buyer. Fire-and-forget: `createNotification` writes on its own
-  // connection and swallows every failure, so it cannot alter the refund result, the reversal
+  // row exists, so tell the buyer. Fire-and-forget: `createNotification` does not join this
+  // flow's writes and does not own a pool — it draws a connection from the shared pool, waiting
+  // at most `POOL_ACQUISITION_TIMEOUT_MS` (payload.config.ts) — and it swallows every failure, so
+  // it cannot alter the refund result, the reversal
   // ledger entry or the entitlement revocation above.
   // The dedupeKey is the order, not the refund row: an order can only be refunded once (the
   // COMPLETED -> REFUNDED guard above), so a retry can never announce it twice.

@@ -56,7 +56,6 @@ describe('F2 — the notification emit cannot hold the pool open without bound',
   let seq = 0
   const getSeq = () => ++seq
 
-  let sentinel: User
   let seller: User
   let moderator: User
   let productId: number | string
@@ -166,12 +165,16 @@ describe('F2 — the notification emit cannot hold the pool open without bound',
   beforeAll(async () => {
     payload = await getPayload({ config })
 
-    // `ensureFirstUserIsAdmin` promotes the first user created while the table is empty; absorb it
-    // with a throwaway sentinel, then assert the roles this probe depends on.
-    sentinel = await createUser('sentinel-notif-pool', ['buyer'])
+    // `ensureFirstUserIsAdmin` promotes whichever user is created while the users table is empty —
+    // which is the state of a freshly migrated database (a scratch clone, or CI). That promotion
+    // is absorbed by this throwaway sentinel, created first and deliberately NOT asserted: on a
+    // populated database it stays `['buyer']`, on a fresh one it becomes `['buyer', 'admin']`, and
+    // neither matters. Asserting it made this spec environment-dependent (it failed on a fresh
+    // clone); the fixtures the probes DO depend on are asserted below, so a promotion that ever
+    // reached them still fails loudly.
+    await createUser('sentinel-notif-pool', ['buyer'])
     seller = await createUser('seller-notif-pool', ['seller'])
     moderator = await createUser('mod-notif-pool', ['moderator'])
-    expect(sentinel.roles).toEqual(['buyer'])
     expect(seller.roles).toEqual(['seller'])
     expect(moderator.roles).toEqual(['moderator'])
 
@@ -195,6 +198,10 @@ describe('F2 — the notification emit cannot hold the pool open without bound',
 
   // Explicit timeout: a pool left saturated by a failing probe must not turn cleanup into the hang
   // it is cleaning up after (vitest's 10 s hook limit did exactly that before the repair).
+  //
+  // The sweep is HONEST: every failure is collected and re-thrown, and the marker rows are counted
+  // afterwards, so a cleanup that did not actually remove the fixtures FAILS this spec instead of
+  // reading as success (review finding R3-2).
   afterAll(async () => {
     releaseAll(heldClients)
     await drainPendingWork()
@@ -207,6 +214,10 @@ describe('F2 — the notification emit cannot hold the pool open without bound',
       ? productIds.map((id) => `'product:${Number(id)}:%'`).join(',')
       : `'product:-1:%'`
 
+    const failures: string[] = []
+    const describeError = (error: unknown): string =>
+      error instanceof Error ? error.message : String(error)
+
     const sweeps = [
       `DELETE FROM notifications WHERE recipient_id IN (${userFilter});`,
       `DELETE FROM notifications WHERE dedupe_key LIKE ANY (ARRAY[${keyFilters}]);`,
@@ -215,17 +226,47 @@ describe('F2 — the notification emit cannot hold the pool open without bound',
     for (const sweep of sweeps) {
       try {
         await rawSql(sweep)
-      } catch {
-        // Best-effort: the fixtures are identity-scoped, and nothing else depends on them.
+      } catch (error) {
+        failures.push(`${sweep} → ${describeError(error)}`)
       }
     }
 
     for (const id of userIds) {
       try {
         await rawSql(`DELETE FROM users WHERE id = ${Number(id)};`)
-      } catch {
-        // Blocked by a wallet/ledger row (BR-03) — expected for money fixtures, none here.
+      } catch (error) {
+        failures.push(`DELETE FROM users WHERE id = ${Number(id)} → ${describeError(error)}`)
       }
+    }
+
+    // Independent residue check: the fixtures must be gone by IDENTITY, not by "the deletes did
+    // not throw". `_products_v` rows matter too — they survive a product delete in this schema.
+    let markers = { users: -1, products: -1, notifications: -1, versions: -1 }
+    try {
+      const rows = await rawSql<{
+        users: number
+        products: number
+        notifications: number
+        versions: number
+      }>(`SELECT
+            (SELECT count(*)::int FROM users WHERE email LIKE '%${runId}%') AS users,
+            (SELECT count(*)::int FROM products WHERE id IN (${productFilter})) AS products,
+            (SELECT count(*)::int FROM notifications WHERE dedupe_key LIKE ANY (ARRAY[${keyFilters}])) AS notifications,
+            (SELECT count(*)::int FROM _products_v v WHERE v.parent_id IN (${productFilter})) AS versions;`)
+      markers = rows[0] ?? markers
+    } catch (error) {
+      failures.push(`residue check → ${describeError(error)}`)
+    }
+
+    const stranded = Object.entries(markers).filter(([, count]) => count !== 0)
+    if (stranded.length) {
+      failures.push(`fixtures still present: ${stranded.map(([k, v]) => `${k}=${v}`).join(', ')}`)
+    }
+
+    if (failures.length) {
+      throw new Error(
+        `F2 probe cleanup did not clean up (${failures.length} problem(s)):\n${failures.join('\n')}`,
+      )
     }
   }, 60_000)
 

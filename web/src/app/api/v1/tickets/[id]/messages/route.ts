@@ -224,9 +224,11 @@ export async function POST(
     // the author replied, the author when the seller or staff replied.
     //
     // Deliberately AFTER `withTicketLock` resolved (the reply is committed by then) and
-    // fire-and-forget: `createNotification` writes on its own pooled connection and swallows
-    // every failure, so the 201 contract above, the append-only thread and the ticket status
-    // transition are exactly what they were before.
+    // fire-and-forget: `createNotification` does not join this transaction and does not own a
+    // pool — it draws a connection from the shared pool, waiting at most
+    // `POOL_ACQUISITION_TIMEOUT_MS` (payload.config.ts) — and it swallows every failure, so the
+    // 201 contract above, the append-only thread and the ticket status transition are exactly what
+    // they were before.
     //
     // The dedupeKey is the appended reply's ordinal in the thread, which is unique per reply and
     // stable across a retry that `mergeTicketMessages` collapses, so no reply is announced twice.

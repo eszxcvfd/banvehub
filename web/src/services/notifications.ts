@@ -21,8 +21,8 @@
  *    notification does not change business state).
  * 3. **Safe inside an open caller transaction — structurally, not by try/catch.** The
  *    service deliberately does NOT forward the caller's `req`/`transactionID` to the
- *    local API, so the notification write runs in its own transaction on a connection
- *    that is not the caller's.
+ *    local API, so the notification write runs in its own transaction on a different
+ *    connection drawn from the shared pool (point 4 — that is not a pool of its own).
  *
  *    This is not a stylistic choice. Reading the Payload source: every local-API write
  *    operation wraps itself in `try { ... } catch (error) { await killTransaction(req);
@@ -277,9 +277,10 @@ export async function createNotification(
     }
 
     // 1. Fast path — this exact business event was already announced by an earlier (or
-    // concurrent) emit. Runs on its own connection too: a read inside the caller's
-    // transaction would see the same rows for every replay we care about, and every
-    // local-API call is a `killTransaction` landmine (see the module header).
+    // concurrent) emit. This read is outside the caller's transaction as well: a read inside it
+    // would see the same rows for every replay we care about, and every local-API call is a
+    // `killTransaction` landmine (see the module header). It is not free of the shared pool — the
+    // read draws a connection from it, bounded by `POOL_ACQUISITION_TIMEOUT_MS`.
     const existing = await payload.find({
       collection: COLLECTION,
       depth: 0,
@@ -298,7 +299,9 @@ export async function createNotification(
       return 'existing'
     }
 
-    // 2. Insert on its own connection: `req` is intentionally NOT forwarded.
+    // 2. Insert without forwarding `req`: this write does not join the caller's transaction, and
+    // it does not own a pool either — it draws a connection from the SHARED pool, waiting at most
+    // `POOL_ACQUISITION_TIMEOUT_MS` before it is reported as skipped.
     try {
       await payload.create({
         collection: COLLECTION,

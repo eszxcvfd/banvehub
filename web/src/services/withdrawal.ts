@@ -27,9 +27,11 @@ const WITHDRAWAL_STATUS_LABEL: Record<string, string> = {
  * - One notification per `(withdrawal, status)` — that is the dedupeKey — so a repeated
  *   transition (which the withdrawal state machine refuses anyway) can never announce the same
  *   status twice, while every genuine status change notifies exactly once.
- * - Fire-and-forget: `createNotification` writes on its own pooled connection and swallows
- *   every failure, so no reservation, balance release, status write or `withdrawal_events`
- *   audit row depends on the notification succeeding.
+ * - Fire-and-forget: `createNotification` does not join this transaction and does not own a
+ *   pool — it draws a connection from the shared pool, waiting at most
+ *   `POOL_ACQUISITION_TIMEOUT_MS` (payload.config.ts) — and it swallows every failure, so no
+ *   reservation, balance release, status write or `withdrawal_events` audit row depends on the
+ *   notification succeeding.
  */
 async function notifyWithdrawalStatus(
   payload: Payload,

@@ -393,10 +393,12 @@ export async function handleSePayWebhook(
   })
 
   // §13 in-app channel (added): the buyer's top-up landed and the wallet was credited.
-  // Fire-and-forget — `createNotification` writes on its own connection and swallows every
-  // failure, so the `200 paid:true` contract of this webhook (and the BR-02 replay no-op
-  // above) is unchanged. The dedupeKey is the payment intent, so the intent's top-up is
-  // announced exactly once no matter how many webhooks arrive for it.
+  // Fire-and-forget — `createNotification` does not join this transaction and does not own a
+  // pool: it draws a connection from the shared pool, waiting at most
+  // `POOL_ACQUISITION_TIMEOUT_MS` (payload.config.ts), and swallows every failure. The
+  // `200 paid:true` contract of this webhook (and the BR-02 replay no-op above) is unchanged.
+  // The dedupeKey is the payment intent, so the intent's top-up is announced exactly once no
+  // matter how many webhooks arrive for it.
   await createNotification(payload, {
     recipient: intentUserId,
     type: 'PAYMENT_SUCCESS',

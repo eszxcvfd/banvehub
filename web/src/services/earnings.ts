@@ -71,8 +71,10 @@ export async function releaseMaturedEarnings(
     // §13 in-app channel (added): this earning just became withdrawable for its seller.
     // One notification per matured earning (not per run), keyed on the earning row, so a
     // re-run — which finds no PENDING rows left anyway — can never announce it twice.
-    // Fire-and-forget: `createNotification` swallows its own failures and writes on its own
-    // connection, so the PENDING -> AVAILABLE transition and the returned counters are
+    // Fire-and-forget: `createNotification` does not own a pool — it draws a connection from
+    // the shared pool, waiting at most `POOL_ACQUISITION_TIMEOUT_MS` (payload.config.ts) — and
+    // swallows its own failures, so the PENDING -> AVAILABLE transition and the returned counters
+    // are
     // unaffected.
     await createNotification(payload, {
       recipient: Number(
