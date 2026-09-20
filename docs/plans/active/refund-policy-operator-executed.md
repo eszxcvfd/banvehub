@@ -199,4 +199,84 @@ under contention — and must not be reported as a green full suite.
 
 ## Result
 
-Pending.
+Verification round 1 (t3) closed on 2026-09-20 with verdict **pass**: decision 0012 is enforced by the
+shipped code, established by the verifier's own probes and gates rather than by the implementer's logs.
+Full record: `.lit/evidence/verifier-t3/REPORT.md`.
+
+What the verifier generated itself: a 157-assertion money/window/guard probe (157/157, exit 0) on a
+scratch clone — SELLER fault reverses the earning and records the seller's share with a paired
+append-only ledger row, PLATFORM fault leaves the earning field-for-field untouched (still PENDING,
+same `holdUntil`), records `sellerAmountRefunded = 0`, credits the buyer the full total, and the earning
+matures so the seller is paid in full; the 5-day window measured at the boundary from both sides
+against `orders.paidAt` (day 5 in, +1 ms out; a refusal writes no refund row, no ledger row and no
+money; the override is recorded as `out_of_window = true`; a download or an entitlement does not
+re-anchor); the label guard negatively (seller 403, moderator 403, operator without an executed refund
+409 `TICKET_REFUND_NOT_EXECUTED`, through the route **and** through the collection hook on a route-free
+write); the console with its own jsdom spec (5/5) plus a live-browser probe. Gates it ran itself:
+`payload migrate` down/up on a populated clone and on an empty database, its own migration idempotency
+probe (19/19), `test:int` 644/644 on a fresh clone, `test:challenger` 303/303, `tsc` exit 0, scoped
+`eslint` 0 errors, whole-tree `lint` 0 errors / 1327 warnings, and an isolated build exit 0.
+
+### Findings this round produced
+
+- **T3-F1 (high, test artifact) — repaired as t9.** `chooseBasis()` in
+  `web/tests/e2e/finance-refund.e2e.spec.ts` read `[data-testid=refund-blocked-reason]` with an
+  un-timed `textContent()` after the console legitimately unmounts that element, so the read waited out
+  the Playwright timeout. Measured live: count 1 → click PLATFORM → count 0, submit not disabled; a
+  freeze-isolation probe showed clicks at 34–97 ms and DOM reads at 1–4 ms. The behaviour the spec
+  asserts is green in the int, challenger and jsdom instruments, so this is a helper defect, not a
+  product defect. t9 was created before the review round could meet the same defect.
+- **T3-F2 (low, open).** t7's fixture repair writes the draft *version*, so the draft fixture's main row
+  still carries `seller = NULL`. No spec orders that product today, so it is latent.
+- **T3-F3 (medium, open).** `tests/int/challenger-m3.int.spec.ts:6.5` (page-1 price sort) is sensitive
+  to how much data the database holds: it fails on a populated database and passes on a fresh one. That
+  is a pre-existing test fragility, not this increment's, but it makes the suite's result depend on the
+  database it runs against.
+- **T3-F4 (low, open — policy gap).** A multi-seller order reverses *every* seller's earning. Decision
+  0012 is silent on multi-seller orders, so this needs the owner rather than a code change.
+
+### e2e
+
+Full suite: 122 passed / 7 flaky / 8 failed (HEAD `44f7ecc`, no foreign runner at start). Six of the
+eight failures are the parallel UI team's specs; two were this increment's finance spec and are the
+T3-F1 helper defect (t9). The full-suite e2e for the increment therefore remains **unproven**, and the
+scoped spec is expected to be green after t9 — for t4's review to confirm.
+
+### Residue
+
+Both verifier scratch databases dropped; its isolated tree, `/tmp` artefacts and probe symlink removed;
+the development database's refunds/orders/order_items/entitlements/seller_earnings/withdrawals/tickets/
+users rows are hash-identical before and after, with the two `lifecycle-draft-*` products its failed
+catalog run created deleted. One unavoidable named residue: its e2e runs made 6 real refunds into the
+spec's wallet-bound buyer `refund-console-buyer@kientaohub-refund.test` plus 6 `wallet_ledger` rows,
+which BR-03 forbids deleting.
+
+### Round state
+
+t9 (repair for T3-F1) is **complete**: `chooseBasis()` now guards with `count()` (which never waits) and
+reads with `textContent({ timeout: 1000 })`. The scoped spec is green twice in a row — 4 passed in
+52.1 s and 4 passed in 32.3 s, the second run starting from the first's post-teardown state, with no
+foreign Playwright suite at start. The repair made the helper's terminal assertion **stronger** rather
+than weaker: `expect(radio).toBeChecked()` replaced `expect(blockedReason).not.toContainText(...)`, which
+had been passing vacuously once the console unmounted the element. The reason itself is still covered
+positively by test 1 (`Vui lòng chọn cơ sở lỗi` while no basis is chosen) and test 2
+(`cần bật xác nhận ghi đè` while the override is unticked), and both ran green.
+
+t4 (review round 1) had already been dispatched by the scheduler when t3 completed, so the reviewer was
+told in writing which change was in flight and that decision 0013 (phase-13 ledger removal, commit
+`65b8d19`) is not part of the increment it judges.
+
+The in-place whole-tree build for this increment is still outstanding — named by the verifier as the one
+gate it did not take, and deferred until no member is running gates so that a dev-server restart cannot
+break a review run.
+
+### Two captain contract defects this round exposed
+
+- **An e2e verify command must carry the loader the repo's own script carries.** `package.json:25` runs
+  `playwright test` with `--import=tsx/esm`; the command written into t9's contract had only
+  `NODE_OPTIONS=--no-deprecation`, so it aborted in globalSetup after about 3 s with
+  `Cannot find module …/next/cache imported from …/revalidatePage.ts`. The engineer ran the identical
+  command plus that loader. Future e2e verify lists need `--import=tsx/esm`.
+- **An `inScope` directory token needs its trailing slash.** `"web/tests/e2e"` was read as a file path,
+  so the scheduler rejected the changed file `web/tests/e2e/finance-refund.e2e.spec.ts` as undeclared
+  (t8's `web/tests/e2e/` was accepted). Write `web/tests/e2e/` when the scope is the directory.
