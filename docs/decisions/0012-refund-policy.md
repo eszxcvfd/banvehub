@@ -159,3 +159,29 @@ Tradeoffs:
   `download_events` stays an audit trail and is never an eligibility input.
 - **Out of scope:** automated payout (a §26 P1 item) and provider-side reversal; the
   P0 rail remains an operator-executed compensating credit.
+- **Decided (F1 — a seller-fault refund against an earning that is already PAID; amended
+  2026-09-20 after review round 1, on the owner's instruction to choose whatever benefits the
+  platform):** the buyer is refunded in full and the refund always proceeds — the operator never
+  refuses a buyer because the seller has already been paid. But an earning whose money has left the
+  platform is **left exactly as it stands** and **excluded from `sellerAmountRefunded`**, because
+  reversing such a row records a recovery that did not happen and destroys the evidence that the
+  seller was paid. `seller_earnings.status = 'PAID'` is that marker: a withdrawal paid the seller, so
+  the platform (not the seller) bore the refund, and the record now says so —
+  `fault_basis = 'SELLER'` with `sellerAmountRefunded = 0`, which is distinguishable both from a
+  platform-fault refund (its own basis) and from an ordinary seller-fault refund (a non-zero recovered
+  share). The operator can still pursue the seller out of band. `AVAILABLE` is **not** excluded: a
+  matured earning has not been paid out — the platform still holds it and `withdrawal.ts` pays from the
+  withdrawable balance — so reversing it is a real recovery and stays as it is.
+- **Decided (F3 — a multi-seller order; amended 2026-09-20):** an order whose earnings belong to more
+  than one seller cannot be refunded on a `SELLER` basis, because an order-level basis cannot say
+  *which* seller was at fault and reversing all of them charges innocent sellers. Such a refund is
+  **refused with a deterministic error** naming the condition; attributing fault per seller (or per
+  order item) is a separate increment (see Follow-Up). A `PLATFORM` basis is unaffected — it reverses
+  nothing. Latent today: no shipped path creates a multi-seller order.
+- **Clarified (F2 — the meaning of `out_of_window`; 2026-09-20):** the field answers "did this
+  execution need an operator override, and was one recorded?", **not** "was the request inside the
+  window?". `false` therefore also covers refunds executed before the 5-day rule existed, which is why
+  the 16 legacy rows on the development database carry `false` although they were executed 5.64–23.65
+  days after `orders.paidAt`. A third state was considered and rejected: it would add a migration and a
+  state to encode 16 immutable historical rows, when the field's own description and this paragraph
+  make the meaning explicit.
