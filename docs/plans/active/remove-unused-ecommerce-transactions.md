@@ -4,12 +4,13 @@ Date: 2026-09-20
 
 ## Status
 
-In progress — code and schema are integrated into `web/` and the migration is applied to the
-development database; the remaining gates (`test:int`, `build`) and the documentation close-out are
-listed under Remaining. Authority is decision 0013, which the owner asked for directly; there is no
-AgentTeams team for this increment because the repository runs one team slot at a time and
-`refund-policy` still holds it. The captain executes it as a bounded change, with the proof recorded
-below.
+Landed as commit `65b8d19` (pushed to `main`): the code, the migration, the regenerated types, the new
+integration spec and the documentation are in `web/`, and the migration is applied to both the
+development database and `kientaohub_test`. One gate is still outstanding — the in-place whole-tree
+build, which waits for a window with no other agent running gates. Authority is decision 0013, which
+the owner asked for directly; there is no AgentTeams team for this increment because the repository
+runs one team slot at a time and `refund-policy` still holds it. The captain executes it as a bounded
+change, with the proof recorded below.
 
 ## Outcome
 
@@ -113,7 +114,13 @@ team's in-flight verification was not disturbed; then re-run in the shared tree.
   intent…`), the whole suite passes with nothing else running, and the spec touches no file this
   increment changed. The machine is running the `refund-policy` verifier's Playwright suite at the
   same time; these are load-sensitive timeouts in a storefront spec the UI team owns.
-- **`build`**: run in the isolated copy (see the note below), result recorded when it finishes.
+- **`build`: exit 0** in the isolated copy — `✓ Compiled successfully in 13.4s` and
+  `Finished TypeScript in 9.6s`. See the note below on why it ran there rather than in place.
+- **The migration proof is reproducible from the repo.** `web/tests/helpers/probe-phase13-ledger-removal.mts`
+  drives `up()` and `down()` through `payload.db.drizzle` — the same surface Payload's runner hands to
+  a migration — and against a scratch database it prints every check PASSED and exits 0: both
+  directions idempotent, `down()` restoring 2 tables / 3 enum types / 4 foreign keys / 7 indexes / the
+  rels column + key + index, and the guard refusing to run while a row exists.
 
 ## Finding: the shared test database was two phases behind
 
@@ -145,3 +152,9 @@ build.
 - 17:02 — shared tree integrated; migration applied to the development database; proof 5; the
   `refund-policy` verifier is told which files changed so it does not attribute a gate failure to the
   refund increment.
+- 17:05–17:15 — in-tree gates: whole-tree `lint` exit 0 (0 errors, 1327 warnings — unchanged), `test:int`
+  exit 0 (40 files / 648 tests), `test:challenger` 301/303 with a load-sensitive timeout in the
+  storefront wallet spec that reproduces identically with this change reverted, and the isolated build
+  exit 0. `kientaohub_test` was found two phases behind and brought to head.
+- 17:20 — committed `65b8d19` and pushed; the migration proof was promoted from the isolated copy into
+  `web/tests/helpers/probe-phase13-ledger-removal.mts` and re-run from the repo (all checks passed).
