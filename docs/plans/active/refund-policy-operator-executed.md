@@ -97,6 +97,38 @@ To keep two teams out of each other's files:
 - Migrations run against a shared development database, so this team runs `payload migrate`
   and the UI team does not, which also keeps the migration ordering single-owner.
 
+## Environment limitation, recorded rather than hidden
+
+The parallel team's redesign currently makes three whole-tree gates impossible for anyone in this
+tree:
+
+- `pnpm lint` — the only two errors are `react-hooks/set-state-in-effect` in
+  `web/src/components/checkout/CheckoutPage.tsx:84,98`, a file they have modified.
+- `pnpm build` — dies collecting page data for `/account` with
+  `TypeError: (0, a.r(...).createContext) is not a function` at
+  `web/src/app/(app)/(account)/account/page.tsx:11` importing `@ant-design/icons`; the same
+  interop breakage serves `/shop` as a 500 in development.
+- `pnpm test:e2e` — the full suite is red on their in-flight storefront specs, and with four to
+  six concurrent Playwright runs on a 14 GB machine Chromium is OOM-killed about thirty seconds
+  into a test. That is why this increment's scoped console run is recorded as **inconclusive**
+  rather than red, and why two earlier attempts collided through the shared `pnpm dev` on port
+  3000 and the shared `e2e-*@kientaohub.test` fixtures each suite's `globalTeardown` deletes.
+
+**What the increment proves, isolated from that work.** `git archive HEAD` plus this increment's
+patch only, hard-linked `node_modules`, private `.next`: `eslint src tests` → **0 errors**,
+`tsc --noEmit` → **clean**, `next build` → **exit 0**. (A symlinked `node_modules` makes Turbopack
+panic with "points out of the filesystem root", so isolation must hard-link or copy it on the same
+filesystem.) `test:int` 39 files / 644 tests and `test:challenger` 14 files / 247 tests pass on a
+scratch clone; the fixture repair is proven by a scripted probe that is red before and green after
+plus two consecutive CLI runs of the affected specs on the same database (57 passed each); and the
+console's critical path — an out-of-window refund requiring the override, then a 200 with
+`faultBasis=SELLER`, `outOfWindow=true`, `sellerAmountRefunded=105000`, earning `REVERSED` —
+passed in a scoped run.
+
+**What therefore stays unproven:** the full-suite `test:e2e` for this increment, and whole-tree
+`lint`/`build` as gates. The affected task contracts were amended to say exactly that instead of
+pretending the gates passed, with each amendment recorded in the task's revisions ledger.
+
 ## Risks And Recovery
 
 - The fault basis is a new required input on an existing money path: every existing caller and
@@ -119,6 +151,13 @@ To keep two teams out of each other's files:
   guard; contact fields on the footer global), the owner having delegated them, and the
   parallel UI team's boundary is recorded above. Validation drops the e2e contact-channel
   assertion because that surface now belongs to the UI team.
+- 2026-09-20: owner said continue; the captain kept the increment alive without pretending the
+  blocked gates passed. `t2`, `t3` and `t4` contracts were amended to the gates that can be taken
+  here (scoped eslint, `tsc --noEmit`, the isolated build), with whole-tree `lint`/`build` and the
+  full-suite e2e recorded above as an environment limitation. Slice state: `t1` complete; `t2`,
+  `t5`, `t6` and `t7` implemented and int-proven, gate-blocked; `t3` verification and `t4` review
+  queued behind them. `t7` additionally closed the stale-fixture defect that was flapping catalog
+  and storefront specs across runs, proven by a probe that is red before and green after.
 
 ## Decisions
 
