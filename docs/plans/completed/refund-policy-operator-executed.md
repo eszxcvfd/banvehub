@@ -4,11 +4,11 @@ Date: 2026-09-19
 
 ## Status
 
-Proposed — drafted by the captain while the §13 notifications team finishes. No team is staged
-and no work is scheduled from this file; the increment is created only after
-`notifications-inapp` closes, because the repository runs one team slot at a time. Authority is
-decision 0012; both mechanism choices are now decided below, and the parallel UI team's
-boundary is recorded there so two teams never edit the same file.
+Complete and validated on 2026-09-20 — verification round 1 (t3, verdict pass) and review round 1 (t4,
+verdict pass) both closed, after one repair (t9) for the verifier's high finding. Four findings are
+recorded below for the owner; none of them blocks an in-policy refund, and one (F4) belongs to the
+parallel UI vertical. Authority is decision 0012; the parallel UI team's boundary is recorded in the
+Scope section so the two verticals never edit the same file.
 
 ## Outcome
 
@@ -280,3 +280,70 @@ break a review run.
 - **An `inScope` directory token needs its trailing slash.** `"web/tests/e2e"` was read as a file path,
   so the scheduler rejected the changed file `web/tests/e2e/finance-refund.e2e.spec.ts` as undeclared
   (t8's `web/tests/e2e/` was accepted). Write `web/tests/e2e/` when the scope is the directory.
+
+### Review round 1 (t4) — verdict pass
+
+Report: `.lit/evidence/reviewer-t4/REPORT.md` (+ `probes/`, `gates/`). The reviewer judged t1/t2/t5/t6/
+t7/t8 clause by clause using its own instruments on two scratch clones (`t4_money` = clone of the
+development database, `t4_fresh` = empty) and never wrote to the development database from a probe.
+
+Reproduced with its own fixtures: probe-A 76/76 (the fault basis changes money, not labels — SELLER
+reverses the earning and records the seller's share; PLATFORM leaves the earning PENDING with the same
+`holdUntil`, records 0, still credits the buyer the full total, and the untouched earning later matures
+with the seller paid in full; the window is inclusive at `paidAt + 5d` with −1 ms/+1 ms boundary probes,
+day 6 is refused with no refund row, ledger row or money movement, and the override is recorded as
+`out_of_window = true`; one paired ledger credit; the BR-03 trigger refuses a direct UPDATE/DELETE),
+probe-C 46/46 (the label guard attacked through the real route handlers with a real session JWT per role
+and through the collection API: seller/moderator/buyer 403, operator-with-no-refund 409, a route-free
+write refused, smuggled and unrelated-field updates refused, the create path refused, another order's
+refund does not license the label, an unrelated ticket untouched), probe-D 26/26 on a brand-new database
+(fresh migrate exit 0, down path idempotent, one phase-12 migration, footer contact fields usable and
+publicly readable), probe-F 11/11 (no refund row, `orders.status` or earning can be forged through the
+API; `processRefund` refuses a missing basis before loading the actor).
+
+Gates it ran itself: `test:int` 40 files / 648 tests exit 0, `tsc` exit 0, whole-tree `lint` 0 errors
+exit 0, `test:challenger` 18 files / 321 exit 0, fresh-database `payload migrate` exit 0 with a no-op
+re-run, the scoped finance e2e 4 passed exit 0, and the **full suite with `--workers=1`: 133 passed /
+1 flaky / 3 failed** — this increment's own spec passing as tests 99–102, and the three failures all
+foreign storefront specs (`antd-m1` 768 px overflow, `antd-redesign` F6/F7 page crash, `catalog`
+T1-F2-06 strict-mode duplicate empty-state). **That closes the full-suite e2e item this plan carried as
+unproven.**
+
+Clause by clause: §1, §3, §4, §5, §6 and §7 are enforced by code the reviewer executed. **§2's schema
+half is enforced, its site half is not satisfied**: the parallel UI team's untracked
+`/chinh-sach-hoan-tien` page says refunds are processed "tự động" and tells buyers to press a "Yêu cầu
+hoàn tiền" button, which contradicts §1/§2. Filed as F4 (low) with the UI vertical as owner and
+explicitly not a scope violation of this increment; the consequence for this record is that clause 2 has
+a named gap and the launch checklist's contact-channel item needs that copy fixed by that team.
+
+Findings (none blocks an in-policy refund):
+
+- **F1 (medium — owner decision).** A SELLER-fault override refund against an earning that is already
+  PAID records `sellerAmountRefunded` as recovered while the seller keeps the payout (measured: earning
+  REVERSED, refund records the share, seller wallet delta 0). §7's letter holds and no balance is
+  corrupted, but the record of *who bore the cost* is wrong on that edge. Options: exclude already-PAID
+  earnings from the reversal, or refuse that refund with a message.
+- **F2 (low — encoding/auditability).** `out_of_window = false` cannot distinguish "in policy" from
+  "executed before the rule existed": all 16 legacy refunds were executed 5.64–23.65 days after
+  `orders.paidAt`. The captain confirmed the field means "an override was required and was recorded", so
+  the value is not a false statement, but the encoding is ambiguous. Fix: a third state, or the exact
+  meaning written into the collection's field description and into decision 0012.
+- **F3 (low — latent, the verifier's T3-F4).** An order-level basis reverses **every** seller on a
+  multi-seller order. No shipped path creates one yet, and the policy is silent.
+- **F4 (low — outside this increment).** The UI-owned `/chinh-sach-hoan-tien` copy, as above.
+
+Residue: both e2e runs left the development database at baseline for orders/refunds/earnings/items/
+tickets (253/16/145/253/0) with the refund money columns unchanged; permanently undeletable under BR-03
+are 8 `wallet_ledger` rows (4 per run). Its full-suite run also left two foreign `lifecycle-draft-*`
+products, which it deleted with the spec's own `draft: true` delete (products back to 165). Everything it
+wrote lives under `.lit/evidence/reviewer-t4/`.
+
+### Final state
+
+All nine tasks are terminal: t1, t2, t5, t6, t7, t8 (implementation and repair), t3 (verification,
+pass), t9 (repair — T3-F1 closed), t4 (review, pass). Whole-tree `lint` 0 errors · `test:int` 40 files /
+648 tests · `tsc` 0 · `test:challenger` 18 files / 321 · fresh-database `payload migrate` exit 0 and
+idempotent · scoped e2e 4/4 · full-suite e2e 133 passed with the three failures attributed to foreign
+storefront specs · in-place build recorded in the phase-13 increment's plan. Explicitly unproven: t6's
+full-seed counters, and clause 2's site half (F4, UI-owned). Open for the owner: F1, F3, the client-side
+Stripe leftovers from decision 0013, and the two test-hygiene findings the verifier raised (T3-F2, T3-F3).

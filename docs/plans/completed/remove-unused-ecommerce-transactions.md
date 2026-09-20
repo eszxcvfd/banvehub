@@ -6,8 +6,9 @@ Date: 2026-09-20
 
 Landed as commit `65b8d19` (pushed to `main`): the code, the migration, the regenerated types, the new
 integration spec and the documentation are in `web/`, and the migration is applied to both the
-development database and `kientaohub_test`. One gate is still outstanding — the in-place whole-tree
-build, which waits for a window with no other agent running gates. Authority is decision 0013, which
+development database and `kientaohub_test`. Every gate is now taken, including the in-place whole-tree
+build (exit 0 at 17:37, after which the shared dev server still answered 200 on `/admin/login` and `/`,
+403 on `/api/orders` and 404 on `/api/transactions`). Authority is decision 0013, which
 the owner asked for directly; there is no AgentTeams team for this increment because the repository
 runs one team slot at a time and `refund-policy` still holds it. The captain executes it as a bounded
 change, with the proof recorded below.
@@ -94,12 +95,14 @@ team's in-flight verification was not disturbed; then re-run in the shared tree.
 
 ## Remaining
 
-- In-tree gates: `test:challenger`, whole-tree `lint`, `test:int`, `build` (see Results below).
-- `docs/product/overview.md`: 104 → 102 tables, migrations 13 → 15 (phase 12 predates this increment),
-  the collection count as measured, and correct the row that claims `addresses` no longer exists — it
-  does, and the account area uses it.
-- Commit and push.
-- Report the client-side Stripe leftovers to the owner as a separate, storefront-owned slice.
+- The **client-side Stripe leftovers** are the owner's call (decision 0013, Follow-Up):
+  `web/src/providers/index.tsx` still mounts `stripeAdapterClient`, with the `stripe`,
+  `@stripe/react-stripe-js` and `@stripe/stripe-js` dependencies, the `stripe-webhooks` script and the
+  `STRIPE_*` variables. Removing the client adapter means replacing the `usePayments` consumers in the
+  checkout and cart components, which the storefront vertical owns.
+- Two **test-hygiene findings** from the refund round are recorded in that increment's plan: T3-F2 (a
+  fixture's draft version is repaired while its main row keeps `seller = NULL`) and T3-F3
+  (`tests/int/challenger-m3.int.spec.ts:6.5` is sensitive to how much data the database holds).
 
 ## Results (in-tree, 2026-09-20)
 
@@ -114,8 +117,12 @@ team's in-flight verification was not disturbed; then re-run in the shared tree.
   intent…`), the whole suite passes with nothing else running, and the spec touches no file this
   increment changed. The machine is running the `refund-policy` verifier's Playwright suite at the
   same time; these are load-sensitive timeouts in a storefront spec the UI team owns.
-- **`build`: exit 0** in the isolated copy — `✓ Compiled successfully in 13.4s` and
-  `Finished TypeScript in 9.6s`. See the note below on why it ran there rather than in place.
+- **`build` in place: exit 0** at 17:37 in the shared tree — `✓ Compiled successfully in 11.5s`,
+  `Finished TypeScript in 6.7s` — and the shared dev server survived it (200 on `/admin/login` and `/`,
+  403 on `/api/orders`, 404 on `/api/transactions`), so it needed no restart. This is the stronger of
+  the two build results below.
+- **`build` in the isolated copy: exit 0** — `✓ Compiled successfully in 13.4s` and
+  `Finished TypeScript in 9.6s`. See the note below on why it also ran there.
 - **The migration proof is reproducible from the repo.** `web/tests/helpers/probe-phase13-ledger-removal.mts`
   drives `up()` and `down()` through `payload.db.drizzle` — the same surface Payload's runner hands to
   a migration — and against a scratch database it prints every check PASSED and exits 0: both
@@ -135,11 +142,11 @@ against it, so the gap is process, not code. Bringing it to head took both migra
 
 `next build` writes to the shared `web/.next`, and the `refund-policy` verifier was running a Playwright
 suite against the shared dev server on port 3000 while this increment was being integrated. Rather than
-risk its run, the type-check and compile gate was run in the isolated copy
-(`~/Documents/2026/project/p13-work`, private `.next`, hard-linked `node_modules`) against a private
-database. That proves this increment type-checks and compiles; the in-tree build still has to be taken
-in a quiet window, and the copy's tree predates the storefront team's newest edits, which are theirs to
-build.
+risk its run, the first build was taken in the isolated copy (`~/Documents/2026/project/p13-work`,
+private `.next`, hard-linked `node_modules`) against a private database. That proved the increment
+type-checks and compiles without touching the shared environment; the in-place build was then taken in
+the quiet window after the review round closed (17:37, exit 0, dev server healthy), which is the
+authoritative result.
 
 
 ## Progress
