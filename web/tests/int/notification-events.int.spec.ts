@@ -597,6 +597,109 @@ describe('§13 in-app notifications — emissions, API and invariants', () => {
       expect((product as any)._status).toBe('published')
     })
 
+    it('(F1 regression) a verdict the database rejects announces nothing, and the real verdict still lands', async () => {
+      // The verdict is only allowed to be announced once the write landed: this test makes the
+      // product write itself fail at the database AFTER the verdict was decided, so a hook that
+      // announces too early commits a verdict notification for a row that never changed — and,
+      // worse, consumes `product:<id>:approved`, so the later genuine verdict is swallowed.
+      const { id: unwritableProductId } = await createProduct('rejected-write-notif-events', seller2, 'draft')
+      const verdictKey = `product:${unwritableProductId}:approved`
+
+      // A real database rejection of that row's write. NOT VALID keeps the DDL instant while
+      // still enforcing every future write.
+      await rawSql(
+        `ALTER TABLE products DROP CONSTRAINT IF EXISTS notif_f1_reject_verdict_write;`,
+      )
+      await rawSql(
+        `ALTER TABLE products ADD CONSTRAINT notif_f1_reject_verdict_write
+           CHECK (id <> ${Number(unwritableProductId)} OR moderation_status <> 'approved') NOT VALID;`,
+      )
+
+      try {
+        await expect(
+          payload.update({
+            collection: 'products',
+            id: unwritableProductId,
+            data: { moderationStatus: 'approved', moderationNotes: 'Không được ghi' },
+            overrideAccess: true,
+            user: moderator,
+          }),
+        ).rejects.toThrow()
+
+        // The write really did not land...
+        const rows = await rawSql<{ moderation_status: string }>(
+          sql`SELECT moderation_status FROM products WHERE id = ${Number(unwritableProductId)};`,
+        )
+        expect(rows[0]?.moderation_status).toBe('draft')
+
+        // ...so no verdict may have been announced for it.
+        expect(
+          await countNotifications({ dedupeKey: { equals: verdictKey } }),
+          'a rejected write must announce ZERO verdict notifications',
+        ).toBe(0)
+      } finally {
+        await rawSql(`ALTER TABLE products DROP CONSTRAINT IF EXISTS notif_f1_reject_verdict_write;`)
+      }
+
+      // The rejected attempt did not consume the dedupe key: the genuine verdict that follows
+      // still reaches the seller exactly once.
+      await payload.update({
+        collection: 'products',
+        id: unwritableProductId,
+        data: { moderationStatus: 'approved', moderationNotes: 'Hồ sơ hợp lệ sau khi sửa' },
+        overrideAccess: true,
+        user: moderator,
+      })
+
+      const doc = await expectSingleNotification({
+        recipient: Number(seller2.id),
+        type: 'PRODUCT_APPROVED',
+        dedupeKey: verdictKey,
+        link: '/seller',
+      })
+      expect(doc.body).toContain('Hồ sơ hợp lệ sau khi sửa')
+
+      // The message describes the written row (title and note), not the rejected attempt.
+      const writtenProduct = await payload.findByID({
+        collection: 'products',
+        id: unwritableProductId,
+        overrideAccess: true,
+      })
+      expect(doc.body).toContain(String((writtenProduct as any).title))
+      expect((writtenProduct as any).moderationStatus).toBe('approved')
+
+      // At-most-once is unchanged: a genuine RE-approval carries the same `(product, verdict)`
+      // key, so it is swallowed as an existing key instead of announcing a second time.
+      await payload.update({
+        collection: 'products',
+        id: unwritableProductId,
+        data: { moderationStatus: 'changes_requested' },
+        overrideAccess: true,
+        user: moderator,
+      })
+      await payload.update({
+        collection: 'products',
+        id: unwritableProductId,
+        data: { moderationStatus: 'approved' },
+        overrideAccess: true,
+        user: moderator,
+      })
+
+      expect(await countNotifications({ dedupeKey: { equals: verdictKey } })).toBe(1)
+
+      // ...and the service agrees the key is taken.
+      expect(
+        await createNotification(payload, {
+          recipient: Number(seller2.id),
+          type: 'PRODUCT_APPROVED',
+          title: 'Thử phát lại',
+          body: 'Thử phát lại',
+          dedupeKey: verdictKey,
+        }),
+      ).toBe('existing')
+      expect(await countNotifications({ dedupeKey: { equals: verdictKey } })).toBe(1)
+    })
+
     it('PRODUCT_REJECTED → seller for a staff moderation verdict', async () => {
       await payload.update({
         collection: 'products',
@@ -652,6 +755,7 @@ describe('§13 in-app notifications — emissions, API and invariants', () => {
       )
       expect(buyerReply.status).toBe(201)
 
+      // The seller has no ticket screen in (app)/seller, so a null link is the honest value.
       await expectSingleNotification({
         recipient: Number(seller1.id),
         type: 'TICKET_REPLY',
@@ -671,13 +775,53 @@ describe('§13 in-app notifications — emissions, API and invariants', () => {
       )
       expect(sellerReply.status).toBe(201)
 
+      // F4: the author DOES have a thread view — `OrderTicketsSection` renders it on
+      // `/orders/[id]` — so the buyer-facing notification deep-links to that order thread.
       await expectSingleNotification({
         recipient: Number(buyer1.id),
         type: 'TICKET_REPLY',
         dedupeKey: `ticket:${ticket.id}:reply:${seededMessages + 2}`,
-        link: null,
+        link: `/orders/${purchaseOrderId}`,
       })
       expect(await notificationsOfType(Number(seller1.id), 'TICKET_REPLY')).toHaveLength(1)
+
+      // F4 fallback: a support ticket with no order has no thread view to open, so the
+      // author-facing notification keeps an honest null instead of a link to a page that would
+      // not render the thread. A staff reply is the way to reach the author on such a ticket —
+      // without a product there is no seller to derive, and a client-supplied seller is stripped.
+      const supportTicket = (await payload.create({
+        collection: 'tickets',
+        data: {
+          user: buyer1.id,
+          reason: 'OTHER',
+          subject: `Hỗ trợ chung ${runId}`,
+          description: 'Câu hỏi chung, không gắn đơn hàng.',
+          status: 'OPEN',
+          priority: 'NORMAL',
+        } as any,
+        overrideAccess: true,
+      })) as any
+
+      // No seller can be derived without a product/order, and a client-supplied one is stripped.
+      expect(supportTicket.seller ?? null).toBeNull()
+
+      actAs(moderator)
+      const staffReply = await postTicketMessage(
+        testRequest(`http://localhost:3000/api/v1/tickets/${supportTicket.id}/messages`, {
+          method: 'POST',
+          body: JSON.stringify({ message: 'Bộ phận hỗ trợ đã tiếp nhận câu hỏi.' }),
+        }),
+        ticketContext(supportTicket.id),
+      )
+      expect(staffReply.status).toBe(201)
+
+      const supportSeeded = Array.isArray(supportTicket.messages) ? supportTicket.messages.length : 0
+      await expectSingleNotification({
+        recipient: Number(buyer1.id),
+        type: 'TICKET_REPLY',
+        dedupeKey: `ticket:${supportTicket.id}:reply:${supportSeeded + 1}`,
+        link: null,
+      })
 
       actAs(null)
     })

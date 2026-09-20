@@ -24,6 +24,7 @@ import { adminOrModerator } from '@/access/adminOrModerator'
 import { adminSellerModeratorOrPublished } from '@/access/adminSellerModeratorOrPublished'
 import { adminOrSeller } from '@/access/adminOrSeller'
 import { enforceModerationState } from './hooks/enforceModerationState'
+import { announceModerationVerdict } from './hooks/announceModerationVerdict'
 
 export const Products: CollectionConfig = {
   slug: 'products',
@@ -72,6 +73,10 @@ export const Products: CollectionConfig = {
   },
   hooks: {
     beforeChange: [enforceModerationState],
+    // §13: the seller is told about an approved/rejected verdict only AFTER the write landed
+    // (decision 0011, decision 6). Keep the announcement in `afterChange`; a `beforeChange`
+    // emit can describe a verdict the database then rejects (review finding F1).
+    afterChange: [announceModerationVerdict],
   },
   versions: {
     drafts: {

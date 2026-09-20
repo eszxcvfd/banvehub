@@ -232,9 +232,27 @@ export async function POST(
     // stable across a retry that `mergeTicketMessages` collapses, so no reply is announced twice.
     const authorId = toTicketUserId((updatedTicket as any)?.user)
     const sellerId = toTicketUserId((updatedTicket as any)?.seller)
-    const recipientId = Number(authorId) === Number(user.id) ? sellerId : authorId
+    const senderIsAuthor = Number(authorId) === Number(user.id)
+    const recipientId = senderIsAuthor ? sellerId : authorId
+    // The recipient is whoever did NOT send this reply: the author when a seller/staff member
+    // replied, the seller when the author replied.
+    const recipientIsAuthor = !senderIsAuthor
 
     if (recipientId !== null && recipientId !== undefined) {
+      // The link is honest per recipient (review finding F4).
+      //
+      // The ticket author DOES have a reachable thread view: `OrderTicketsSection` renders the
+      // dispute thread on `/orders/[id]` (`app/(app)/(account)/orders/[id]/page.tsx`), and the
+      // ticket carries the `order` relation that names it, so an author-facing notification
+      // deep-links to that thread — the same buyer convention the rest of the channel already
+      // uses (`services/purchase.ts`, `services/refund.ts`).
+      //
+      // For a ticket nobody bought (no order) and for every seller/staff recipient there is
+      // genuinely no screen to open — `(app)/seller` has no ticket view — so those keep `null`
+      // rather than a link into a page that would not show the thread.
+      const orderId = toTicketUserId((updatedTicket as any)?.order)
+      const link = recipientIsAuthor && orderId !== null ? `/orders/${orderId}` : null
+
       await createNotification(payload, {
         recipient: Number(recipientId),
         type: 'TICKET_REPLY',
@@ -246,9 +264,7 @@ export async function POST(
               ? 'người bán'
               : 'bộ phận hỗ trợ'
         }.`,
-        // No buyer-facing tickets screen exists yet (§25 #20 is not implemented in this app),
-        // so the notification carries no link rather than a link to a 404.
-        link: null,
+        link,
         dedupeKey: `ticket:${ticketId}:reply:${replyOrdinal}`,
       })
     }

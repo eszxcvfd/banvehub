@@ -1,30 +1,15 @@
 import type { CollectionBeforeChangeHook } from 'payload'
 import { checkRole } from '@/access/utilities'
-import { createNotification } from '@/services/notifications'
 
 /**
- * §13 in-app channel (added): the two moderation verdicts that are announced to the seller.
+ * Moderation rules for products (BR-08 & FR-28).
  *
- * Only the *verdict* is announced, and only when the acting principal is allowed to issue it
- * (see the `isStaff` gate at the call site), so a seller cannot talk the channel into
- * notifying themselves through the collection API.
+ * This hook is `beforeChange`, so it may only *decide and shape* the write: it never announces
+ * anything. The §13 verdict announcement lives in `./announceModerationVerdict.ts`, registered as
+ * an `afterChange` hook in `../index.ts`, because a notification may only describe an event that
+ * was actually written (decision 0011, decision 6). Announcing from here committed a verdict for
+ * product updates the database then rejected (review finding F1).
  */
-const ANNOUNCED_VERDICTS: Record<
-  string,
-  { title: string; body: (productTitle: string, note: string) => string }
-> = {
-  approved: {
-    title: 'Sản phẩm đã được duyệt',
-    body: (productTitle, note) =>
-      `Tài nguyên "${productTitle}" đã được kiểm duyệt và phát hành.${note ? ` Ghi chú: ${note}` : ''}`,
-  },
-  rejected: {
-    title: 'Sản phẩm bị từ chối',
-    body: (productTitle, note) =>
-      `Tài nguyên "${productTitle}" chưa được duyệt.${note ? ` Lý do: ${note}` : ' Vui lòng xem lại nội dung và gửi duyệt lại.'}`,
-  },
-}
-
 export const enforceModerationState: CollectionBeforeChangeHook = async ({
   data,
   req,
@@ -95,51 +80,6 @@ export const enforceModerationState: CollectionBeforeChangeHook = async ({
       } else if (data.moderationStatus === 'changes_requested' || data.moderationStatus === 'rejected') {
         data._status = 'draft'
       }
-    }
-  }
-
-  // §13 in-app channel (added).
-  //
-  // Emitted at the very END of the hook — after every rejection above — so a refused
-  // transition announces nothing. Only the two seller-facing verdicts, only for a real status
-  // change, and only when the acting principal is entitled to issue a verdict (`isStaff` is
-  // `true` for staff and for internal/system context, and `false` for a seller), so a seller
-  // cannot push the channel into notifying themselves.
-  //
-  // Fire-and-forget: `createNotification` writes on its own pooled connection and swallows
-  // every failure, so it can never change whether this product write succeeds. The dedupeKey is
-  // `(product, verdict)`, so re-approving or re-rejecting the same product announces the
-  // verdict exactly once.
-  //
-  // Ordering note, stated deliberately: this is a `beforeChange` hook, so the announcement is
-  // produced just before the row is written. A database-level failure *after* this point would
-  // leave a verdict notification for a write that did not land. Adding an `afterChange` hook
-  // would close that window but requires touching `collections/Products/index.ts`, which is
-  // outside this increment's scope — see the t2 report.
-  const previousStatus = originalDoc?.moderationStatus
-  const nextStatus = data.moderationStatus
-  const verdict = nextStatus ? ANNOUNCED_VERDICTS[nextStatus] : undefined
-
-  if (operation === 'update' && verdict && nextStatus !== previousStatus && isStaff) {
-    const productSeller = data.seller ?? originalDoc?.seller
-    const sellerId =
-      typeof productSeller === 'object' && productSeller !== null
-        ? (productSeller as { id?: number | string }).id
-        : productSeller
-
-    if (sellerId !== undefined && sellerId !== null && originalDoc?.id) {
-      await createNotification(req.payload, {
-        recipient: Number(sellerId),
-        type: nextStatus === 'approved' ? 'PRODUCT_APPROVED' : 'PRODUCT_REJECTED',
-        title: verdict.title,
-        body: verdict.body(
-          String(data.title ?? originalDoc?.title ?? ''),
-          String(data.moderationNotes ?? originalDoc?.moderationNotes ?? ''),
-        ),
-        link: '/seller',
-        dedupeKey: `product:${originalDoc.id}:${nextStatus}`,
-        req,
-      })
     }
   }
 
