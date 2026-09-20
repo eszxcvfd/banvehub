@@ -36,6 +36,13 @@ than theoretical:
 - The storefront publishes **no contact information**: the `footer` global holds only
   `navItems` (`web/src/globals/Footer.ts:14`), so "contact the operator through the
   site" has nowhere to point today.
+- The **7-day seller hold already exists**: `seller_earnings.holdPeriodDays` snapshots
+  `7` (`web/src/services/purchase.ts:278`), `holdUntil` is `createdAt + holdPeriodDays`
+  (`web/src/collections/SellerEarnings/hooks/calculateHoldUntil.ts`), and maturity flips
+  PENDING → AVAILABLE (`web/src/services/earnings.ts:42`). The **5-day refund window, by
+  contrast, does not exist**: `processRefund` validates only the reason, the acting
+  principal and that the order is COMPLETED (`web/src/services/refund.ts:45-96`), so a
+  refund can be requested at any time today.
 
 ## Decision
 
@@ -54,6 +61,14 @@ than theoretical:
 4. **The label and the money must agree.** No surface may show a refund that did not
    happen: a ticket may only display "Đã hoàn tiền" when an executed refund record
    exists for its order, and a seller may not set that resolution.
+5. **The seller is paid 7 days after the buyer receives the drawing.** Already the
+   implemented rule, restated here because the refund window is defined against it;
+   changing the number stays a migration (decision 0009).
+6. **The buyer has 5 days from receipt to request a refund.** The window is deliberately
+   shorter than the hold: at day 5 the seller's earning is still PENDING, so an approved
+   refund reverses an unmatured earning instead of clawing back money the seller already
+   received. A request after day 5 is outside policy — the operator may still act, but the
+   refund record must then state that it was out of window.
 
 ## Alternatives Considered
 
@@ -76,6 +91,9 @@ Positive:
 - Fixing the ticket resolution removes a user-visible false statement about money.
 - Publishing a contact channel gives support a single documented entry point, which
   the launch checklist's "support channel" item already assumes.
+- The 5-day request window closes before the 7-day hold matures, so an approved refund
+  reverses a PENDING earning rather than recovering money the seller already received —
+  that ordering is what makes fault-based refunds affordable at all.
 
 Tradeoffs:
 
@@ -85,19 +103,31 @@ Tradeoffs:
   application today (decision 0011, decision 5, same open owner item).
 - Eligibility is a judgement, so the reason field has to carry the basis; a free-text
   reason alone cannot be checked.
+- A fault discovered after day 5 has no in-policy refund path: the operator decides out
+  of policy, and the record must say so rather than the code pretending the window is
+  soft.
 
 ## Follow-Up
 
 - **Increment (next):** tighten the ticket resolution so only an operator can mark a
-  refund and only against an executed refund record; publish the contact channel and
-  point the ticket/order surfaces at it; make the refund reason carry the fault basis.
-  Mechanism choices (auto-resolving the ticket when the operator executes the refund
-  versus a guarded manual mark, contact fields on the `footer` global versus a
-  dedicated page) belong to that increment's plan, not to this record.
-- **Open owner question:** when the fault is the platform's rather than the seller's,
-  does the seller keep their earning and the platform absorb the refund? Today
-  `processRefund` reverses the seller earning unconditionally
+  refund and only against an executed refund record; enforce the 5-day request window
+  against the receipt moment while keeping the operator's out-of-window override
+  recorded; publish the contact channel and point the ticket/order surfaces at it; make
+  the refund reason carry the fault basis. Mechanism choices (auto-resolving the ticket
+  when the operator executes the refund versus a guarded manual mark, contact fields on
+  the `footer` global versus a dedicated page) belong to that increment's plan, not to
+  this record.
+- **Open owner question (fault basis of the money):** when the fault is the platform's
+  rather than the seller's, does the seller keep their earning and the platform absorb
+  the refund? Today `processRefund` reverses the seller earning unconditionally
   (`web/src/services/refund.ts`, step 3), which is correct for seller fault and
-  unexamined for platform fault.
+  unexamined for platform fault. Because the 5/7 ordering means the earning is still
+  PENDING when the decision is taken, absorbing the refund without reversing the seller
+  is feasible — it is a policy choice, not a technical constraint.
+- **Open detail (anchor of the 5-day window):** "receipt" needs one definition. The
+  purchase/grant moment (`entitlements.grantedAt`) and the first download
+  (`download_events.downloadedAt`) both exist in the data, and the owner's rule that
+  payment and receipt coincide points at the purchase moment; the increment must fix one
+  and say so.
 - **Out of scope:** automated payout (a §26 P1 item) and provider-side reversal; the
   P0 rail remains an operator-executed compensating credit.
