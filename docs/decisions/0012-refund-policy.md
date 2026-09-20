@@ -64,11 +64,17 @@ than theoretical:
 5. **The seller is paid 7 days after the buyer receives the drawing.** Already the
    implemented rule, restated here because the refund window is defined against it;
    changing the number stays a migration (decision 0009).
-6. **The buyer has 5 days from receipt to request a refund.** The window is deliberately
-   shorter than the hold: at day 5 the seller's earning is still PENDING, so an approved
-   refund reverses an unmatured earning instead of clawing back money the seller already
-   received. A request after day 5 is outside policy — the operator may still act, but the
-   refund record must then state that it was out of window.
+6. **The buyer has 5 days from purchase to request a refund.** The anchor is the instant
+   payment completed and ownership was granted — `orders.paidAt`
+   (`web/src/collections/Orders/index.ts:123`, written at
+   `web/src/services/purchase.ts:215`) — explicitly **not** the first download: a buyer
+   could otherwise extend the window indefinitely by never downloading, and the 7-day hold
+   already counts from the earning created in that same purchase, so both windows stay
+   aligned on the same instant. The window is deliberately shorter than the hold: at day 5
+   the seller's earning is still PENDING, so an approved refund reverses an unmatured
+   earning instead of clawing back money the seller already received. A request after day 5
+   is outside policy — the operator may still act, but the refund record must then state
+   that it was out of window.
 7. **Who bears the refund depends on whose fault it was.**
    - *The seller's fault:* the buyer is refunded, the seller's earning is reversed
      (`sellerAmountRefunded` = the seller's share) and the platform's fee is refunded
@@ -130,7 +136,7 @@ Tradeoffs:
 
 - **Increment (next):** tighten the ticket resolution so only an operator can mark a
   refund and only against an executed refund record; enforce the 5-day request window
-  against the receipt moment while keeping the operator's out-of-window override
+  against `orders.paidAt` while keeping the operator's out-of-window override
   recorded; publish the contact channel and point the ticket/order surfaces at it; make
   the refund reason carry the fault basis. Mechanism choices (auto-resolving the ticket
   when the operator executes the refund versus a guarded manual mark, contact fields on
@@ -145,10 +151,11 @@ Tradeoffs:
   buyer's ledger credit is `type: 'refund'` in both cases
   (`web/src/collections/WalletLedger.ts:51-58`), so the fault basis on the refund record is
   what makes the two cases distinguishable after the fact.
-- **Open detail (anchor of the 5-day window):** "receipt" needs one definition. The
-  purchase/grant moment (`entitlements.grantedAt`) and the first download
-  (`download_events.downloadedAt`) both exist in the data, and the owner's rule that
-  payment and receipt coincide points at the purchase moment; the increment must fix one
-  and say so.
+- **Decided (anchor of the 5-day window):** the window runs from `orders.paidAt` — the
+  instant payment completed and ownership was granted — not from the first download, so an
+  order older than 5 days is out of policy unless the operator overrides it and records
+  that they did. `entitlements.grantedAt` is written in the same purchase
+  (`web/src/services/purchase.ts:296`) and therefore agrees with the anchor;
+  `download_events` stays an audit trail and is never an eligibility input.
 - **Out of scope:** automated payout (a §26 P1 item) and provider-side reversal; the
   P0 rail remains an operator-executed compensating credit.
