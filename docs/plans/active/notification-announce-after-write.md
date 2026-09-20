@@ -5,9 +5,9 @@ Date: 2026-09-19
 ## Status
 
 Active — opened by review round 1 of the §13 in-app increment
-(`docs/plans/completed/notifications-inapp.md`, commit `e65df0f`). Closes findings F1, F2
-and F4 from `.lit/evidence/reviewer-t4/REPORT.md`. F3 (test fixture hygiene) stays open and
-is explicitly not in scope here.
+(`docs/plans/completed/notifications-inapp.md`, commit `e65df0f`). F1 and F4 shipped in
+`285c73d` and passed review round 2; F2 (bounding the pool wait) is the remaining round, with
+its own review. F3 (test fixture hygiene) stays open and is explicitly not in scope here.
 
 ## Outcome
 
@@ -27,8 +27,17 @@ The defect is the captain's scoping error, not the implementer's: t2's inScope d
 excluded `web/src/collections/Products/index.ts`, which is where the hook must be
 registered, so the implementer could only document the window in a code comment.
 
-F2 (narrow liveness risk: an emit awaiting a second pooled connection while holding the
-caller's) closes with F1, because the offending emit is the one being moved.
+F2 (narrow liveness risk: an emit awaiting a pooled connection while the operation holds
+one) is **not** closed by moving the emit, which round 2 measured after round 1 assumed the
+opposite. `afterChange` changes when the emit runs relative to the document write, not which
+connection it needs: Payload runs a collection `afterChange` inside the operation before
+commit (`payload/dist/collections/operations/utilities/update.js:330` vs
+`collections/operations/updateByID.js:166`). `createNotification` owns no pool — it calls the
+Payload local API without forwarding `req` — and `web/src/payload.config.ts` configures the
+pool with `connectionString` only, so the wait for a connection is unbounded. With N >=
+`pool.max` such emits, every connection is held by a transaction that is itself waiting; the
+repository already recorded that failure class for tickets (`web/src/collections/Tickets/hooks/enforceTicketInvariants.ts:52-59`)
+and bounded that wait at 5000 ms. F2 is repaired in its own round, in the same shape.
 
 F4 is the `TICKET_REPLY` notification carrying `link: null` while its comment claims no
 buyer-facing thread view exists. Buyers do have one: `OrderTicketsSection` renders on
@@ -46,6 +55,9 @@ In:
 - `web/src/collections/Products/hooks/` — the announce hook itself.
 - `web/src/app/api/v1/tickets/[id]/messages/route.ts` — F4 link honesty.
 - `web/tests/int/notification-events.int.spec.ts` — regression proof and the F4 assertion.
+- `web/src/payload.config.ts` and `web/src/services/notifications.ts` — F2: bound the wait for
+  a pool connection and correct the service's documented isolation semantics.
+- `web/tests/int/` — the F2 saturation probe.
 
 Out:
 
@@ -80,6 +92,23 @@ lives, in the same honest style as the removed comment.
 ## Progress
 
 - 2026-09-19: plan opened; F1/F2/F4 in scope, F3 recorded as out of scope.
+- 2026-09-19: F1 and F4 repaired in `285c73d` (5 files, +301/-71). Red-then-green with an
+  identical final test file: the regression test forces a real database rejection and asserts
+  zero `product:<id>:approved` rows (RED: `expected 1 to be +0`), while the genuine verdict
+  still notifies exactly once with the written title and note and a re-approval is swallowed
+  by the same key. F4's first cut derived the link from the sender, so the **seller** received
+  `/orders/<id>`; the test caught it, and the link is now honest per recipient.
+- 2026-09-19: review round 2 returned `pass` on its own evidence: its own `BEFORE UPDATE`
+  trigger reproduction of F1, a drift-sensitivity proof that restores the pre-fix hook in a
+  scratch copy (RED) while the real tree is green, no regressions with every notification
+  INSERT rejected, and its own `test:int` 631 / `test:e2e` 62 runs. It also corrected round
+  1's claim that F1's move would close F2.
+- 2026-09-19: F2 handed to its own repair round (bounded pool wait) with its own review, so
+  this plan stays in `active/` until that lands.
+- Note on evidence: the reviewer/verifier raw trees under `.lit/evidence/` are workspace-only
+  scratch, and the owner's workspace cleanup removed round 1's and the verifier's trees during
+  the session. Round 2's report embeds its raw output inline so it survives a sweep; the
+  durable record is this plan and decision 0011.
 
 ## Decisions
 
@@ -88,6 +117,11 @@ lives, in the same honest style as the removed comment.
   alternative 5).
 - 2026-09-19: the commit-failure residual is documented rather than engineered away; closing
   it needs a transactional outbox, which decision 0011 defers.
+- 2026-09-19: F2 is closed by **bounding the wait for a pool connection** — the shape the
+  ticket lock already uses in this repository — and not by moving the emit, which round 2
+  proved does not change the connection requirement. A dedicated bounded pool for the
+  notification path is equally acceptable if its isolation is demonstrated rather than
+  asserted.
 
 ## Validation
 
@@ -101,5 +135,7 @@ lives, in the same honest style as the removed comment.
 
 ## Result
 
-Pending. Record the red-then-green evidence, the round-2 review verdict, and the commit
-before moving this plan to `docs/plans/completed/`.
+F1 and F4 are shipped in `285c73d` and passed review round 2. F2 remains **open**: it is
+repaired in its own round by bounding the wait for a pool connection, and this plan moves to
+`docs/plans/completed/` only once that repair passes its review, with the commit and the
+measured saturation evidence recorded here.

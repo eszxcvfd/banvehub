@@ -4,8 +4,10 @@ Date: 2026-09-19
 
 Provenance: implements the `PLAN.md` §13 P0 in-app channel in commit `e65df0f`;
 the increment plan is `docs/plans/completed/notifications-inapp.md`. Review round
-1 returned `pass` with four non-blocking findings, all recorded here
-(`.lit/evidence/reviewer-t4/REPORT.md`).
+1 returned `pass` with four non-blocking findings, all recorded here, and the
+F1/F4 repair is `285c73d`. Raw reviewer trees under `.lit/evidence/` are
+workspace-only scratch, so this record and the increment plan carry the durable
+results.
 
 ## Status
 
@@ -117,23 +119,36 @@ Tradeoffs:
 
 ## Follow-Up
 
-- **F1 (medium, repaired in the commit that follows this record).** The product
+- **F1 (medium, repaired in `285c73d`).** The product
   verdict was announced from a `beforeChange` hook
   (`web/src/collections/Products/hooks/enforceModerationState.ts`), so with a real
   `BEFORE UPDATE` trigger rejecting the write, the product stayed `draft` while
   `PRODUCT_APPROVED` was already committed (measured, notification id 923). The
   false row also consumed `product:<id>:approved`, so the later real verdict was
   swallowed as an existing key — the seller never received the true notification.
-  The announce moves to an `afterChange` hook registered in
+  The announce now lives in an `afterChange` hook registered in
   `web/src/collections/Products/index.ts` (the file the increment could not touch),
   with a regression test that fails the write and asserts zero verdict
   notifications. Residual, recorded rather than hidden: a commit failure after
   `afterChange` can still orphan the notification (decision 6).
+- **F2 (low, open — the next repair, not closed by F1).** Round 1 suggested F1's move would
+  close it; round 2 measured that it does not, and the correction is worth keeping because
+  the reasoning is easy to repeat: moving the emit to `afterChange` changes *when* it runs
+  relative to the document write, not *which connection* it needs. Payload runs a collection
+  `afterChange` inside the operation before commit
+  (`payload/dist/collections/operations/utilities/update.js:330` vs
+  `collections/operations/updateByID.js:166`), so the emit still waits on the same pool while
+  the operation holds a connection. `createNotification` owns no pool — it calls the Payload
+  local API without forwarding `req` — and the pool is configured with `connectionString`
+  only, so that wait is unbounded. This repository has already paid for the failure class
+  once (the ticket lock comment records that an unbounded wait with N >= `pool.max` left the
+  pool unable to recover); the repair bounds the wait in the same shape, and alternative 4
+  remains the only design that removes the coupling entirely.
 - **F3 (low, open, test hygiene).** Each full `test:int` run leaves ~26
   notification rows in `kientaohub_test` (measured 78 → 104) owned by six
   pre-existing money specs' fixtures; BR-03 makes those users undeletable, so the
   fixture owners must sweep by recipient id. The development database stays at 0.
-- **F4 (low, repaired).** The `TICKET_REPLY` notification carried `link: null`
+- **F4 (low, repaired in `285c73d`).** The `TICKET_REPLY` notification carried `link: null`
   with a rationale claiming no buyer-facing thread view exists, but buyers do have
   one (`OrderTicketsSection` on `/orders/[id]`, `web/src/app/(app)/(account)/orders/[id]/page.tsx:212`).
   The link is now honest per recipient.
@@ -144,6 +159,17 @@ Tradeoffs:
 
 ## Closed after this record was written
 
-- F1 and F4 were repaired together, with the regression test red before the fix and
-  green after; the round-2 review verdict and the exact commit are recorded in the
-  increment plan.
+- F1 and F4 were repaired together in `285c73d`, with the regression test red before the fix
+  and green after under an identical final test file; review round 2 re-derived F1 with its
+  own `BEFORE UPDATE` trigger, showed the test is drift-sensitive by restoring the pre-fix
+  hook in a scratch copy, and returned `pass`. Round 2 also produced this record's F2
+  disposition above.
+- F2 is **not** closed by that commit and is repaired next by bounding the pool wait; the
+  increment plan `docs/plans/active/notification-announce-after-write.md` carries it, and the
+  increment does not move to `completed/` until it lands.
+- Evidence availability, stated plainly: the reviewer and verifier trees under `.lit/evidence/`
+  are workspace-only scratch. The owner's cleanup during the session removed round 1's tree
+  (`reviewer-t4`) and the verifier's (`s13-verify`); round 2's report
+  (`.lit/evidence/reviewer-t6/REPORT.md`) embeds its raw output inline so it survives a sweep.
+  The verdicts, gate counts and reproduction methods are recorded here and in the increment
+  plan, which is what CI and future readers can rely on.

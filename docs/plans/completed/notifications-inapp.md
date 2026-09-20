@@ -232,20 +232,28 @@ Delivered in `e65df0f` (25 files, +3863/-4) and accepted by both gates. Policy o
   INSERT rejected by a CHECK, purchase, the SePay webhook, earnings, withdrawal, refund and
   moderation all still wrote their business rows), real-HTTP 64/64, webhook replay 11/11.
   Gates: `payload migrate`, `test:int` 630, `test:challenger` 101, `lint` 0 errors, `build`
-  exit 0, `test:e2e` 62 — fixture residue 0. Evidence: `.lit/evidence/s13-verify/`.
+  exit 0, `test:e2e` 62 — fixture residue 0. Evidence: `.lit/evidence/s13-verify/` (removed by
+  the owner's workspace cleanup — see the availability note under Findings).
 - **Adversarial review round 1 (t4): pass,** with four non-blocking findings. The reviewer
   re-ran `test:int` (36 files / 630 tests) and `test:e2e` (62 passed) itself and re-derived
   the schema constraints from psql (UNIQUE `(recipient_id, type, dedupe_key)`, `dedupeKey`
   NOT NULL, 10-value enum, duplicate → 23505, whole-table duplicate probe 0). Evidence:
-  `.lit/evidence/reviewer-t4/`.
+  `.lit/evidence/reviewer-t4/` — **no longer present**: the reviewer/verifier trees under
+  `.lit/evidence/` are workspace-only scratch and the owner's workspace cleanup removed this
+  tree and `s13-verify` during the session. Round 2's report
+  (`.lit/evidence/reviewer-t6/REPORT.md`) embeds its raw output inline for that reason; the
+  durable record of every verdict, gate count and method is this plan and decision 0011.
 - **Findings.** F1 (medium) is a real defect — the product verdict was announced from a
   `beforeChange` hook, so a database-rejected product update left a committed
   `PRODUCT_APPROVED` for a row that stayed `draft`, and the false row consumed
-  `product:<id>:approved` so the later real verdict was swallowed as an existing key. F2
-  (low) closes with F1. F4 (low, `TICKET_REPLY` link honesty) rides the same repair round.
-  All three are tracked in `docs/plans/active/notification-announce-after-write.md`, opened
-  because the fix needs `web/src/collections/Products/index.ts`, which t2's scope
-  deliberately excluded — the captain's scoping error, not the implementer's.
+  `product:<id>:approved` so the later real verdict was swallowed as an existing key. F1 and
+  F4 were repaired in `285c73d` and passed review round 2. F2 (low) does **not** close with F1
+  — round 2 measured that moving the emit to `afterChange` changes when it runs, not which
+  connection it needs, because Payload runs collection `afterChange` inside the operation
+  before commit — so it is repaired in its own round by bounding the pool wait, tracked in
+  `docs/plans/active/notification-announce-after-write.md`, opened because the F1 fix needs
+  `web/src/collections/Products/index.ts`, which t2's scope deliberately excluded — the
+  captain's scoping error, not the implementer's.
 - **F3 (low, open).** Each full `test:int` run leaves ~26 notification rows in
   `kientaohub_test` (measured 78 → 104) owned by six pre-existing money specs' fixtures;
   BR-03 makes those users undeletable, so those fixture owners must sweep by recipient id.
