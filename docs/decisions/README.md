@@ -26,6 +26,8 @@ documents here as real choices are accepted, then index them in this file.
 
 | [0011 In-app notification policy](0011-in-app-notification-policy.md) | Accepted | `PLAN.md` §13 P0 ships in-app only — email stays deferred by decision 0003 and web push is P1; at-most-once per business event is a required `dedupeKey` plus UNIQUE `(recipient_id, type, dedupe_key)`, where a duplicate is a no-op rather than an error, and the column is NOT NULL because Postgres never treats NULLs as equal; the notification write never joins the caller's transaction, so a notification can outlive a rolled-back business row (accepted trade-off; closing it needs a transactional outbox); reads are own-rows-only for every principal including administrators, create is closed to the collection API, update touches only `readAt`, delete is admin-only; a notification may only announce an event that happened — never from `beforeChange` |
 
+| [0012 Refund policy](0012-refund-policy.md) | Accepted | Refunds are executed only by the operator (`financeAdmin`/`admin`) through the audited refund path — there is no automatic dispute-to-refund; requests arrive out of band through a contact channel the website must publish; eligibility is fault-based (seller or platform fault, never a buyer's change of mind) and the recorded reason must carry that basis; no surface may show "Đã hoàn tiền" without an executed refund record, so a seller may not set that ticket resolution |
+
 ## Superseded
 
 The daptin-era decisions deleted in `366ac21` are not restored. They are
