@@ -159,6 +159,24 @@ under contention — and must not be reported as a green full suite.
   `t5`, `t6` and `t7` implemented and int-proven, gate-blocked; `t3` verification and `t4` review
   queued behind them. `t7` additionally closed the stale-fixture defect that was flapping catalog
   and storefront specs across runs, proven by a probe that is red before and green after.
+- 2026-09-20: `t8` completed. `web/tests/e2e/financeRefundResidue.ts` sweeps this spec's own
+  residue by code prefix (`ORD-E2E-REF-*` orders, `refund-console-*` products) in `beforeAll` as
+  well as `afterAll`, so a browser killed mid-run heals instead of poisoning the next run; the
+  probe `finance-refund-residue.probe.mts` plants the exact shape that had to be removed by hand
+  from the development database and proves the healing (45 → 51 → 45 orders). **A correction worth
+  keeping: the deletion order this plan's acceptance named — refunds → order_items →
+  seller_earnings → orders — cannot work**, because `refunds.order_item_id` and
+  `seller_earnings.order_item_id` are NOT NULL with `ON DELETE SET NULL`, so deleting an item while
+  either row exists fails a constraint and the item then disappears uncounted through the order's
+  cascade. The working order is refunds → seller_earnings → order_items → orders, and their probe
+  caught it: the first version reported "0 order items removed" while the row was gone. The contract
+  text was wrong, not the implementation.
+- 2026-09-20: the tree is green **in place**, not only in isolation — a real `pnpm build` in the
+  working tree exited 0 at 16:26 after confirming no foreign Playwright suite was live, and the
+  shared dev server was restarted afterwards and answers 200. With whole-tree `pnpm lint` at
+  0 errors, the only gate still waiting on a quiet machine is the full-suite `test:e2e`; the
+  verifier has been told to take it when the machine is quiet and to report contention as
+  inconclusive rather than red.
 
 ## Decisions
 
