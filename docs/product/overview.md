@@ -50,7 +50,9 @@ Recorded in `docs/decisions/`:
 
 ## What Runs Today
 
-Measured on 2026-09-18. The row counts come from
+Measured on 2026-09-20, except two things: the seeded-data and empty-by-design rows describe what the
+seed writes rather than the current database (measured 2026-09-18), and the `test:e2e` count is the
+last full-suite measurement (2026-09-18). The row counts come from
 `docker exec -i kientaohub-postgres psql -U payload -d kientaohub` against the
 seeded development database, so they describe that database, not production
 capacity.
@@ -58,13 +60,13 @@ capacity.
 | Surface | Measured |
 |---|---|
 | Application | Next.js 16 + Payload CMS 3.89 in one process: Payload admin at `/admin`, collection REST at `/api/<collection>`, GraphQL at `/api/graphql`, and the KienTaoHub storefront |
-| Storefront identity | `KienTaoHub - Sàn giao dịch tài nguyên bản vẽ & mô hình kỹ thuật số` (`web/src/app/(app)/layout.tsx`); the template's physical-goods collections (`variants`, `carts`, `addresses`) no longer exist |
-| Schema | 104 tables in `public`, 28 Payload collections, 13 versioned migrations in `web/src/migrations` |
+| Storefront identity | `KienTaoHub - Sàn giao dịch tài nguyên bản vẽ & mô hình kỹ thuật số` (`web/src/app/(app)/layout.tsx`); the template's physical-goods collections (`variants`, `carts`) no longer exist, and neither does its Stripe ledger (`transactions`, `transactions_items` — decision 0013); `addresses` survives because the account area reads it, and it is the only collection the ecommerce plugin still provides |
+| Schema | 102 tables in `public`, 31 Payload collections (the configured set minus the four `payload-*` internals), 15 versioned migrations in `web/src/migrations` |
 | Seeded data | products 161 · users 56 · orders 253 · entitlements 188 · wallet_ledger 201 · seller_earnings 145 · withdrawals 8 · refunds 16 |
 | Empty by design | reviews 0 · comments 0 · tickets 0 · moderation_cases 0 · notifications 0 — these surfaces are delivered but the seed does not populate them |
 | Money integrity | append-only triggers installed in the database: `forbid_ledger_mutation`, `forbid_ledger_truncate`, `forbid_wallet_delete`, `forbid_wallet_truncate`, `enforce_br04_seller_anti_self_purchase` |
 | Roles | `admin`, `buyer`, `seller`, `moderator`, `financeAdmin`; default `buyer`; first user promoted to admin (decision 0008) |
-| Tests | `test:int` 36 files / 630 tests · `test:challenger` 101 · `test:e2e` 62 (desktop Chrome, channel override via `PLAYWRIGHT_CHANNEL`) · `test:stress` a separate config |
+| Tests | `test:int` 40 files / 648 tests · `test:challenger` 303 · `test:e2e` 62 (desktop Chrome, channel override via `PLAYWRIGHT_CHANNEL`) · `test:stress` a separate config |
 | CI | lint, `pnpm audit --audit-level=high`, migrations, build/type-check, integration tests (`.github/workflows/ci.yml`) |
 
 The running application is KienTaoHub, not the template: the storefront is

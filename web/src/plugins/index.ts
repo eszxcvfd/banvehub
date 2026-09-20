@@ -5,8 +5,6 @@ import { GenerateTitle, GenerateURL } from '@payloadcms/plugin-seo/types'
 import { FixedToolbarFeature, HeadingFeature, lexicalEditor } from '@payloadcms/richtext-lexical'
 import { ecommercePlugin } from '@payloadcms/plugin-ecommerce'
 
-import { stripeAdapter } from '@payloadcms/plugin-ecommerce/payments/stripe'
-
 import { Page, Product } from '@/payload-types'
 import { getServerSideURL } from '@/utilities/getURL'
 import { adminOrPublishedStatus } from '@/access/adminOrPublishedStatus'
@@ -97,29 +95,16 @@ export const plugins: Plugin[] = [
     carts: false,
     products: false,
     orders: false,
-    transactions: {
-      transactionsCollectionOverride: ({ defaultCollection }) => ({
-        ...defaultCollection,
-        // Same display format as every other admin item, so the one plugin-provided collection
-        // does not read differently from the rest (see the collections' `labels` blocks).
-        labels: {
-          singular: 'Transaction',
-          plural: 'Transactions',
-        },
-        fields: defaultCollection.fields.filter(
-          (field) => !('name' in field && field.name === 'cart'),
-        ),
-      }),
-    },
-    payments: {
-      paymentMethods: [
-        stripeAdapter({
-          secretKey: process.env.STRIPE_SECRET_KEY!,
-          publishableKey: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!,
-          webhookSecret: process.env.STRIPE_WEBHOOKS_SIGNING_SECRET!,
-        }),
-      ],
-    },
+    // The template's Stripe ledger. Decision 0004 replaced Stripe with SePay plus the wallet, so this
+    // collection has had no writer since phase 4 while still claiming a sidebar group named
+    // "Ecommerce" whose only page could never hold a row; phase 13 drops its two tables. `addresses`
+    // and `customers` stay — the account area lists addresses through the plugin's `useAddresses`.
+    transactions: false,
+    // `payments` is omitted on purpose: the plugin sanitises a missing block into
+    // `paymentMethods: []`, and the Stripe adapter was the only method, so no `/api/payments/*`
+    // endpoint is registered at all. The client-side `EcommerceProvider` in `src/providers` stays
+    // because the account area needs its `useAddresses`; the Stripe client it still mounts is
+    // unused and is tracked separately from this schema change.
   }),
   (incomingConfig) => {
     if (!incomingConfig.typescript) {
@@ -129,18 +114,19 @@ export const plugins: Plugin[] = [
       incomingConfig.typescript.schema = []
     }
     incomingConfig.typescript.schema.push(({ jsonSchema }) => {
+      // The plugin's slug map lists every ecommerce collection unconditionally, so the generated
+      // `ecommerce.collections` block keeps naming the ones this config disabled. `generate:types`
+      // would then emit references to types it no longer defines (`transactions: Transaction` with
+      // no `Transaction` interface anywhere), so every disabled slug leaves the block — from its
+      // `properties` and from its `required` list.
       const collections = (jsonSchema?.properties?.ecommerce as any)?.properties?.collections
-      if (collections?.properties?.carts) {
-        delete collections.properties.carts
-      }
-      if (Array.isArray(collections?.required)) {
-        collections.required = collections.required.filter((s: string) => s !== 'carts')
-      }
-      if (collections?.properties?.orders) {
-        delete collections.properties.orders
-      }
-      if (Array.isArray(collections?.required)) {
-        collections.required = collections.required.filter((s: string) => s !== 'orders')
+      for (const slug of ['carts', 'orders', 'transactions']) {
+        if (collections?.properties?.[slug]) {
+          delete collections.properties[slug]
+        }
+        if (Array.isArray(collections?.required)) {
+          collections.required = collections.required.filter((s: string) => s !== slug)
+        }
       }
       return jsonSchema
     })

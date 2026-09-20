@@ -11,6 +11,8 @@ import * as migration_20260917_010000_phase8_comments from './20260917_010000_ph
 import * as migration_20260917_052848_phase9_tickets from './20260917_052848_phase9_tickets';
 import * as migration_20260918_000000_phase10_moderation_cases from './20260918_000000_phase10_moderation_cases';
 import * as migration_20260919_000000_phase11_notifications from './20260919_000000_phase11_notifications';
+import * as migration_20260919_120000_phase12_refund_policy from './20260919_120000_phase12_refund_policy';
+import * as migration_20260920_160000_phase13_drop_unused_ecommerce_transactions from './20260920_160000_phase13_drop_unused_ecommerce_transactions';
 
 export const migrations = [
   {
@@ -77,5 +79,15 @@ export const migrations = [
     up: migration_20260919_000000_phase11_notifications.up,
     down: migration_20260919_000000_phase11_notifications.down,
     name: '20260919_000000_phase11_notifications',
+  },
+  {
+    up: migration_20260919_120000_phase12_refund_policy.up,
+    down: migration_20260919_120000_phase12_refund_policy.down,
+    name: '20260919_120000_phase12_refund_policy',
+  },
+  {
+    up: migration_20260920_160000_phase13_drop_unused_ecommerce_transactions.up,
+    down: migration_20260920_160000_phase13_drop_unused_ecommerce_transactions.down,
+    name: '20260920_160000_phase13_drop_unused_ecommerce_transactions',
   },
 ];

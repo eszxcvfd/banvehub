@@ -98,7 +98,6 @@ export interface Config {
     forms: Form;
     'form-submissions': FormSubmission;
     addresses: Address;
-    transactions: Transaction;
     'payload-kv': PayloadKv;
     'payload-locked-documents': PayloadLockedDocument;
     'payload-preferences': PayloadPreference;
@@ -149,7 +148,6 @@ export interface Config {
     forms: FormsSelect<false> | FormsSelect<true>;
     'form-submissions': FormSubmissionsSelect<false> | FormSubmissionsSelect<true>;
     addresses: AddressesSelect<false> | AddressesSelect<true>;
-    transactions: TransactionsSelect<false> | TransactionsSelect<true>;
     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
     'payload-preferences': PayloadPreferencesSelect<false> | PayloadPreferencesSelect<true>;
@@ -186,7 +184,6 @@ export interface Config {
       addresses: Address;
       customers?: User;
       products: Product;
-      transactions: Transaction;
     };
   };
 }
@@ -1518,6 +1515,14 @@ export interface Refund {
   sellerAmountRefunded: number;
   currency: 'VND';
   reason: string;
+  /**
+   * Bên chịu trách nhiệm hoàn tiền (Decision 0012 §7). SELLER: doanh thu người bán bị đảo ngược. PLATFORM: chỉ người mua được hoàn, doanh thu người bán giữ nguyên và đơn hàng không tính doanh thu nền tảng.
+   */
+  faultBasis: 'SELLER' | 'PLATFORM';
+  /**
+   * True khi yêu cầu hoàn tiền được gửi sau 5 ngày kể từ orders.paidAt và người vận hành đã ghi đè có chủ đích (Decision 0012 §6).
+   */
+  outOfWindow: boolean;
   status: 'COMPLETED' | 'FAILED';
   processedBy: number | User;
   ledgerTransaction?: (number | null) | WalletLedger;
@@ -1792,46 +1797,6 @@ export interface FormSubmission {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "transactions".
- */
-export interface Transaction {
-  id: number;
-  items?:
-    | {
-        product?: (number | null) | Product;
-        quantity: number;
-        id?: string | null;
-      }[]
-    | null;
-  paymentMethod?: 'stripe' | null;
-  stripe?: {
-    customerID?: string | null;
-    paymentIntentID?: string | null;
-  };
-  billingAddress?: {
-    title?: string | null;
-    firstName?: string | null;
-    lastName?: string | null;
-    company?: string | null;
-    addressLine1?: string | null;
-    addressLine2?: string | null;
-    city?: string | null;
-    state?: string | null;
-    postalCode?: string | null;
-    country?: string | null;
-    phone?: string | null;
-  };
-  status: 'pending' | 'succeeded' | 'failed' | 'cancelled' | 'expired' | 'refunded';
-  customer?: (number | null) | User;
-  customerEmail?: string | null;
-  order?: (number | null) | Order;
-  amount?: number | null;
-  currency?: 'USD' | null;
-  updatedAt: string;
-  createdAt: string;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "payload-kv".
  */
 export interface PayloadKv {
@@ -1977,10 +1942,6 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'addresses';
         value: number | Address;
-      } | null)
-    | ({
-        relationTo: 'transactions';
-        value: number | Transaction;
       } | null);
   globalSlug?: string | null;
   user: {
@@ -2659,6 +2620,8 @@ export interface RefundsSelect<T extends boolean = true> {
   sellerAmountRefunded?: T;
   currency?: T;
   reason?: T;
+  faultBasis?: T;
+  outOfWindow?: T;
   status?: T;
   processedBy?: T;
   ledgerTransaction?: T;
@@ -2932,49 +2895,6 @@ export interface AddressesSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "transactions_select".
- */
-export interface TransactionsSelect<T extends boolean = true> {
-  items?:
-    | T
-    | {
-        product?: T;
-        quantity?: T;
-        id?: T;
-      };
-  paymentMethod?: T;
-  stripe?:
-    | T
-    | {
-        customerID?: T;
-        paymentIntentID?: T;
-      };
-  billingAddress?:
-    | T
-    | {
-        title?: T;
-        firstName?: T;
-        lastName?: T;
-        company?: T;
-        addressLine1?: T;
-        addressLine2?: T;
-        city?: T;
-        state?: T;
-        postalCode?: T;
-        country?: T;
-        phone?: T;
-      };
-  status?: T;
-  customer?: T;
-  customerEmail?: T;
-  order?: T;
-  amount?: T;
-  currency?: T;
-  updatedAt?: T;
-  createdAt?: T;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "payload-kv_select".
  */
 export interface PayloadKvSelect<T extends boolean = true> {
@@ -3058,6 +2978,18 @@ export interface Footer {
         id?: string | null;
       }[]
     | null;
+  /**
+   * Địa chỉ email công khai để người mua liên hệ với người vận hành (Decision 0012 §2).
+   */
+  contactEmail?: string | null;
+  /**
+   * Số điện thoại hoặc hotline hỗ trợ hiển thị công khai trên website.
+   */
+  contactPhone?: string | null;
+  /**
+   * Thời gian hỗ trợ và hướng dẫn gửi yêu cầu hoàn tiền (yêu cầu hoàn tiền được gửi ngoài hệ thống, không có nút tự phục vụ).
+   */
+  contactNote?: string | null;
   updatedAt?: string | null;
   createdAt?: string | null;
 }
@@ -3116,6 +3048,9 @@ export interface FooterSelect<T extends boolean = true> {
             };
         id?: T;
       };
+  contactEmail?: T;
+  contactPhone?: T;
+  contactNote?: T;
   updatedAt?: T;
   createdAt?: T;
   globalType?: T;

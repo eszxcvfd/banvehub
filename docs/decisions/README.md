@@ -28,6 +28,8 @@ documents here as real choices are accepted, then index them in this file.
 
 | [0012 Refund policy](0012-refund-policy.md) | Accepted | Refunds are executed only by the operator (`financeAdmin`/`admin`) through the audited refund path — there is no automatic dispute-to-refund; requests arrive out of band through a contact channel the website must publish; eligibility is fault-based (seller or platform fault, never a buyer's change of mind) and the recorded reason must carry that basis; the buyer has 5 days from purchase (`orders.paidAt`, never the first download) to request a refund while the seller is paid 7 days after receipt, so an approved refund reverses a still-PENDING earning instead of paid money; the fault basis decides who bears it — a seller's fault reverses the seller's earning, the platform's fault refunds only the buyer, leaves that earning to mature and books no revenue on the order; no surface may show "Đã hoàn tiền" without an executed refund record, so a seller may not set that ticket resolution |
 
+| [0013 Remove the unused template commerce ledger](0013-remove-unused-commerce-ledger.md) | Accepted | The template's `transactions`/`transactions_items` ledger and its Stripe payment endpoints are gone (phase-13 migration `20260920_160000_phase13_drop_unused_ecommerce_transactions`, which refuses to run while `transactions` holds a row); the plugin stays configured only for `customers` and `addresses`, which the account area reads through `useAddresses`; Stripe is not a rail of this application, so a future card provider arrives through `PLAN.md` FR-12's seam with a real writer, never by re-enabling the template ledger |
+
 ## Superseded
 
 The daptin-era decisions deleted in `366ac21` are not restored. They are
