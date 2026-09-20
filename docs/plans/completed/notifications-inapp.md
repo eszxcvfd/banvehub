@@ -250,7 +250,8 @@ Delivered in `e65df0f` (25 files, +3863/-4) and accepted by both gates. Policy o
   F4 were repaired in `285c73d` and passed review round 2. F2 (low) does **not** close with F1
   — round 2 measured that moving the emit to `afterChange` changes when it runs, not which
   connection it needs, because Payload runs collection `afterChange` inside the operation
-  before commit — so it is repaired in its own round by bounding the pool wait, tracked in
+  before commit — so it was repaired in its own round in `26057ae` by bounding the pool wait
+  (`POOL_ACQUISITION_TIMEOUT_MS = 5000`), and passed review round 3. Tracked in
   `docs/plans/active/notification-announce-after-write.md`, opened because the F1 fix needs
   `web/src/collections/Products/index.ts`, which t2's scope deliberately excluded — the
   captain's scoping error, not the implementer's.

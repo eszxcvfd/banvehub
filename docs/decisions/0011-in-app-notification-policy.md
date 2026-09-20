@@ -51,14 +51,21 @@ read another principal's notifications.
    column is NOT NULL because Postgres never treats NULLs as equal, so a nullable
    key would silently disable the guarantee.
 4. **The notification write does not join the caller's transaction.** The service
-   writes on its own pooled connection and swallows every failure, so "never
-   breaks the caller" is structural rather than a promise: Payload's local API
+   writes through the Payload local API with `req` deliberately not forwarded — it does
+   **not** own a pool of its own — and swallows every failure, so "never breaks the
+   caller" is structural rather than a promise: Payload's local API
    rolls back the caller's entire transaction on any write error
    (`payload/dist/collections/operations/create.js:338` calls `killTransaction`),
    which is the BR-02 failure mode, and a SAVEPOINT cannot prevent it because that
-   rollback happens above the driver. Accepted consequence, stated plainly: **a
+   rollback happens above the driver. Because that write still needs a connection from
+   the **shared** pool, the pool's acquisition wait is bounded at 5 s
+   (`POOL_ACQUISITION_TIMEOUT_MS` in `web/src/payload.config.ts`), so an emit can never
+   hold its caller's transaction open without bound; a saturated skip is reported as
+   `'failed'` and does not consume the dedupe key, so the next genuine event still lands
+   exactly once. Accepted consequences, stated plainly: **a
    notification is not atomic with the business flow and can outlive a rolled-back
-   business transaction.** The constraint is proven by DB-forced failure, not by
+   business transaction**, and the bound is app-wide, so any query may fail after 5 s of
+   pool saturation instead of queueing. The constraint is proven by DB-forced failure, not by
    inspection: with every notification INSERT rejected by a CHECK, purchase, the
    SePay webhook, earnings, withdrawal, refund and moderation all still wrote their
    business rows.
@@ -131,7 +138,7 @@ Tradeoffs:
   with a regression test that fails the write and asserts zero verdict
   notifications. Residual, recorded rather than hidden: a commit failure after
   `afterChange` can still orphan the notification (decision 6).
-- **F2 (low, open — the next repair, not closed by F1).** Round 1 suggested F1's move would
+- **F2 (low, repaired in `26057ae`).** Round 1 suggested F1's move would
   close it; round 2 measured that it does not, and the correction is worth keeping because
   the reasoning is easy to repeat: moving the emit to `afterChange` changes *when* it runs
   relative to the document write, not *which connection* it needs. Payload runs a collection
@@ -139,11 +146,22 @@ Tradeoffs:
   (`payload/dist/collections/operations/utilities/update.js:330` vs
   `collections/operations/updateByID.js:166`), so the emit still waits on the same pool while
   the operation holds a connection. `createNotification` owns no pool — it calls the Payload
-  local API without forwarding `req` — and the pool is configured with `connectionString`
-  only, so that wait is unbounded. This repository has already paid for the failure class
+  local API without forwarding `req` — and the pool was configured with `connectionString`
+  only, so that wait was unbounded. This repository has already paid for the failure class
   once (the ticket lock comment records that an unbounded wait with N >= `pool.max` left the
   pool unable to recover); the repair bounds the wait in the same shape, and alternative 4
   remains the only design that removes the coupling entirely.
+  Repaired and measured: `connectionTimeoutMillis` is armed from
+  `POOL_ACQUISITION_TIMEOUT_MS = 5000`. With every other connection held, a verdict update
+  inside a caller-owned transaction settles in 5052 ms and commits with zero notifications for
+  the skipped emit; under `pool.max` concurrent verdict updates, 9 of 10 commit in 5167 ms and
+  the tenth is rejected with the bounded `cannot begin transaction: timeout exceeded` — no hang,
+  no duplicate, no half-written row. A control run with the bound removed sat at a 15 s guard on
+  all three probes, and before the fix the probe spec's own `afterAll` was killed by vitest's
+  10 s hook limit because cleanup could not get a connection either. The bound is app-wide and
+  that is deliberate: under saturation a query now fails after 5 s rather than queueing, the
+  failure happens before any statement runs (BR-03 unaffected), and no path in the tree depends
+  on a longer pool wait.
 - **F3 (low, open, test hygiene).** Each full `test:int` run leaves ~26
   notification rows in `kientaohub_test` (measured 78 → 104) owned by six
   pre-existing money specs' fixtures; BR-03 makes those users undeletable, so the
@@ -164,9 +182,15 @@ Tradeoffs:
   own `BEFORE UPDATE` trigger, showed the test is drift-sensitive by restoring the pre-fix
   hook in a scratch copy, and returned `pass`. Round 2 also produced this record's F2
   disposition above.
-- F2 is **not** closed by that commit and is repaired next by bounding the pool wait; the
-  increment plan `docs/plans/active/notification-announce-after-write.md` carries it, and the
-  increment does not move to `completed/` until it lands.
+- F2 was repaired in `26057ae` and passed review round 3, which reproduced the saturation
+  scenario with its own fixtures and confirmed the bound is what removes the wait: a control
+  pool configured with `connectionTimeoutMillis: 0` left its waiter unresolved past 3 s and was
+  served only when the holder released. Round 3 also verified the probe cannot starve sibling
+  spec files (`fileParallelism: false` with per-file process isolation, measured from the
+  process tree) and that the value the service reports comes from the same `options` object
+  pg-pool arms its timer with, so it cannot drift from what is enforced. Its two low findings —
+  wording that still claimed a connection of its own, and a cleanup that swallowed its own
+  errors while stranding fixtures — are carried into the increment's final round.
 - Evidence availability, stated plainly: the reviewer and verifier trees under `.lit/evidence/`
   are workspace-only scratch. The owner's cleanup during the session removed round 1's tree
   (`reviewer-t4`) and the verifier's (`s13-verify`); round 2's report

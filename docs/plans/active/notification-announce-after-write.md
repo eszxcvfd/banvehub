@@ -105,6 +105,20 @@ lives, in the same honest style as the removed comment.
   1's claim that F1's move would close F2.
 - 2026-09-19: F2 handed to its own repair round (bounded pool wait) with its own review, so
   this plan stays in `active/` until that lands.
+- 2026-09-19: F2 repaired in `26057ae`: `POOL_ACQUISITION_TIMEOUT_MS = 5000` arms
+  `pool.connectionTimeoutMillis`, and `createNotification` reports a saturated skip as
+  `'failed'` with the live bound named in the warning. Measured red-then-green with an identical
+  final test file — with every other connection held, the verdict update settles in 5052 ms and
+  commits with zero notifications for the skipped emit, while a control run without the bound
+  sat at a 15 s guard on all three probes; before the fix this spec's own `afterAll` was killed
+  by vitest's 10 s hook limit because cleanup could not get a connection either.
+- 2026-09-19: review round 3 returned `pass`, reproducing saturation with its own fixtures (one
+  of ten concurrent verdict updates failing with the bounded error instead of hanging), choosing
+  a control pool with `connectionTimeoutMillis: 0` to show the bound is what removes the wait,
+  and verifying the probe cannot starve sibling spec files (`fileParallelism: false`, per-file
+  process isolation). Its two low findings — R3-1, wording that still claimed a connection of its
+  own, and R3-2, a cleanup that swallowed its own errors and stranded fixtures — are the final
+  round; this plan moves to `completed/` only once that review passes.
 - Note on evidence: the reviewer/verifier raw trees under `.lit/evidence/` are workspace-only
   scratch, and the owner's workspace cleanup removed round 1's and the verifier's trees during
   the session. Round 2's report embeds its raw output inline so it survives a sweep; the
