@@ -51,6 +51,34 @@ import { plugins } from './plugins'
 const filename = fileURLToPath(import.meta.url)
 const dirname = path.dirname(filename)
 
+/**
+ * Bound on acquiring a connection from the shared `pg` pool (review finding F2).
+ *
+ * Why a value at all: `pg-pool` only bounds a full-pool wait when this is set — when the pool is
+ * at `max` with nothing idle, `connect()` queues the waiter and, with no value configured, leaves
+ * it queued forever (`pg-pool/index.js`: the `_pendingQueue` branch sits next to the
+ * `connectionTimeoutMillis` check). Any code that holds one connection while awaiting a second
+ * can then park every connection on a waiter, and the pool never recovers on its own.
+ *
+ * Why 5000 ms: it is the value this repository already chose for the same failure class. The
+ * ticket reply path bounds its `SELECT ... FOR UPDATE` wait at 5000 ms
+ * (`src/collections/Tickets/hooks/enforceTicketInvariants.ts`, `TICKET_LOCK_WAIT_TIMEOUT`) after
+ * recording that an unbounded wait with N >= pool.max concurrent replies "ended up with every
+ * connection held by a transaction that was itself waiting, and the pool never recovered". Using
+ * the same number keeps one fail-fast budget across the repository, and it is generous enough
+ * that an ordinary burst of >10 concurrent queries still waits for a free connection instead of
+ * failing.
+ *
+ * Consequence, stated plainly: a burst that needs more than `max` simultaneous connections now
+ * fails after this bound instead of queueing indefinitely. That is the deliberate trade — a
+ * bounded failure the caller can report beats an unbounded wait that takes the pool down.
+ *
+ * The F2 emit site that depends on it is the products verdict `afterChange` hook
+ * (`src/collections/Products/hooks/announceModerationVerdict.ts`); the notification service that
+ * draws the second connection documents the same bound in `src/services/notifications.ts`.
+ */
+export const POOL_ACQUISITION_TIMEOUT_MS = 5_000
+
 export default buildConfig({
   admin: {
     components: {
@@ -96,6 +124,9 @@ export default buildConfig({
   db: postgresAdapter({
     pool: {
       connectionString: process.env.DATABASE_URL || '',
+      // Bounded acquisition — see POOL_ACQUISITION_TIMEOUT_MS above for why this exists, why it
+      // is 5000 ms, and which emit site depends on it (review finding F2).
+      connectionTimeoutMillis: POOL_ACQUISITION_TIMEOUT_MS,
     },
     // Development uses migrations too, so the database never drifts ahead of a
     // committed migration (PLAN.md §37).

@@ -21,7 +21,8 @@
  *    notification does not change business state).
  * 3. **Safe inside an open caller transaction — structurally, not by try/catch.** The
  *    service deliberately does NOT forward the caller's `req`/`transactionID` to the
- *    local API, so the notification is written on its own pooled connection.
+ *    local API, so the notification write runs in its own transaction on a connection
+ *    that is not the caller's.
  *
  *    This is not a stylistic choice. Reading the Payload source: every local-API write
  *    operation wraps itself in `try { ... } catch (error) { await killTransaction(req);
@@ -31,18 +32,53 @@
  *    SAVEPOINT cannot save it either: the rollback happens above the driver, after the
  *    statement has already been rolled back. So if the notification INSERT joined the
  *    caller's transaction and lost a race against a concurrent emitter, a replayed
- *    webhook would take the payment transaction down with it. Writing on a separate
- *    connection makes "never breaks the caller" a structural property instead of a
+ *    webhook would take the payment transaction down with it. Writing through a separate
+ *    transaction makes "never breaks the caller" a structural property instead of a
  *    promise.
  *
  *    Accepted trade-off, stated explicitly: a notification is therefore NOT
  *    transactional with the business flow — if the caller's transaction rolls back, an
  *    already-committed notification survives. For a one-way informational record that is
  *    the correct side to err on, and "at most once per business event" still holds.
+ * 4. **It does NOT own a pool, and its wait for a connection is bounded.** This service
+ *    takes its connection from the application's SHARED `pg` pool (`src/payload.config.ts`)
+ *    — the same pool the caller's transaction came from. So an emit performed while the
+ *    caller still holds a connection needs a second one from that same pool. The
+ *    acquisition wait is bounded by `POOL_ACQUISITION_TIMEOUT_MS` (5000 ms, configured as
+ *    `connectionTimeoutMillis` in `src/payload.config.ts`); when the pool is saturated the
+ *    local API fails with `timeout exceeded when trying to connect` after that bound, this
+ *    service logs it as a skipped notification and returns `'failed'`, and the caller's
+ *    write proceeds. Nothing is half-written: the failure happens before any statement runs.
+ *
+ *    That bound is the repository's own precedent for this failure class: the ticket reply
+ *    path bounds its `SELECT ... FOR UPDATE` wait at 5000 ms
+ *    (`src/collections/Tickets/hooks/enforceTicketInvariants.ts`, `TICKET_LOCK_WAIT_TIMEOUT`)
+ *    after recording that an unbounded wait with N >= pool.max concurrent replies "ended up
+ *    with every connection held by a transaction that was itself waiting, and the pool never
+ *    recovered" (review finding F2). Do not remove the bound without replacing it: "never
+ *    breaks the caller" must not be bought with an unbounded wait.
  */
 
 import type { Payload, PayloadRequest } from 'payload'
 import { isNotificationType, type NotificationType } from '@/collections/Notifications/types'
+
+/**
+ * The acquisition bound that is actually in effect, read off the live pool instead of being
+ * restated here: `POOL_ACQUISITION_TIMEOUT_MS` in `src/payload.config.ts` configures it as
+ * `connectionTimeoutMillis`. Importing that module from here would create a cycle (config →
+ * Products → hooks → this service), and a copied literal could silently drift from the
+ * configuration the failure came from — so the log reports the pool's own value, including
+ * `unset` when the bound is missing.
+ */
+const configuredPoolBoundMs = (payload: Payload): number | 'unset' => {
+  try {
+    const value = (payload as any)?.db?.pool?.options?.connectionTimeoutMillis
+    const parsed = Number(value)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 'unset'
+  } catch {
+    return 'unset'
+  }
+}
 
 /**
  * Shape of `req` a caller may pass. Accepted for call-site symmetry with the other
@@ -179,6 +215,26 @@ export const isDuplicateNotificationError = (error: unknown): boolean =>
   })
 
 /**
+ * True when the shared pool could not hand over a connection inside the configured bound
+ * (`connectionTimeoutMillis`, `POOL_ACQUISITION_TIMEOUT_MS` in `src/payload.config.ts`).
+ *
+ * `pg-pool` raises `timeout exceeded when trying to connect` for a waiter that never got a
+ * connection, and `pg` raises `Connection terminated due to connection timeout` when
+ * establishing a new client times out, so both spellings are matched. This is the saturation
+ * case: the caller's operation (or its peers) hold every connection, so the emit is skipped
+ * rather than parked — the failure happens before any statement runs, hence nothing is
+ * half-written.
+ */
+export const isPoolAcquisitionTimeoutError = (error: unknown): boolean =>
+  errorChain(error).some((node) => {
+    const message = typeof node?.message === 'string' ? node.message : ''
+    return (
+      message.includes('timeout exceeded when trying to connect') ||
+      message.includes('Connection terminated due to connection timeout')
+    )
+  })
+
+/**
  * Write the in-app notification for one business event.
  *
  * Never throws: the resolved value is the signal, and `'failed'` is safe to ignore.
@@ -265,11 +321,33 @@ export async function createNotification(
         return 'existing'
       }
 
+      if (isPoolAcquisitionTimeoutError(error)) {
+        // Saturated shared pool: the write never started, so there is nothing half-written to
+        // clean up, and the caller's business write must not wait any longer than the bound.
+        log(
+          payload,
+          'warn',
+          `createNotification: no connection from the shared pool within the configured bound (${configuredPoolBoundMs(payload)} ms) — notification skipped, caller unaffected`,
+          error,
+        )
+        return 'failed'
+      }
+
       log(payload, 'error', 'createNotification: insert failed — notification swallowed', error)
       return 'failed'
     }
   } catch (error) {
     // Belt and braces: nothing below may ever propagate into the calling business flow.
+    if (isPoolAcquisitionTimeoutError(error)) {
+      log(
+        payload,
+        'warn',
+        `createNotification: no connection from the shared pool within the configured bound (${configuredPoolBoundMs(payload)} ms) — notification skipped, caller unaffected`,
+        error,
+      )
+      return 'failed'
+    }
+
     log(payload, 'error', 'createNotification: unexpected failure — notification swallowed', error)
     return 'failed'
   }

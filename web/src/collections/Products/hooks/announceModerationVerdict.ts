@@ -46,17 +46,24 @@ import { createNotification } from '@/services/notifications'
  *    before commit (decision 0011, alternative 5); closing this properly needs the transactional
  *    outbox that decision 0011 defers as alternative 4.
  *
- * 2. **Pool liveness (review finding F2), NOT removed by this move.** The hook runs while the
- *    document operation still holds its transaction connection, and `createNotification`
- *    deliberately acquires a second connection (decision 0011, decision 4). With `>=` the pool
- *    maximum (10 by default, `payload.config.ts`) concurrent verdict updates, every connection
- *    can be held by a waiter and the pool does not recover — the same precondition this
- *    repository already documents for ticket replies
- *    (`collections/Tickets/hooks/enforceTicketInvariants.ts:52-59`). `afterChange` narrows
- *    nothing here: the emit is still awaited inside the operation. Any future change that makes
- *    verdict updates a hot path should give the notification path its own bounded pool, or emit
- *    without awaiting (at the cost of the deterministic assertion these tests rely on) — do not
- *    silently widen this.
+ * 2. **Pool liveness (review finding F2), now bounded.** The hook runs while the document
+ *    operation still holds its transaction connection, and `createNotification` deliberately
+ *    draws a *second* connection from the same shared pool (decision 0011, decision 4), so a
+ *    saturated pool cannot hand one over. That acquisition is bounded by
+ *    `connectionTimeoutMillis` = `POOL_ACQUISITION_TIMEOUT_MS` (5000 ms,
+ *    `src/payload.config.ts`), so the emit fails inside the bound, is swallowed, and this verdict
+ *    update finishes — instead of parking a connection on a waiter until the pool can no longer
+ *    recover. Same precedent as the ticket reply path, which bounds its `SELECT ... FOR UPDATE`
+ *    wait at the same 5000 ms (`collections/Tickets/hooks/enforceTicketInvariants.ts`,
+ *    `TICKET_LOCK_WAIT_TIMEOUT`). Measured by `tests/int/notification-pool-bound.int.spec.ts`,
+ *    which holds connections out of the pool and asserts both the bounded completion and the
+ *    skipped notification.
+ *
+ *    What the bound does NOT buy: with a saturated pool a verdict update can still be delayed by
+ *    up to that bound before it proceeds, and the unbounded wait returns if the bound is ever
+ *    removed from the pool configuration. If verdict updates become a hot path, give the
+ *    notification path its own pool or emit without awaiting (at the cost of the deterministic
+ *    assertions these tests rely on) — do not silently drop the bound.
  */
 const ANNOUNCED_VERDICTS: Record<
   string,
