@@ -4,10 +4,11 @@ Date: 2026-09-19
 
 ## Status
 
-Proposed — drafted by the captain while the §13 notifications team finishes. No team is
-staged and no work is scheduled from this file; the increment is created only after
-`notifications-inapp` closes. Authority already exists in decision 0012; the two mechanism
-choices below are the ones an owner review should settle before implementation starts.
+Proposed — drafted by the captain while the §13 notifications team finishes. No team is staged
+and no work is scheduled from this file; the increment is created only after
+`notifications-inapp` closes, because the repository runs one team slot at a time. Authority is
+decision 0012; both mechanism choices are now decided below, and the parallel UI team's
+boundary is recorded there so two teams never edit the same file.
 
 ## Outcome
 
@@ -40,14 +41,14 @@ In:
 - `web/src/app/api/v1/admin/refunds/route.ts` — accept the fault basis (and the override).
 - `web/src/collections/Refunds/index.ts` + a schema migration — carry the fault basis and the
   window state on the refund record.
-- `web/src/globals/Footer.ts` + the same migration — contact fields the operator can edit.
-- The storefront footer and the ticket/order surfaces — render the contact channel and point
-  refund copy at it, stating the 5-day window.
-- Tests: integration specs for the authorization, the fault branching and the window; an e2e
-  assertion for the published contact channel.
+- `web/src/globals/Footer.ts` + the same migration — contact fields the operator can edit, and
+  the schema the UI team renders.
+- Tests: integration specs for the authorization, the fault branching and the window.
 
 Out:
 
+- **Presentation**: the footer/ticket/order components, storefront copy and pages that render
+  the contact channel — owned by the owner's parallel UI team, not this one.
 - Email delivery (decision 0003), web push/Zalo/SMS (§13 P1), automated payout (§26 P1),
   provider-side reversal, the F3 notification fixture hygiene, and any change to
   `web/src/collections/Products/**` or the notification access rules.
@@ -63,17 +64,38 @@ books no revenue on the order.
 The ticket label follows the money, not the other way round: a ticket may only display
 "Đã hoàn tiền" when an executed refund exists for its order, and a seller never sets it.
 
-## Two mechanism choices for the owner review
+## Two mechanism choices — decided
 
-1. **How a `REFUNDED` resolution is produced.** (a) The operator's refund action resolves the
-   related ticket(s) automatically — one action, no drift; or (b) the operator marks the
-   ticket manually and the API refuses unless an executed refund exists for the order — two
-   actions, but no automatic state change. Recommendation: (a) with (b)'s guard kept as the
-   invariant, so the label can never precede the money.
-2. **Where the contact information lives.** (a) Fields on the `footer` global rendered in the
-   footer, which the operator edits in the admin panel; or (b) a dedicated contact page linked
-   from the footer. Recommendation: (a), plus a link, because it is where users already look
-   and it needs no new route.
+Owner delegated the choice on 2026-09-19 ("bạn cứ thực hiện"); both remain reviewable at plan
+approval, and both are recorded in decision 0012's Follow-Up as belonging to this plan.
+
+1. **How a `REFUNDED` resolution is produced: the operator's refund action resolves the
+   related ticket automatically, with the guard kept as the invariant.** One action, and the
+   label can never precede the money — the guard (a ticket may only carry `REFUNDED` when an
+   executed refund exists for its order) stays enforced independently, so the automatic path
+   is a convenience on top of a rule rather than the rule itself.
+2. **Where the contact information lives: fields on the `footer` global, rendered in the
+   footer, plus a link.** It is where users already look, the operator edits it in the admin
+   panel without a deploy, and it needs no new route.
+
+## Parallel work boundary
+
+A second team, created by the owner, works the **UI vertical** of this increment in parallel.
+To keep two teams out of each other's files:
+
+- **Schema has exactly one owner at a time: this team.** This team owns
+  `web/src/globals/Footer.ts` (the contact fields), `web/src/collections/Refunds/index.ts`,
+  the single phase-12 migration, `web/src/migrations/index.ts` and the generated
+  `web/src/payload-types.ts`. The UI team consumes those fields and must not add schema,
+  write a migration, or regenerate `payload-types.ts`; if it needs another field, it asks this
+  team for it instead.
+- **Presentation belongs to the UI team**: footer/ticket/order components, storefront copy and
+  pages. This team does not edit those paths.
+- **Scope checks must be path-filtered.** During parallel work `git status --porcelain` is
+  never globally clean, so a task's scope check compares only its own inScope paths instead of
+  requiring an empty tree — otherwise every parallel edit looks like a scope violation.
+- Migrations run against a shared development database, so this team runs `payload migrate`
+  and the UI team does not, which also keeps the migration ordering single-owner.
 
 ## Risks And Recovery
 
@@ -92,7 +114,11 @@ The ticket label follows the money, not the other way round: a ticket may only d
 ## Progress
 
 - 2026-09-19: plan drafted from decision 0012 (policy) and the three measured facts above. Not
-  staged; the increment waits for the §13 team to close.
+  staged while `notifications-inapp` still holds the team slot.
+- 2026-09-19: the two mechanism choices are decided (automatic ticket resolution behind the
+  guard; contact fields on the footer global), the owner having delegated them, and the
+  parallel UI team's boundary is recorded above. Validation drops the e2e contact-channel
+  assertion because that surface now belongs to the UI team.
 
 ## Decisions
 
@@ -106,8 +132,10 @@ The ticket label follows the money, not the other way round: a ticket may only d
   executed refund; a platform-fault refund leaves the seller earning intact and records
   `sellerAmountRefunded = 0`; a seller-fault refund reverses it; a refund requested at day 6
   is refused without the override and recorded with it.
-- Integration or end-to-end proof: the contact channel renders on the storefront and the
-  ticket/order copy points at it.
+- Integration proof: the operator's refund action resolves the related ticket, and the guard
+  refuses a `REFUNDED` resolution whose order has no executed refund.
+- The presentation assertions — that the footer renders the contact fields and the copy points
+  at them — belong to the parallel UI team's suite; this plan does not duplicate them.
 - Repository-required checks: `payload migrate`, `test:int`, `test:challenger`, `lint`
   (0 errors), `build`, `test:e2e`.
 
