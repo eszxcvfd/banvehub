@@ -97,37 +97,38 @@ To keep two teams out of each other's files:
 - Migrations run against a shared development database, so this team runs `payload migrate`
   and the UI team does not, which also keeps the migration ordering single-owner.
 
-## Environment limitation, recorded rather than hidden
+## Environment limitation — raised and then lifted, on the record
 
-The parallel team's redesign currently makes three whole-tree gates impossible for anyone in this
-tree:
+**What was blocked, and why it mattered.** While the increment's slices were being finished, a
+parallel team's in-flight files made three whole-tree gates impossible for anyone: the only two
+lint errors lived in `web/src/components/checkout/CheckoutPage.tsx:84,98`, `next build` died
+collecting page data for `/account` with
+`TypeError: (0, a.r(...).createContext) is not a function` at
+`web/src/app/(app)/(account)/account/page.tsx:11` importing `@ant-design/icons` (the same
+interop that served `/shop` as a 500 in development), and the full e2e suite was red on their
+in-flight storefront specs. On top of that, with four to six concurrent Playwright runs on a
+14 GB machine Chromium is OOM-killed about thirty seconds into a test, and the shared `pnpm dev`
+on port 3000 plus the shared `e2e-*@kientaohub.test` fixtures mean two suites cannot run
+concurrently at all.
 
-- `pnpm lint` — the only two errors are `react-hooks/set-state-in-effect` in
-  `web/src/components/checkout/CheckoutPage.tsx:84,98`, a file they have modified.
-- `pnpm build` — dies collecting page data for `/account` with
-  `TypeError: (0, a.r(...).createContext) is not a function` at
-  `web/src/app/(app)/(account)/account/page.tsx:11` importing `@ant-design/icons`; the same
-  interop breakage serves `/shop` as a 500 in development.
-- `pnpm test:e2e` — the full suite is red on their in-flight storefront specs, and with four to
-  six concurrent Playwright runs on a 14 GB machine Chromium is OOM-killed about thirty seconds
-  into a test. That is why this increment's scoped console run is recorded as **inconclusive**
-  rather than red, and why two earlier attempts collided through the shared `pnpm dev` on port
-  3000 and the shared `e2e-*@kientaohub.test` fixtures each suite's `globalTeardown` deletes.
+**Isolated proof taken while it was blocked.** `git archive HEAD` plus this increment's patch
+only, hard-linked `node_modules`, private `.next`: `eslint src tests` → 0 errors,
+`tsc --noEmit` → clean, `next build` → exit 0. (A symlinked `node_modules` makes Turbopack panic
+with "points out of the filesystem root", so isolation must hard-link or copy it on the same
+filesystem.)
 
-**What the increment proves, isolated from that work.** `git archive HEAD` plus this increment's
-patch only, hard-linked `node_modules`, private `.next`: `eslint src tests` → **0 errors**,
-`tsc --noEmit` → **clean**, `next build` → **exit 0**. (A symlinked `node_modules` makes Turbopack
-panic with "points out of the filesystem root", so isolation must hard-link or copy it on the same
-filesystem.) `test:int` 39 files / 644 tests and `test:challenger` 14 files / 247 tests pass on a
-scratch clone; the fixture repair is proven by a scripted probe that is red before and green after
-plus two consecutive CLI runs of the affected specs on the same database (57 passed each); and the
-console's critical path — an out-of-window refund requiring the override, then a 200 with
-`faultBasis=SELLER`, `outOfWindow=true`, `sellerAmountRefunded=105000`, earning `REVERSED` —
-passed in a scoped run.
+**Lifted.** The parallel team fixed both blockers. The captain then measured, on the tree as it
+stands: whole-tree `pnpm lint` → **exit 0, 0 errors** (1327 warnings), and `next build` on a
+full copy of the current tree → **exit 0** ("Compiled successfully", "Finished TypeScript", no
+`createContext` failure). The blocked gates therefore went back into the verification and review
+contracts — `t3` and `t4` were amended a second time to require whole-tree lint, whole-tree build
+and the real `test:int`/`test:challenger` runs rather than the scoped substitutes — and the only
+thing that still needs arranging is a quiet window for the full-suite e2e, because that
+constraint is machine contention, not code.
 
-**What therefore stays unproven:** the full-suite `test:e2e` for this increment, and whole-tree
-`lint`/`build` as gates. The affected task contracts were amended to say exactly that instead of
-pretending the gates passed, with each amendment recorded in the task's revisions ledger.
+**What remains unproven until that window:** the full-suite `test:e2e`. The increment's scoped
+e2e evidence stays what it is — one passing run of each critical case, the rest inconclusive
+under contention — and must not be reported as a green full suite.
 
 ## Risks And Recovery
 
