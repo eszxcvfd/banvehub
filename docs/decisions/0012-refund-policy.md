@@ -69,6 +69,19 @@ than theoretical:
    refund reverses an unmatured earning instead of clawing back money the seller already
    received. A request after day 5 is outside policy — the operator may still act, but the
    refund record must then state that it was out of window.
+7. **Who bears the refund depends on whose fault it was.**
+   - *The seller's fault:* the buyer is refunded, the seller's earning is reversed
+     (`sellerAmountRefunded` = the seller's share) and the platform's fee is refunded
+     with it — a seller does not keep money for a file that was not as described.
+   - *The platform's fault:* only the buyer is refunded. The seller's earning is **not**
+     reversed and matures normally, so the seller is paid their share in full, and the
+     order is not counted as platform revenue — the platform absorbs both its fee and the
+     seller's payout. This is affordable precisely because of decision 6: at day 5 the
+     earning is still PENDING, so the platform is choosing to release money it has not yet
+     paid, not clawing money back.
+   The fault basis is therefore a required input of a refund rather than free text, and
+   `processRefund` — which today reverses every earning unconditionally
+   (`web/src/services/refund.ts`, step c) — must branch on it.
 
 ## Alternatives Considered
 
@@ -81,6 +94,9 @@ than theoretical:
    "Đã hoàn tiền" as money received, so the disagreement is user-visible, not
    internal.
 4. **Buyer self-service refunds.** Rejected by the owner's eligibility rule.
+5. **Reverse the seller's earning on every refund, as the code does today.** Rejected by
+   the owner: a platform failure is the platform's cost, so the seller keeps their share
+   and the platform absorbs both the fee and the payout.
 
 ## Consequences
 
@@ -106,6 +122,9 @@ Tradeoffs:
 - A fault discovered after day 5 has no in-policy refund path: the operator decides out
   of policy, and the record must say so rather than the code pretending the window is
   soft.
+- A platform-fault refund costs the platform twice — the buyer's refund plus the
+  seller's untouched payout — and the order books no revenue. That is the intended price
+  of not charging a seller for the platform's failure.
 
 ## Follow-Up
 
@@ -117,13 +136,15 @@ Tradeoffs:
   when the operator executes the refund versus a guarded manual mark, contact fields on
   the `footer` global versus a dedicated page) belong to that increment's plan, not to
   this record.
-- **Open owner question (fault basis of the money):** when the fault is the platform's
-  rather than the seller's, does the seller keep their earning and the platform absorb
-  the refund? Today `processRefund` reverses the seller earning unconditionally
-  (`web/src/services/refund.ts`, step 3), which is correct for seller fault and
-  unexamined for platform fault. Because the 5/7 ordering means the earning is still
-  PENDING when the decision is taken, absorbing the refund without reversing the seller
-  is feasible — it is a policy choice, not a technical constraint.
+- **Decided (fault basis of the money):** fault decides who bears the refund — seller
+  fault reverses the seller's earning, platform fault leaves it intact and the platform
+  absorbs both the fee and the payout (decision 7). Implementation consequence for the
+  increment: `processRefund` must accept a required fault basis and branch the earning
+  reversal on it, recording `sellerAmountRefunded = 0` for platform fault. The `refunds`
+  document already carries `platformFeeRefunded` and `sellerAmountRefunded`, and the
+  buyer's ledger credit is `type: 'refund'` in both cases
+  (`web/src/collections/WalletLedger.ts:51-58`), so the fault basis on the refund record is
+  what makes the two cases distinguishable after the fact.
 - **Open detail (anchor of the 5-day window):** "receipt" needs one definition. The
   purchase/grant moment (`entitlements.grantedAt`) and the first download
   (`download_events.downloadedAt`) both exist in the data, and the owner's rule that
