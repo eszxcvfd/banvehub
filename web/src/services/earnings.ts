@@ -6,6 +6,7 @@
  */
 
 import type { Payload } from 'payload'
+import { createNotification } from '@/services/notifications'
 
 export interface SellerBalanceSummary {
   totalEarned: number
@@ -65,6 +66,23 @@ export async function releaseMaturedEarnings(
         availableAt: nowIso,
       },
       overrideAccess: true,
+    })
+
+    // §13 in-app channel (added): this earning just became withdrawable for its seller.
+    // One notification per matured earning (not per run), keyed on the earning row, so a
+    // re-run — which finds no PENDING rows left anyway — can never announce it twice.
+    // Fire-and-forget: `createNotification` swallows its own failures and writes on its own
+    // connection, so the PENDING -> AVAILABLE transition and the returned counters are
+    // unaffected.
+    await createNotification(payload, {
+      recipient: Number(
+        typeof doc.seller === 'object' && doc.seller !== null ? (doc.seller as any).id : doc.seller,
+      ),
+      type: 'EARNINGS_AVAILABLE',
+      title: 'Doanh thu đã khả dụng',
+      body: `Khoản thu ${Number(doc.sellerAmount || 0).toLocaleString('vi-VN')}₫ từ đơn hàng đã hết thời gian giữ và có thể rút.`,
+      link: '/seller',
+      dedupeKey: `seller-earning:${doc.id}:matured`,
     })
 
     releasedCount++

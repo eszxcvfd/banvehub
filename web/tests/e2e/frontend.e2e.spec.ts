@@ -196,6 +196,81 @@ test.describe('KienTaoHub storefront journey', () => {
     await expect(page.locator('h1').first()).toHaveText('Đơn hàng của tôi')
   })
 
+  test('authenticated buyer reads their own notification and marks it read (§25 #21)', async ({
+    page,
+  }) => {
+    // Own fixture, owned by this test: created through the Payload Local API and removed in the
+    // `finally` below by its id, so the shared e2e fixture lifecycle (tests/helpers/**) stays
+    // untouched and no residue is left for the 12 shared identities.
+    const payload = await getTestPayload()
+    const buyer = (
+      await payload.find({
+        collection: 'users',
+        where: { email: { equals: TEST_USERS.buyer.email } },
+        limit: 1,
+        overrideAccess: true,
+      })
+    ).docs[0]
+
+    expect(buyer, 'the e2e buyer fixture must exist (tests/helpers/global-setup.ts seeds it)').toBeTruthy()
+
+    const stamp = Date.now()
+    const title = `Thông báo kiểm thử e2e ${stamp}`
+    const notification = await payload.create({
+      collection: 'notifications',
+      data: {
+        recipient: buyer.id,
+        type: 'ORDER_SUCCESS',
+        title,
+        body: 'Nội dung thông báo do bài kiểm thử e2e tạo cho chính người mua này.',
+        link: null,
+        dedupeKey: `e2e-notification-${stamp}`,
+      },
+      overrideAccess: true,
+    })
+
+    try {
+      await loginViaUI(page, TEST_USERS.buyer.email, TEST_USERS.buyer.password)
+
+      // The account area links to the §25 #21 screen.
+      await expect(page.getByTestId('nav-notifications')).toBeVisible()
+      await page.getByTestId('nav-notifications').click()
+      await page.waitForURL(/\/notifications/)
+      await expect(page.locator('h1').first()).toHaveText('Thông báo')
+
+      const item = page.locator(
+        `[data-testid="notification-item"][data-notification-id="${notification.id}"]`,
+      )
+      await expect(item).toBeVisible()
+      await expect(item).toHaveAttribute('data-read', 'false')
+      await expect(item.getByTestId('notification-title')).toHaveText(title)
+      await expect(item.getByTestId('notification-read-state')).toHaveText('Chưa đọc')
+
+      // Mark read through the API from the screen.
+      await item.getByTestId('mark-read').click()
+      await expect(item).toHaveAttribute('data-read', 'true')
+      await expect(item.getByTestId('notification-read-state')).toHaveText('Đã đọc')
+
+      // ...and the state really persisted server-side.
+      const stored = await payload.findByID({
+        collection: 'notifications',
+        id: notification.id,
+        overrideAccess: true,
+      })
+      expect(stored.readAt).toBeTruthy()
+    } finally {
+      try {
+        await payload.delete({
+          collection: 'notifications',
+          id: notification.id,
+          overrideAccess: true,
+        })
+      } catch {
+        // The row is already gone (or the fixture teardown removed its owner); nothing to do.
+      }
+    }
+  })
+
   test('a guest is redirected to the login page from account and orders', async ({ page }) => {
     await page.goto(`${baseURL}/account`)
     await expect(page).toHaveURL(/\/login/)

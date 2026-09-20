@@ -8,6 +8,15 @@ import {
   ticketErrorName,
   withTicketLock,
 } from '@/collections/Tickets/hooks/enforceTicketInvariants'
+import { createNotification } from '@/services/notifications'
+
+/** Relationship fields arrive as an id or a populated doc; normalise to the id. */
+function toTicketUserId(value: unknown): number | null {
+  const raw = typeof value === 'object' && value !== null ? (value as { id?: unknown }).id : value
+  if (raw === null || raw === undefined || raw === '') return null
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) ? parsed : null
+}
 
 /**
  * POST /api/v1/tickets/[id]/messages — append a reply to a ticket thread.
@@ -136,7 +145,7 @@ export async function POST(
     // Shared serialization point: the ticket row lock is held for the whole
     // read-modify-write below, so concurrent replies (and concurrent PATCH writes)
     // cannot overwrite each other's message array.
-    const { newMessage, updatedTicket } = await withTicketLock(
+    const { newMessage, replyOrdinal, updatedTicket } = await withTicketLock(
       payload,
       ticketId,
       async (txReq) => {
@@ -201,9 +210,48 @@ export async function POST(
           req: txReq,
         })
 
-        return { newMessage: appendedMessage, updatedTicket: updated }
+        // Hand the reply ordinal back to the caller so the §13 notification below can be
+        // keyed on the exact appended entry instead of on wall-clock time.
+        return {
+          newMessage: appendedMessage,
+          replyOrdinal: existingMessages.length + 1,
+          updatedTicket: updated,
+        }
       },
     )
+
+    // §13 in-app channel (added): notify the OTHER side of the thread — the seller/staff when
+    // the author replied, the author when the seller or staff replied.
+    //
+    // Deliberately AFTER `withTicketLock` resolved (the reply is committed by then) and
+    // fire-and-forget: `createNotification` writes on its own pooled connection and swallows
+    // every failure, so the 201 contract above, the append-only thread and the ticket status
+    // transition are exactly what they were before.
+    //
+    // The dedupeKey is the appended reply's ordinal in the thread, which is unique per reply and
+    // stable across a retry that `mergeTicketMessages` collapses, so no reply is announced twice.
+    const authorId = toTicketUserId((updatedTicket as any)?.user)
+    const sellerId = toTicketUserId((updatedTicket as any)?.seller)
+    const recipientId = Number(authorId) === Number(user.id) ? sellerId : authorId
+
+    if (recipientId !== null && recipientId !== undefined) {
+      await createNotification(payload, {
+        recipient: Number(recipientId),
+        type: 'TICKET_REPLY',
+        title: 'Có phản hồi mới trong khiếu nại',
+        body: `Khiếu nại "${(updatedTicket as any)?.subject ?? ticketId}" vừa có phản hồi mới từ ${
+          newMessage?.senderRole === 'buyer'
+            ? 'người mua'
+            : newMessage?.senderRole === 'seller'
+              ? 'người bán'
+              : 'bộ phận hỗ trợ'
+        }.`,
+        // No buyer-facing tickets screen exists yet (§25 #20 is not implemented in this app),
+        // so the notification carries no link rather than a link to a 404.
+        link: null,
+        dedupeKey: `ticket:${ticketId}:reply:${replyOrdinal}`,
+      })
+    }
 
     return NextResponse.json(
       {

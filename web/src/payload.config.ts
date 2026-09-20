@@ -29,6 +29,7 @@ import { Reviews } from '@/collections/Reviews'
 import { Comments } from '@/collections/Comments'
 import { Tickets } from '@/collections/Tickets'
 import { ModerationCases } from '@/collections/ModerationCases'
+import { Notifications } from '@/collections/Notifications'
 import { Pages } from '@/collections/Pages'
 import { PaymentIntents } from '@/collections/PaymentIntents'
 import { PaymentTransactions } from '@/collections/PaymentTransactions'
@@ -90,6 +91,7 @@ export default buildConfig({
     Comments,
     Tickets,
     ModerationCases,
+    Notifications,
   ],
   db: postgresAdapter({
     pool: {

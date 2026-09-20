@@ -8,6 +8,60 @@
 import crypto from 'crypto'
 import type { Payload } from 'payload'
 import { getSellerBalance } from './earnings'
+import { createNotification } from '@/services/notifications'
+
+/** Vietnamese labels for the withdrawal statuses announced through §13. */
+const WITHDRAWAL_STATUS_LABEL: Record<string, string> = {
+  REQUESTED: 'đã được gửi và đang chờ xử lý',
+  UNDER_REVIEW: 'đang được bộ phận tài chính xem xét',
+  APPROVED: 'đã được duyệt',
+  PROCESSING: 'đang được chuyển khoản',
+  PAID: 'đã được thanh toán',
+  REJECTED: 'đã bị từ chối',
+  CANCELLED: 'đã được hủy',
+}
+
+/**
+ * §13 in-app channel (added): announce a withdrawal status change to the seller who owns it.
+ *
+ * - One notification per `(withdrawal, status)` — that is the dedupeKey — so a repeated
+ *   transition (which the withdrawal state machine refuses anyway) can never announce the same
+ *   status twice, while every genuine status change notifies exactly once.
+ * - Fire-and-forget: `createNotification` writes on its own pooled connection and swallows
+ *   every failure, so no reservation, balance release, status write or `withdrawal_events`
+ *   audit row depends on the notification succeeding.
+ */
+async function notifyWithdrawalStatus(
+  payload: Payload,
+  withdrawal: {
+    id: number | string
+    code?: null | string
+    amount?: null | number
+    seller?: unknown
+  },
+  status: string,
+  options?: { reason?: null | string },
+): Promise<void> {
+  const sellerId =
+    typeof withdrawal.seller === 'object' && withdrawal.seller !== null
+      ? (withdrawal.seller as { id?: number | string }).id
+      : withdrawal.seller
+
+  if (sellerId === undefined || sellerId === null) return
+
+  const label = WITHDRAWAL_STATUS_LABEL[status] || status
+  const amountText = Number(withdrawal.amount || 0).toLocaleString('vi-VN')
+  const reasonText = options?.reason ? ` Lý do: ${options.reason}` : ''
+
+  await createNotification(payload, {
+    recipient: Number(sellerId),
+    type: 'WITHDRAWAL_STATUS',
+    title: 'Cập nhật yêu cầu rút tiền',
+    body: `Yêu cầu rút ${amountText}₫ (${withdrawal.code}) ${label}.${reasonText}`,
+    link: '/seller',
+    dedupeKey: `withdrawal:${withdrawal.id}:${status}`,
+  })
+}
 
 export interface WithdrawalRequestParams {
   sellerId: number
@@ -172,6 +226,11 @@ export async function requestWithdrawal(
       overrideAccess: true,
     })
 
+    // §13 in-app channel (added): the request is on file and its balance is reserved, so the
+    // seller gets the first status of the chain. The dedupeKey pins the announcement to this
+    // withdrawal and this status, so re-issuing the same request can never double-notify.
+    await notifyWithdrawalStatus(payload, withdrawal as any, 'REQUESTED')
+
     return {
       id: Number(withdrawal.id),
       code: withdrawal.code,
@@ -235,6 +294,9 @@ export async function reviewWithdrawal(
     overrideAccess: true,
   })
 
+  // §13 in-app channel (added).
+  await notifyWithdrawalStatus(payload, updated as any, 'UNDER_REVIEW')
+
   return {
     id: Number(updated.id),
     code: updated.code,
@@ -297,6 +359,9 @@ export async function approveWithdrawal(
     overrideAccess: true,
   })
 
+  // §13 in-app channel (added).
+  await notifyWithdrawalStatus(payload, updated as any, 'APPROVED')
+
   return {
     id: Number(updated.id),
     code: updated.code,
@@ -356,6 +421,9 @@ export async function processWithdrawal(
     },
     overrideAccess: true,
   })
+
+  // §13 in-app channel (added).
+  await notifyWithdrawalStatus(payload, updated as any, 'PROCESSING')
 
   return {
     id: Number(updated.id),
@@ -417,6 +485,9 @@ export async function finalizeWithdrawalPaid(
     },
     overrideAccess: true,
   })
+
+  // §13 in-app channel (added).
+  await notifyWithdrawalStatus(payload, updated as any, 'PAID')
 
   return {
     id: Number(updated.id),
@@ -485,6 +556,12 @@ export async function rejectWithdrawal(
     overrideAccess: true,
   })
 
+  // §13 in-app channel (added): a rejection always carries its reason, so the seller does not
+  // have to open the dashboard to find out why.
+  await notifyWithdrawalStatus(payload, updated as any, 'REJECTED', {
+    reason: params.reason.trim(),
+  })
+
   return {
     id: Number(updated.id),
     code: updated.code,
@@ -551,6 +628,9 @@ export async function cancelWithdrawal(
     },
     overrideAccess: true,
   })
+
+  // §13 in-app channel (added).
+  await notifyWithdrawalStatus(payload, updated as any, 'CANCELLED')
 
   return {
     id: Number(updated.id),

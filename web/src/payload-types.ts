@@ -94,6 +94,7 @@ export interface Config {
     comments: Comment;
     tickets: Ticket;
     moderation_cases: ModerationCase;
+    notifications: Notification;
     forms: Form;
     'form-submissions': FormSubmission;
     addresses: Address;
@@ -144,6 +145,7 @@ export interface Config {
     comments: CommentsSelect<false> | CommentsSelect<true>;
     tickets: TicketsSelect<false> | TicketsSelect<true>;
     moderation_cases: ModerationCasesSelect<false> | ModerationCasesSelect<true>;
+    notifications: NotificationsSelect<false> | NotificationsSelect<true>;
     forms: FormsSelect<false> | FormsSelect<true>;
     'form-submissions': FormSubmissionsSelect<false> | FormSubmissionsSelect<true>;
     addresses: AddressesSelect<false> | AddressesSelect<true>;
@@ -1723,6 +1725,55 @@ export interface ModerationCase {
   createdAt: string;
 }
 /**
+ * Thông báo in-app (§13, màn hình §25 #21). Bản ghi một chiều: phát thông báo không đổi trạng thái nghiệp vụ, và mỗi sự kiện nghiệp vụ chỉ phát tối đa một lần (dedupeKey).
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "notifications".
+ */
+export interface Notification {
+  id: number;
+  /**
+   * Người nhận thông báo
+   */
+  recipient: number | User;
+  /**
+   * Loại sự kiện nghiệp vụ (§13)
+   */
+  type:
+    | 'PAYMENT_SUCCESS'
+    | 'PAYMENT_FAILED'
+    | 'ORDER_SUCCESS'
+    | 'SELLER_SALE'
+    | 'EARNINGS_AVAILABLE'
+    | 'WITHDRAWAL_STATUS'
+    | 'REFUND'
+    | 'PRODUCT_APPROVED'
+    | 'PRODUCT_REJECTED'
+    | 'TICKET_REPLY';
+  /**
+   * Tiêu đề ngắn hiển thị trong danh sách thông báo
+   */
+  title: string;
+  /**
+   * Nội dung thông báo
+   */
+  body: string;
+  /**
+   * Đường dẫn mở từ thông báo (tuỳ chọn)
+   */
+  link?: string | null;
+  /**
+   * Thời điểm đọc; null = chưa đọc
+   */
+  readAt?: string | null;
+  /**
+   * Khoá chống trùng theo sự kiện nghiệp vụ. UNIQUE (recipient, type, dedupeKey) ở tầng DB.
+   */
+  dedupeKey: string;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "form-submissions".
  */
@@ -1910,6 +1961,10 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'moderation_cases';
         value: number | ModerationCase;
+      } | null)
+    | ({
+        relationTo: 'notifications';
+        value: number | Notification;
       } | null)
     | ({
         relationTo: 'forms';
@@ -2688,6 +2743,21 @@ export interface ModerationCasesSelect<T extends boolean = true> {
   resolutionNotes?: T;
   resolvedBy?: T;
   resolvedAt?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "notifications_select".
+ */
+export interface NotificationsSelect<T extends boolean = true> {
+  recipient?: T;
+  type?: T;
+  title?: T;
+  body?: T;
+  link?: T;
+  readAt?: T;
+  dedupeKey?: T;
   updatedAt?: T;
   createdAt?: T;
 }

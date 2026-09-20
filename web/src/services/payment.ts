@@ -1,6 +1,7 @@
 import type { Payload } from 'payload'
 import type { PaymentIntent, PaymentTransaction, PaymentWebhookEvent, User } from '@/payload-types'
 import { creditWallet } from '@/services/wallet'
+import { createNotification } from '@/services/notifications'
 
 export class InvalidWebhookSignatureError extends Error {
   constructor(message = 'Chữ ký hoặc mã bảo mật Webhook không hợp lệ') {
@@ -286,6 +287,22 @@ export async function handleSePayWebhook(
       req,
     })
 
+    // §13 in-app channel (added): the buyer's attempted top-up did not go through — the
+    // transfer landed with a different amount, so the intent stays PENDING and is flagged
+    // for reconciliation. Fire-and-forget: `createNotification` writes on its own
+    // connection and swallows every failure, so the reconciliation outcome, the intent
+    // status and the `200` returned below are exactly what they were before.
+    // The dedupeKey is the provider transaction, so replaying this webhook is a no-op here.
+    await createNotification(payload, {
+      recipient: intentUserId,
+      type: 'PAYMENT_FAILED',
+      title: 'Nạp tiền chưa thành công',
+      body: `Giao dịch ${intent.code}: hệ thống nhận ${transferAmount.toLocaleString('vi-VN')}₫, không khớp số tiền yêu cầu ${Number(intent.amount).toLocaleString('vi-VN')}₫. Yêu cầu đang được đối soát.`,
+      link: '/wallet',
+      dedupeKey: `payment-mismatch:${providerTransactionId || eventId}`,
+      req,
+    })
+
     return {
       success: true,
       statusCode: 200,
@@ -372,6 +389,21 @@ export async function handleSePayWebhook(
       processedAt: new Date().toISOString(),
     },
     overrideAccess: true,
+    req,
+  })
+
+  // §13 in-app channel (added): the buyer's top-up landed and the wallet was credited.
+  // Fire-and-forget — `createNotification` writes on its own connection and swallows every
+  // failure, so the `200 paid:true` contract of this webhook (and the BR-02 replay no-op
+  // above) is unchanged. The dedupeKey is the payment intent, so the intent's top-up is
+  // announced exactly once no matter how many webhooks arrive for it.
+  await createNotification(payload, {
+    recipient: intentUserId,
+    type: 'PAYMENT_SUCCESS',
+    title: 'Nạp tiền thành công',
+    body: `Ví của bạn đã được cộng ${transferAmount.toLocaleString('vi-VN')}₫ (mã giao dịch ${intent.code}).`,
+    link: '/wallet',
+    dedupeKey: `payment-intent:${intent.code}`,
     req,
   })
 

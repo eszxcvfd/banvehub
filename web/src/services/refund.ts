@@ -9,6 +9,7 @@ import crypto from 'crypto'
 import type { Payload } from 'payload'
 import type { Order, User } from '@/payload-types'
 import { creditWallet } from '@/services/wallet'
+import { createNotification } from '@/services/notifications'
 
 export interface RefundParams {
   orderId: number
@@ -259,7 +260,22 @@ export async function processRefund(
     overrideAccess: true,
   })
 
-  // g) Return RefundResult
+  // g) §13 in-app channel (added): the compensating credit is applied and the refund audit
+  // row exists, so tell the buyer. Fire-and-forget: `createNotification` writes on its own
+  // connection and swallows every failure, so it cannot alter the refund result, the reversal
+  // ledger entry or the entitlement revocation above.
+  // The dedupeKey is the order, not the refund row: an order can only be refunded once (the
+  // COMPLETED -> REFUNDED guard above), so a retry can never announce it twice.
+  await createNotification(payload, {
+    recipient: Number(buyerId),
+    type: 'REFUND',
+    title: 'Đã hoàn tiền đơn hàng',
+    body: `Đơn hàng ${order.code} đã được hoàn ${orderTotal.toLocaleString('vi-VN')}₫ vào ví của bạn. Lý do: ${params.reason.trim()}`,
+    link: `/orders/${params.orderId}`,
+    dedupeKey: `order:${order.code}:refunded`,
+  })
+
+  // h) Return RefundResult
   return {
     refundId: refundDoc.id,
     orderId: params.orderId,

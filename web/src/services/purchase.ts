@@ -11,6 +11,7 @@ import crypto from 'crypto'
 import type { Product, Order, OrderItem, Entitlement } from '@/payload-types'
 import { debitWallet, InsufficientFundsError } from '@/services/wallet'
 import { resolveCommissionRate, calculateRevenueSplit } from '@/services/commission'
+import { createNotification } from '@/services/notifications'
 
 // Re-export InsufficientFundsError for consumers
 export { InsufficientFundsError }
@@ -302,6 +303,40 @@ export async function purchaseProduct(
     // 10. Commit transaction if owned by this function
     if (shouldCommit) {
       await commitTransaction(effectiveReq)
+    }
+
+    // §13 in-app channel (added).
+    //
+    // Placed AFTER the commit (when this function owns the transaction) so the buyer and the
+    // seller are only told about an order that actually committed. Fire-and-forget in both
+    // directions: `createNotification` writes on its own pooled connection and swallows every
+    // failure, so it can neither change this function's result nor roll back the money-path
+    // rows above — which is why no caller-side guard is needed here.
+    //
+    // Each order is announced exactly once: the dedupeKey is the immutable order code (BR-07
+    // snapshot) and `(recipient, type, dedupeKey)` is UNIQUE.
+    await createNotification(payload, {
+      recipient: numericBuyerId,
+      type: 'ORDER_SUCCESS',
+      title: 'Mua tài nguyên thành công',
+      body: isFreeProduct
+        ? `Bạn đã nhận miễn phí tài nguyên "${product.title}".`
+        : `Đơn hàng ${orderDoc.code} đã hoàn tất: "${product.title}" (${pricePaid.toLocaleString('vi-VN')}₫).`,
+      link: `/orders/${orderDoc.id}`,
+      dedupeKey: `order:${orderDoc.code}`,
+    })
+
+    // "Seller sale" is about money moving to the seller, so a free community download — which
+    // pays the seller nothing — is not a sale and is not announced as one.
+    if (!isFreeProduct && pricePaid > 0 && sellerId !== undefined && sellerId !== null) {
+      await createNotification(payload, {
+        recipient: Number(sellerId),
+        type: 'SELLER_SALE',
+        title: 'Bạn có đơn hàng mới',
+        body: `Tài nguyên "${product.title}" vừa được bán (${pricePaid.toLocaleString('vi-VN')}₫). Đơn hàng ${orderDoc.code}.`,
+        link: '/seller',
+        dedupeKey: `order:${orderDoc.code}`,
+      })
     }
 
     return {
