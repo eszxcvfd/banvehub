@@ -84,6 +84,16 @@ Tradeoffs:
 
 ## Follow-Up
 
+- Concrete buyer-facing consequence, recorded so it cannot get lost:
+  `web/src/components/checkout/CheckoutPage.tsx` still renders a Stripe payment option
+  (`paymentMethod === 'stripe'` and its `initiatePayment('stripe', …)` call), and
+  `web/src/components/Cart/CartDrawer.tsx` links to `/checkout` — while this decision's migration removed
+  the only endpoints that option could have reached, so selecting it now dead-ends at a 404. Those files
+  belong to the storefront vertical, which was mid-rework on exactly them when this was written (they
+  were the newest files in the tree), so the removal is theirs: drop the Stripe option and
+  `stripeAdapterClient` from `web/src/providers/index.tsx` — **keeping `EcommerceProvider`**, which the
+  account area needs for `useAddresses` — then the `stripe`, `@stripe/react-stripe-js` and
+  `@stripe/stripe-js` dependencies, the `stripe-webhooks` script, and the `STRIPE_*` variables.
 - Client-side leftovers: `stripeAdapterClient` in `web/src/providers/index.tsx`, the `stripe`,
   `@stripe/react-stripe-js` and `@stripe/stripe-js` dependencies, the `stripe-webhooks` script, and
   the `STRIPE_*` variables. Removing the client adapter means replacing the `usePayments` consumers
