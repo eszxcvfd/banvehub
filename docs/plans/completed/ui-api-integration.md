@@ -1021,3 +1021,35 @@ Gates after the check (tree unchanged by `t15`): `tsc --noEmit` exit 0; `eslint 
 `tests/helpers/probe-ui-api-contracts.mts` exit 0 (87 probes reached their expected branch, 0 failed,
 7 documented not-found branches, A3/A4/A5 reported as follow-ups); `tests/e2e/probe-rendered-vs-db.mts`
 151 checks / 0 failing, exit 0.
+
+## Delivered — 2026-09-21, commit `7cd3397`
+
+The increment is committed and pushed, and the team reports **Delivery: ok** with all twenty tasks
+terminal. What the commit carries: the 78-row inventory and its repairs (A9's authorization hole, A1's
+wallet balance, B30's never-sending email, the two upload guards), the sessionStorage cart of decision
+0014, the checkout's real money paths, and the removal of the invented-data class — with an instrument
+that now fails on a substituted image and a negative control proving it can.
+
+Gates on the committed tree, taken in this cycle: `test:int` **42 files / 654 tests exit 0**,
+`test:challenger` **30 files / 463 tests exit 0**, `next build` **in place exit 0**, `tsc` 0 and
+`eslint .` 0 errors. The captain's first `test:int` run on the frozen tree failed one test
+(`login/page.tsx` inlining decision 0010's visibility literal); `t20` repaired it and both logs are kept.
+
+Independent verification and four review rounds closed it: `verifier-t3` (137-probe sweep),
+`verifier-t11` (t11 and the re-verification t14), and reviews t4 (`needs_revision`) → t16 (`pass`) →
+t17 (close-out conformance) → t19 (`ready-to-commit`), each re-deriving rather than trusting a green
+probe. Two rounds were missed by the same instrument defect — a probe that reported 144/144 while three
+findings were live — which is why the record now says plainly: **`MATCHES` certifies the contract, never
+the render.**
+
+Disclosures on the commit: 45 of its files are shared with the storefront vertical (23 it redesigned,
+22 it created) and no file-granular separation exists, so the message says the commit carries its work
+inside those files; three captain-authorised exceptions are named (the vertical's lint line, two cart
+mock targets, two lines in the verifier's probe); `.lit/evidence/**` is deliberately not committed.
+
+Still open, with the owner: the `VN` country option (a schema increment — `enum_addresses_country` has
+no Vietnam, so the address form defaults to a foreign country), the homepage's "80% chia sẻ doanh thu"
+against `commission_settings.default_rate = 0.30`, the loyalty-points promise with no storage, and
+whether the invented product attributes should become real seller-filled fields. The handoff section
+above carries the vertical's items, and the carried-unproven list in Validation is what this increment
+did **not** prove.
