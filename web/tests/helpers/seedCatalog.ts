@@ -170,6 +170,84 @@ async function findOrCreate(
   }
 }
 
+/**
+ * Resolves a relationship value (raw id, populated doc, null) to an id.
+ */
+const relationshipId = (value: unknown): string | number | null => {
+  if (value === null || value === undefined || value === '') return null
+  if (typeof value === 'object') {
+    const id = (value as { id?: unknown }).id
+    return id === null || id === undefined || id === '' ? null : (id as string | number)
+  }
+  return value as string | number
+}
+
+/**
+ * A fixture product MUST carry the fixture seller.
+ *
+ * `enforceModerationState` only auto-assigns `products.seller` when the write carries an
+ * authenticated user (`if (operation === 'create' && user?.id && !data.seller)`), and this seed runs
+ * through the Local API without one — so a fixture product created here is born with `seller = null`.
+ * That state is fatal downstream: `OrderItems.validateAntiSelfPurchase` refuses every order item for
+ * a product with no assigned seller ("Product X has no assigned seller"), which makes any spec that
+ * builds an order for a fixture product fail for a reason that has nothing to do with what it tests.
+ *
+ * `cleanupCatalogFixtures()` already deletes products before categories and users, so it does not
+ * leave residue behind; the seller-less state comes from the create path, not from a teardown. Both
+ * halves are therefore repaired here: new rows are created with the seller, and an adopted row whose
+ * seller is missing is updated instead of being used as-is. That is what makes a second run against
+ * a database that already contains seller-less fixture products behave like the first.
+ */
+async function ensureFixtureProductSeller(
+  payload: Payload,
+  doc: Record<string, unknown>,
+  sellerId: string | number,
+  draft: boolean,
+): Promise<Record<string, unknown>> {
+  // The decision has to be made on the MAIN row, not on the document this helper was handed: the
+  // caller adopts through `findOrCreate(..., { draft: true })`, so for a drafts-enabled collection the
+  // document can come from the version rows — which already carry the seller — while the main row is
+  // the one still missing it, and the repair was skipped on exactly that difference (finding T3-F2).
+  const mainRow = (
+    await payload.find({
+      collection: 'products',
+      where: { id: { equals: doc.id as string | number } },
+      draft: false,
+      limit: 1,
+      overrideAccess: true,
+    })
+  ).docs[0] as Record<string, unknown> | undefined
+
+  const currentSeller = relationshipId(mainRow?.seller)
+  if (currentSeller !== null && String(currentSeller) === String(sellerId)) return doc
+
+  // `draft: true` writes only the version rows and leaves the main row alone (finding T3-F2), so a
+  // repaired draft fixture kept `seller = null` on exactly the row `OrderItems.validateAntiSelfPurchase`
+  // reads. A `draft: false` update is not the answer either: it publishes the document, and this
+  // fixture exists to stay a draft so the storefront hides it. The main row is therefore written
+  // through the database adapter — the same layer the write path uses internally — which touches no
+  // version row and changes no status. Field hooks deliberately do not run for this write: the value
+  // is the fixture seller itself, and the whole point of the helper is to repair rows the normal write
+  // path left unusable.
+  await payload.db.updateOne({
+    collection: 'products',
+    id: doc.id as string | number,
+    data: { seller: sellerId } as never,
+  })
+
+  // Then bring the newest version in step with the main row, so a draft read (`draft: true`) sees the
+  // seller too and the two halves of the document do not disagree.
+  const repaired = (await payload.update({
+    collection: 'products',
+    id: doc.id as string | number,
+    data: { seller: sellerId } as never,
+    draft,
+    overrideAccess: true,
+  })) as unknown as Record<string, unknown>
+
+  return repaired
+}
+
 export async function seedCatalogData(): Promise<SeedCatalogResult> {
   const payload = await getTestPayload()
 
@@ -219,10 +297,21 @@ export async function seedCatalogData(): Promise<SeedCatalogResult> {
     Object.entries(categories).map(([slug, doc]) => [slug, doc.id as string | number]),
   )
 
+  // Every fixture product is owned by the fixture seller (see `ensureFixtureProductSeller`): a
+  // product without a seller cannot receive an order item at all, so an unusable fixture product is
+  // worse than no fixture product.
+  const fixtureSellerId = relationshipId(users.seller?.id)
+  if (fixtureSellerId === null) {
+    throw new Error(
+      'The fixture seller account is missing, so fixture products cannot be given an owner.',
+    )
+  }
+
   const products: Record<string, Record<string, unknown>> = {}
   for (const prod of FIXTURE_PRODUCT_DEFS) {
     try {
       const categoryId = prod.categorySlug ? categoryIds.get(prod.categorySlug) : undefined
+      const isDraftProduct = prod._status === 'draft'
       const { doc } = await findOrCreate(
         payload,
         'products',
@@ -230,7 +319,7 @@ export async function seedCatalogData(): Promise<SeedCatalogResult> {
         async () =>
           (await payload.create({
             collection: 'products',
-            draft: prod._status === 'draft',
+            draft: isDraftProduct,
             data: {
               title: prod.title,
               slug: prod.slug,
@@ -238,10 +327,11 @@ export async function seedCatalogData(): Promise<SeedCatalogResult> {
               isFree: prod.isFree,
               price: prod.price,
               productCode: prod.productCode,
+              seller: fixtureSellerId,
               _status: prod._status,
               // The draft product is created as a draft document (Payload keeps `draft` on the
               // data it was handed); published products must not carry it.
-              ...(prod._status === 'draft' ? { draft: true } : {}),
+              ...(isDraftProduct ? { draft: true } : {}),
               categories: categoryId ? [categoryId] : [],
             } as never,
             overrideAccess: true,
@@ -249,7 +339,12 @@ export async function seedCatalogData(): Promise<SeedCatalogResult> {
         { draft: true },
       )
 
-      products[prod.slug] = doc
+      products[prod.slug] = await ensureFixtureProductSeller(
+        payload,
+        doc,
+        fixtureSellerId,
+        isDraftProduct,
+      )
     } catch (err) {
       console.warn(`Could not seed product ${prod.slug}:`, err)
     }

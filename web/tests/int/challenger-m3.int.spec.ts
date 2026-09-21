@@ -982,15 +982,24 @@ describe('Challenger M3 Empirical Verification Suite', () => {
       expect(json).toContain(prodFreeAutoCADArch.slug)
     })
 
-    it('6.5 renders storefront with sort=-price', async () => {
+    it('6.5 renders storefront with sort=-price scoped to this spec own category', async () => {
+      // Page 1 of a global `-price` sort is "the most expensive products in the database", so a
+      // populated database pushes this spec's fixtures off it and the assertion below failed for a
+      // reason that has nothing to do with the storefront (measured by review round 1: it passed on a
+      // fresh database and failed on a populated one). The ordering semantics belong to 1.7/1.8,
+      // which assert them through the query API; what this test owns is that ShopPage renders the
+      // sorted path and keeps the fixture, so the query is scoped to the structure category this
+      // spec created. The absence assertion keeps it from passing vacuously.
       const result = await ShopPage({
         searchParams: Promise.resolve({
+          category: catStruct.slug,
           sort: '-price',
         }),
       })
       expect(result).toBeDefined()
       const json = JSON.stringify(result)
       expect(json).toContain(prodPaidRevitStruct.slug)
+      expect(json).not.toContain(prodFreeAutoCADArch.slug)
     })
   })
 })
