@@ -187,6 +187,23 @@ found in this increment, each only when a member hit it:
 
 ## Progress
 
+- **t27 completed (integrator): the increment landed as `359e515` (36 files, +6979/−539).** All six
+  gates ran green on the frozen revision `7f42759` and only that revision — migrate exit 0,
+  `test:int` exit 0 with **43 files / 658 tests** and the guard
+  `web/tests/int/address-countries-single-source.int.spec.ts (4 tests)` executing, `test:challenger`
+  exit 0 with **31 files / 469 tests**, `lint` exit 0 (**0 errors**, 1480 pre-existing warnings),
+  `tsc --noEmit` exit 0, in-place `build` exit 0 (`Compiled successfully in 10.1s`, 49/49 static
+  pages) — and the shared dev server then answered **200** on `/`, `/admin/login` and `/shop`. Neither
+  intermittent signature appeared. The staging is the 36 declared paths and nothing else: the
+  forbidden set (`package.json`, `pnpm-lock.yaml`, `next.config.ts`, `vitest.challenger.config.mts`,
+  `web/scripts/**`, the generated import map, `.lit/**`, `.agents/**`, `.agent-teams/**`) is verified
+  unstaged, and `web/src/payload-types.ts` was committed with **only** its country hunk (`git diff
+  --cached` shows the union and nothing else) while the refund increment's `Refund.outOfWindow`
+  comment hunk stays in the working tree for its owner. The one thing this task proves that no other
+  could: the artefact the owner will run is green **on the exact revision that was committed**, not on
+  a tree that drifted while it was being reviewed. Evidence:
+  `.lit/evidence/integration-t27/` (freeze, staging verification, the seven gate logs).
+
 - t45 completed (reviewer, verdict **pass**) — the last gate before integration. Round 1's two findings
   are closed and the reviewer proved the coverage guard **with its own control** rather than by reading:
   a scratch product with `.obj` (id 1667, slug `reviewer-t45-scratch-domain`) made the probe exit 1 with
@@ -663,4 +680,79 @@ found in this increment, each only when a member hit it:
 
 ## Validation
 
-_(evidence from this cycle only; filled at integration)_
+_(evidence from this cycle only)_
+
+Frozen revision of record: **`7f42759`** (`7f427596b55400b866bdf60e7c2f377717c79371`), branch `main`,
+frozen 2026-09-21 22:32 +07 after t45 passed. Same tree for every gate below; entry count at freeze
+156 (83 modified + 73 untracked), nothing staged. The observation is
+`.lit/evidence/integration-t27/frozen-revision-post-t45.txt`, which carries the per-path mtimes and the
+four order files' sha1s. Every gate was run by the integrator on that revision; a gate not run is not
+listed.
+
+| # | gate | command | exit | its own summary line | log |
+|---|---|---|---|---|---|
+| 1 | migrations | `pnpm --prefix web payload migrate` | 0 | `Reading migration files from …/web/src/migrations` → `Done.` | `.lit/evidence/integration-t27/gates/migrate.log` |
+| 2 | integration tests | `pnpm --prefix web test:int` | 0 | `Test Files 43 passed (43)` · `Tests 658 passed (658)` · 138.22s | `.lit/evidence/integration-t27/gates/test-int.log` |
+| 3 | challenger tests | `pnpm --prefix web test:challenger` | 0 | `Test Files 31 passed (31)` · `Tests 469 passed (469)` · 109.94s | `.lit/evidence/integration-t27/gates/test-challenger.log` |
+| 4 | lint | `pnpm --prefix web lint` | 0 | `✖ 1480 problems (0 errors, 1480 warnings)` | `.lit/evidence/integration-t27/gates/lint.log` |
+| 5 | types | `cd web && NODE_OPTIONS=--no-deprecation node_modules/.bin/tsc --noEmit` | 0 | no output | `.lit/evidence/integration-t27/gates/tsc.log` |
+| 6 | build (in place) | `pnpm --prefix web build` | 0 | `✓ Compiled successfully in 10.1s` · `Finished TypeScript in 10.2s` · `✓ Generating static pages (49/49)` | `.lit/evidence/integration-t27/gates/build.log` |
+| 7 | dev server after the build | `curl -o /dev/null -w '%{http_code}' localhost:3000/` and `/admin/login` and `/shop` | — | `200` · `200` · `200` | `.lit/evidence/integration-t27/gates/dev-server-after-build.txt` |
+
+**The guard this cycle added ran, and did not skip.** Gate 2's log carries
+`✓ tests/int/address-countries-single-source.int.spec.ts (4 tests) 88ms` inside the 43 files / 658
+tests, so the enum↔list pin executed on the frozen revision rather than being collected and skipped.
+
+**The frozen files did not move.** The four order files passed review at t45 and were touched by no
+gate: `OrderDetailClient.tsx` sha1 `450171133ff2`, `orders/[id]/page.tsx` sha1 `dae261812431`,
+`order-detail-version.spec.tsx` sha1 `a444e1509840`, `probe-version-claims.mts` sha1 `0e040e5d2d6e`.
+
+**Intermittent signatures, reported rather than smoothed over.** Neither appeared in this cycle's
+runs: gate 3's log contains no `window is not defined` and no `Errors 1 error` line. The two signatures
+earlier cycles saw (`login.spec.tsx`'s rc-component timer, and
+`checkout-payment-branches.spec.tsx` with all tests passing) are recorded here as absent on this
+revision — not as fixed by it.
+
+**What was NOT run, and why.** `test:e2e` (Playwright) is not part of this increment's gate set. The
+browser-facing claims in this plan were measured by the author, verifier and reviewer instruments
+recorded under `.lit/evidence/{auditor-t23,verifier-t24,verifier-t29,verifier-t34,reviewer-*}`; those
+directories are deliberately not committed, so the claims they support are cited by path and row, not
+by a gate in this table.
+
+**Commit of record.** Everything above was taken before the commit and on its parent revision; the
+increment landed as `359e515` (`359e51500ecc4776e2b3e1bb5e88aba38b3ef038`), 36 files,
++6979/−539, with `web/src/payload-types.ts` carrying only the generated country union (8 lines) and
+the refund increment's `Refund.outOfWindow` comment hunk left unstaged in the working tree.
+
+
+## Delivered
+
+The increment landed as commit **`359e515`** (`359e51500ecc4776e2b3e1bb5e88aba38b3ef038`) on
+2026-09-21, 36 files, +6979/−539, on the frozen revision `7f42759`. It implements decisions
+**0015** (Vietnam is a first-class address country, one shared list, enum changed only by a
+transactional migration), **0016** (the revenue-share figure is read from
+`commission_settings.default_rate` at render time — measured 70% at 0.30, 75% at 0.25, back to 70% on
+restore), **0017** (no loyalty-points promise without a ledger — the `/wallet` points card and the
+`/login` "Tích xu thưởng" block are gone, and the search finds no loyalty storage anywhere) and
+**0018** (a product attribute comes from the record or is not shown — the seller forms write only what
+was supplied or measured, the display tables carry no literal fallback, and the fabricated package
+checklist is deleted).
+
+Gates on that revision, all green and all run by the integrator: `payload migrate` 0 · `test:int` 0
+(43 files / 658 tests, guard test executing) · `test:challenger` 0 (31 files / 469 tests) · `lint` 0
+(0 errors) · `tsc --noEmit` 0 · in-place `build` 0 · dev server 200/200/200 afterwards. The full table
+is `## Validation` above; the logs are `.lit/evidence/integration-t27/gates/`.
+
+Disclosures carried by the commit message: 22 of the 36 files are new and land whole, including the
+storefront vertical's markup inside them, and two of the 14 tracked files (`TechnicalSpecsTable.tsx`,
+`orders/[id]/page.tsx`) are the vertical's own Ant Design rewrites that this increment also had to
+change; `web/src/payload-types.ts` is shared and only its country hunk was staged, leaving the refund
+increment's comment hunk untouched in the working tree; `web/tests/challenger/m3-challenger2-empirical.spec.tsx`
+is changed by this increment while its task t22 reads `failed` on a captain contract defect, with the
+content reviewed **pass** at t26.
+
+Still with the owner, and unchanged by this commit: the share figure is rendered only inside an
+`sr-only` compatibility block, so a sighted visitor sees no percentage (decision 0016's Follow-Up — a
+design-layer question, not a data one); a real voucher programme would need a table, a redemption rule
+and a money-path change under decision 0002; and 161 stored `'% 2022+'` product-version rows are
+reported rather than purged (decision 0018).
