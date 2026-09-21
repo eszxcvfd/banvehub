@@ -13,6 +13,7 @@ import * as migration_20260918_000000_phase10_moderation_cases from './20260918_
 import * as migration_20260919_000000_phase11_notifications from './20260919_000000_phase11_notifications';
 import * as migration_20260919_120000_phase12_refund_policy from './20260919_120000_phase12_refund_policy';
 import * as migration_20260920_160000_phase13_drop_unused_ecommerce_transactions from './20260920_160000_phase13_drop_unused_ecommerce_transactions';
+import * as migration_20260921_000000_phase14_address_countries from './20260921_000000_phase14_address_countries';
 
 export const migrations = [
   {
@@ -89,5 +90,10 @@ export const migrations = [
     up: migration_20260920_160000_phase13_drop_unused_ecommerce_transactions.up,
     down: migration_20260920_160000_phase13_drop_unused_ecommerce_transactions.down,
     name: '20260920_160000_phase13_drop_unused_ecommerce_transactions',
+  },
+  {
+    up: migration_20260921_000000_phase14_address_countries.up,
+    down: migration_20260921_000000_phase14_address_countries.down,
+    name: '20260921_000000_phase14_address_countries',
   },
 ];

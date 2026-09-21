@@ -173,7 +173,7 @@ describe('Challenger M3: Product Detail Data Rendering & Integrity', () => {
       expect(screen.getByText('#Biệt Thự')).toBeDefined()
     })
 
-    it('provides fallbacks for empty or missing technical specifications', () => {
+    it('omits every spec row when the record carries no specification', () => {
       const emptyProduct: Product = {
         id: 2,
         title: 'Tài nguyên chưa có specs',
@@ -187,12 +187,45 @@ describe('Challenger M3: Product Detail Data Rendering & Integrity', () => {
 
       render(<TechnicalSpecsTable product={emptyProduct} />)
 
-      expect(screen.getByText('Tệp kỹ thuật chuẩn')).toBeDefined()
-      expect(screen.getByText('Tương thích mọi phiên bản')).toBeDefined()
-      expect(screen.getByText('Đang cập nhật')).toBeDefined()
-      expect(screen.getByText('Hệ Mét (mm / m)')).toBeDefined()
-      expect(screen.getByText('Đa nền tảng CAD/BIM')).toBeDefined()
-      expect(screen.getByText('Hồ sơ kỹ thuật tổng hợp')).toBeDefined()
+      // No row stands in for a value the record does not carry — no format, version, size, unit,
+      // software-type or category row, and none of the invented fallbacks this component used to print.
+      for (const invented of [
+        'Tệp kỹ thuật chuẩn',
+        'Tương thích mọi phiên bản',
+        'Đang cập nhật',
+        'Hệ Mét (mm / m)',
+        'Đa nền tảng CAD/BIM',
+        'Hồ sơ kỹ thuật tổng hợp',
+        'Đã kiểm duyệt cấu trúc layer, xref và kích thước chuẩn',
+      ]) {
+        expect(screen.queryByText(invented)).toBeNull()
+      }
+      // The only row left is the one the record really carries (its update date)
+      expect(screen.getByText('Ngày cập nhật hồ sơ (Last Updated)')).toBeDefined()
+      for (const label of [
+        'Định dạng tệp tin (Format)',
+        'Phiên bản phần mềm (Software Version)',
+        'Dung lượng tệp (File Size)',
+        'Hệ đơn vị thiết kế (Unit)',
+      ]) {
+        expect(screen.queryByText(label)).toBeNull()
+      }
+    })
+
+    it('renders the honest empty state when the record carries nothing at all', () => {
+      const bareProduct = {
+        id: 4,
+        title: 'Bản ghi trống hoàn toàn',
+        slug: 'bare',
+        price: 0,
+        isFree: true,
+        _status: 'published',
+      } as unknown as Product
+
+      render(<TechnicalSpecsTable product={bareProduct} />)
+      expect(
+        screen.getByText('Người bán chưa khai báo thông số kỹ thuật cho tài nguyên này.'),
+      ).toBeDefined()
     })
 
     it('gracefully handles unpopulated relation IDs (raw numbers/strings) and null elements without crashing', () => {
@@ -211,15 +244,21 @@ describe('Challenger M3: Product Detail Data Rendering & Integrity', () => {
 
       const { container } = render(<TechnicalSpecsTable product={rawRelProduct} />)
       expect(container).toBeDefined()
-      expect(screen.getByText('Đa nền tảng CAD/BIM')).toBeDefined()
-      expect(screen.getByText('Hồ sơ kỹ thuật tổng hợp')).toBeDefined()
+      // Unpopulated relations are not software types or categories, so those rows are omitted too
+      expect(screen.queryByText('Đa nền tảng CAD/BIM')).toBeNull()
+      expect(screen.queryByText('Hồ sơ kỹ thuật tổng hợp')).toBeNull()
     })
 
-    it('renders technical audit standards badge', () => {
+    it('renders the record own spec values and no invented audit badge', () => {
       render(<TechnicalSpecsTable product={fullProduct} />)
+      // The values come from the product's own technicalSpecs (fullProduct: .dwg / AutoCAD 2024 / 48.2 MB)
+      expect(screen.getByText('.dwg')).toBeDefined()
+      expect(screen.getByText('AutoCAD 2024')).toBeDefined()
+      expect(screen.getByText('48.2 MB')).toBeDefined()
+      // …and nothing asserts a technical review no record carries
       expect(
-        screen.getByText('Đã kiểm duyệt cấu trúc layer, xref và kích thước chuẩn'),
-      ).toBeDefined()
+        screen.queryByText('Đã kiểm duyệt cấu trúc layer, xref và kích thước chuẩn'),
+      ).toBeNull()
     })
   })
 

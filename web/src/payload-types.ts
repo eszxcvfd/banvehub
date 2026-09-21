@@ -1119,6 +1119,14 @@ export interface Address {
   state?: string | null;
   postalCode?: string | null;
   country:
+    | 'VN'
+    | 'TH'
+    | 'LA'
+    | 'KH'
+    | 'MM'
+    | 'PH'
+    | 'ID'
+    | 'CN'
     | 'US'
     | 'GB'
     | 'CA'

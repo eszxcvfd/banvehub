@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React from 'react'
 import Link from 'next/link'
 import {
   Row,
@@ -13,10 +13,7 @@ import {
   Typography,
   Breadcrumb,
   Tag,
-  Space,
-  Input,
   Statistic,
-  message,
 } from 'antd'
 import {
   ShoppingCartOutlined,
@@ -26,7 +23,6 @@ import {
   ArrowRightOutlined,
   SafetyCertificateFilled,
   ThunderboltFilled,
-  TagOutlined,
 } from '@ant-design/icons'
 import { useCart } from '@/providers/Cart'
 import { Media } from '@/components/Media'
@@ -36,8 +32,6 @@ const { Title, Text } = Typography
 
 export function CartPageClient() {
   const { cart, isLoading, removeItem, incrementItem, decrementItem, clearCart } = useCart()
-  const [voucherCode, setVoucherCode] = useState('')
-  const [discountPercent, setDiscountPercent] = useState(0)
 
   const items = cart?.items || []
   const totalItems = items.reduce(
@@ -52,21 +46,9 @@ export function CartPageClient() {
       return acc + price * (item.quantity || 1)
     }, 0)
 
-  const discountAmount = Math.round((subtotal * discountPercent) / 100)
-  const finalTotal = Math.max(0, subtotal - discountAmount)
-
-  const handleApplyVoucher = () => {
-    if (!voucherCode.trim()) {
-      message.warning('Vui lòng nhập mã ưu đãi')
-      return
-    }
-    if (voucherCode.trim().toUpperCase() === 'KIENTAO10') {
-      setDiscountPercent(10)
-      message.success('Áp dụng mã KIENTAO10 thành công: Giảm 10%!')
-    } else {
-      message.error('Mã giảm giá không hợp lệ hoặc đã hết hạn')
-    }
-  }
+  // No voucher: no coupon/voucher/discount/promo table exists, and `POST /api/v1/orders/purchase`
+  // charges each item's own price (decision 0002), so the cart may only show that same sum.
+  const finalTotal = subtotal
 
   const columns = [
     {
@@ -271,29 +253,6 @@ export function CartPageClient() {
                 </Tag>
               </div>
 
-              {discountAmount > 0 && (
-                <div className="flex justify-between text-sm text-emerald-600">
-                  <span>Ưu đãi (KIENTAO10 -10%):</span>
-                  <span className="font-mono font-semibold">
-                    -{discountAmount.toLocaleString('vi-VN')} ₫
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Voucher input */}
-            <div className="mb-4">
-              <Space.Compact className="w-full">
-                <Input
-                  placeholder="Mã ưu đãi (vd: KIENTAO10)"
-                  prefix={<TagOutlined className="text-neutral-400" />}
-                  value={voucherCode}
-                  onChange={(e) => setVoucherCode(e.target.value)}
-                />
-                <Button type="primary" onClick={handleApplyVoucher}>
-                  Áp dụng
-                </Button>
-              </Space.Compact>
             </div>
 
             <div className="pt-4 border-t border-neutral-200 dark:border-neutral-800 mb-6">

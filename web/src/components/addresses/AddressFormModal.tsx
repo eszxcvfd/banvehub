@@ -17,10 +17,8 @@ import {
   HomeOutlined,
   BankOutlined,
 } from '@ant-design/icons'
-import {
-  useAddresses,
-  defaultCountries as supportedCountries,
-} from '@payloadcms/plugin-ecommerce/client/react'
+import { useAddresses } from '@payloadcms/plugin-ecommerce/client/react'
+import { SUPPORTED_COUNTRIES } from '@/constants/countries'
 import type { Address } from '@/payload-types'
 
 export type AddressFormModalProps = {
@@ -61,15 +59,12 @@ export function AddressFormModal({
   const [submitting, setSubmitting] = useState(false)
   const { createAddress, updateAddress } = useAddresses()
 
-  // The addresses collection validates `country` against this same plugin list; a value outside it can
-  // never be saved, so the form offers the list and defaults to its first value ('VN' used to be the
-  // default and every submit answered 400 invalid selection).
-  const countryOptions = supportedCountries.map((c: any) => {
-    const val = typeof c === 'string' ? c : c.value
-    const lbl = typeof c === 'string' ? c : typeof c.label === 'string' ? c.label : val
-    return { label: lbl, value: val }
-  })
-  const defaultCountry = String(countryOptions[0]?.value ?? '')
+  // One list, one owner: the same `SUPPORTED_COUNTRIES` the plugin config hands to the addresses
+  // collection (decision 0015), so every option this form offers is a value the API accepts.
+  const countryOptions = SUPPORTED_COUNTRIES.map(({ label, value }) => ({ label, value }))
+  // `VN` leads the shared list, so a new address starts on Vietnam instead of the United States —
+  // the default that used to exist here was `US` only because the collection rejected `VN`.
+  const defaultCountry = SUPPORTED_COUNTRIES[0].value
 
   const handleFinish = async (values: any) => {
     setSubmitting(true)

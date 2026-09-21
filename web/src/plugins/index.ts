@@ -6,6 +6,7 @@ import { FixedToolbarFeature, HeadingFeature, lexicalEditor } from '@payloadcms/
 import { ecommercePlugin } from '@payloadcms/plugin-ecommerce'
 
 import { Page, Product } from '@/payload-types'
+import { SUPPORTED_COUNTRIES } from '@/constants/countries'
 import { getServerSideURL } from '@/utilities/getURL'
 import { adminOrPublishedStatus } from '@/access/adminOrPublishedStatus'
 import { adminOnlyFieldAccess } from '@/access/adminOnlyFieldAccess'
@@ -91,6 +92,13 @@ export const plugins: Plugin[] = [
     },
     customers: {
       slug: 'users',
+    },
+    // The address country list has one owner: `web/src/constants/countries.ts` (decision 0015). The
+    // plugin replaces any `country` field config with a `select` over this list, so passing it here
+    // is what makes the collection's validation, the admin select and the REST API accept `VN` —
+    // and it is what the phase-14 migration's enum must stay equal to.
+    addresses: {
+      supportedCountries: SUPPORTED_COUNTRIES,
     },
     carts: false,
     products: false,

@@ -140,10 +140,10 @@ export function ProductDescription({
           </>
         )}
 
-        {(product.technicalSpecs?.softwareVersion || primarySoftware?.title) && (
+        {product.technicalSpecs?.softwareVersion && (
           <div className="inline-flex items-center gap-1">
             <FileTextOutlined className="text-slate-400 text-xs" />
-            <span>{product.technicalSpecs?.softwareVersion || primarySoftware?.title}</span>
+            <span>{product.technicalSpecs.softwareVersion}</span>
           </div>
         )}
 

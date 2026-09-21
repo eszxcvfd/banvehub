@@ -1,18 +1,13 @@
 import type { Metadata } from 'next'
-import { Price } from '@/components/Price'
-import { Button } from '@/components/ui/button'
-import { formatDateTime } from '@/utilities/formatDateTime'
 import { mergeOpenGraph } from '@/utilities/mergeOpenGraph'
-import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
-import { ChevronLeftIcon, FileCode, CheckCircle2 } from 'lucide-react'
 import { headers as getHeaders } from 'next/headers'
 import configPromise from '@payload-config'
 import { getPayload } from 'payload'
-import { OrderStatus } from '@/components/OrderStatus'
-import { DownloadButton } from '@/components/download/DownloadButton'
-import { OrderDisputeModal } from '@/components/dispute/OrderDisputeModal'
-import { OrderTicketsSection } from '@/components/dispute/OrderTicketsSection'
+import {
+  OrderDetailClient,
+  type OrderDetailItem,
+} from '@/components/orders/OrderDetailClient'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,7 +21,9 @@ export default async function OrderPage({ params }: PageProps) {
   const { user } = await payload.auth({ headers })
 
   if (!user) {
-    redirect(`/login?warning=${encodeURIComponent('Vui lòng đăng nhập để xem đơn hàng.')}`)
+    redirect(
+      `/login?warning=${encodeURIComponent('Vui lòng đăng nhập để xem đơn hàng.')}`,
+    )
   }
 
   const { id } = await params
@@ -92,126 +89,54 @@ export default async function OrderPage({ params }: PageProps) {
     }
   })
 
-    const orderIdentifier = order.code || `#${order.id}`
+  const clientOrderItems: OrderDetailItem[] = orderItems.map((item) => {
+    const product = typeof item.product === 'object' ? item.product : null
+    const productId = product ? product.id : item.product
+    const productTitle = product?.title || `Sản phẩm #${productId}`
+    const productSlug = product?.slug || productId
+    const technicalSpecs = product?.technicalSpecs || {}
+    // Only `technicalSpecs.softwareVersion` exists on the Products schema (the sibling
+    // `technicalSpecs.version` and `product.softwareSupport` this chain used to read are not fields at
+    // all), and when the record has no version the order passes nothing rather than a claim
+    // (decision 0018 clause 2).
+    const softwareVersion = technicalSpecs.softwareVersion || undefined
 
-    return (
-      <div className="space-y-6">
-        <div className="flex gap-4 justify-between items-center">
-          <Button asChild variant="ghost" size="sm">
-            <Link href="/orders" className="flex items-center gap-1">
-              <ChevronLeftIcon className="w-4 h-4" />
-              Tất cả đơn hàng
-            </Link>
-          </Button>
+    return {
+      key: item.id,
+      id: item.id,
+      productId,
+      productTitle,
+      productSlug,
+      // `product.format` does not exist on the Products schema (the value lives in
+      // `technicalSpecs.fileFormat`), so every order used to print the literal 'CAD'. The record's own
+      // format is passed through and the cell's matcher keys it on the stored extensions (.dwg, .rvt,
+      // .skp, .max, .pdf, .ls) with an honest absence for an empty record (decision 0018 clause 2).
+      format: product?.technicalSpecs?.fileFormat || undefined,
+      softwareVersion,
+      salePrice: item.salePrice || 0,
+    }
+  })
 
-          <div className="flex items-center gap-3">
-            <OrderDisputeModal
-              orderId={orderId}
-              orderCode={order.code || undefined}
-              products={productsList}
-              buttonVariant="outline"
-              buttonSize="sm"
-            />
-            <h1 className="text-sm font-mono px-3 py-1 bg-primary/10 rounded-full tracking-wider font-semibold">
-              {orderIdentifier}
-            </h1>
-          </div>
-        </div>
-
-        <div className="bg-card border rounded-xl p-6 md:p-8 flex flex-col gap-8 shadow-sm">
-          {/* Order Header Summary */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 pb-6 border-b">
-            <div>
-              <p className="font-mono uppercase text-muted-foreground text-xs font-semibold">Ngày đặt</p>
-              <p className="text-base font-medium mt-1">
-                <time dateTime={order.createdAt}>
-                  {formatDateTime({ date: order.createdAt, format: 'dd/MM/yyyy HH:mm' })}
-                </time>
-              </p>
-            </div>
-
-            <div>
-              <p className="font-mono uppercase text-muted-foreground text-xs font-semibold">Tổng thanh toán</p>
-              <p className="text-xl font-bold font-mono text-primary mt-1">
-                {order.totalAmount !== undefined && (
-                  <Price as="span" amount={order.totalAmount} currencyCode={order.currency ?? 'VND'} />
-                )}
-              </p>
-            </div>
-
-            <div>
-              <p className="font-mono uppercase text-muted-foreground text-xs font-semibold mb-1">Trạng thái</p>
-              <OrderStatus status={order.status} />
-            </div>
-          </div>
-
-          {/* Digital Items List */}
-          <div>
-            <h2 className="text-base font-semibold mb-4 flex items-center gap-2">
-              <FileCode className="w-5 h-5 text-primary" />
-              Tài nguyên kỹ thuật số ({orderItems.length})
-            </h2>
-
-            {orderItems.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Không có mục chi tiết đơn hàng.</p>
-            ) : (
-              <ul className="flex flex-col divide-y border rounded-lg overflow-hidden bg-background">
-                {orderItems.map((item) => {
-                  const product = typeof item.product === 'object' ? item.product : null
-                  const productId = product ? product.id : item.product
-                  const productTitle = product?.title || `Sản phẩm #${productId}`
-
-                  return (
-                    <li
-                      key={item.id}
-                      className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                    >
-                      <div className="space-y-1">
-                        <Link
-                          href={`/products/${product?.slug || productId}`}
-                          className="font-semibold hover:text-primary transition-colors line-clamp-1"
-                        >
-                          {productTitle}
-                        </Link>
-                        <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                          <span>Đơn giá: {item.salePrice?.toLocaleString('vi-VN')} ₫</span>
-                          <span>•</span>
-                          <span className="flex items-center gap-1 text-emerald-600 font-medium">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            Đã cấp quyền tải vĩnh viễn
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="shrink-0 flex items-center gap-2">
-                        <OrderDisputeModal
-                          orderId={orderId}
-                          orderCode={order.code || undefined}
-                          products={productsList}
-                          preselectedProductId={productId}
-                          buttonVariant="ghost"
-                          buttonSize="sm"
-                          buttonText="Báo lỗi"
-                        />
-                        <DownloadButton
-                          productId={productId}
-                          productTitle={productTitle}
-                          buttonText="Tải tệp ngay"
-                          size="sm"
-                        />
-                      </div>
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-          </div>
-        </div>
-
-        {/* Existing dispute tickets & message thread */}
-        <OrderTicketsSection orderId={orderId} initialTickets={tickets as any} />
-      </div>
-    )
+  return (
+    <OrderDetailClient
+      order={{
+        id: order.id,
+        code: order.code,
+        createdAt: order.createdAt,
+        status: order.status,
+        totalAmount: order.totalAmount,
+        currency: order.currency,
+      }}
+      user={{
+        id: user.id,
+        email: user.email,
+        name: user.name,
+      }}
+      orderItems={clientOrderItems}
+      productsList={productsList}
+      tickets={tickets}
+    />
+  )
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {

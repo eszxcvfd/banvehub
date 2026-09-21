@@ -25,10 +25,12 @@ export function ProductEditorForm({ categories, softwareTypes, tags }: Props) {
   const [title, setTitle] = useState('')
   const [price, setPrice] = useState('200000')
   const [isFree, setIsFree] = useState(false)
-  const [fileFormat, setFileFormat] = useState('.dwg')
-  const [softwareVersion, setSoftwareVersion] = useState('AutoCAD 2022+')
-  const [fileSize, setFileSize] = useState('25 MB')
-  const [unit, setUnit] = useState('metric')
+  // Empty until the seller types a value or the upload measures one: a form default becomes catalog
+  // data, so the examples live in the inputs' placeholders (decision 0018 clause 1).
+  const [fileFormat, setFileFormat] = useState('')
+  const [softwareVersion, setSoftwareVersion] = useState('')
+  const [fileSize, setFileSize] = useState('')
+  const [unit, setUnit] = useState('metric') // the schema's own default
   const [selectedCategory, setSelectedCategory] = useState<string>(categories[0]?.id ? String(categories[0].id) : '')
   const [selectedSoftware, setSelectedSoftware] = useState<string>(softwareTypes[0]?.id ? String(softwareTypes[0].id) : '')
   const [copyrightDeclared, setCopyrightDeclared] = useState(false)

@@ -2,7 +2,8 @@
 
 import React, { useState, useCallback } from 'react'
 import { Form, Input, Select, Button, Row, Col, Divider, message } from 'antd'
-import { useAddresses, defaultCountries as supportedCountries } from '@payloadcms/plugin-ecommerce/client/react'
+import { useAddresses } from '@payloadcms/plugin-ecommerce/client/react'
+import { SUPPORTED_COUNTRIES } from '@/constants/countries'
 import { Address, Config } from '@/payload-types'
 import { titles } from './constants'
 import { deepMergeSimple } from 'payload/shared'
@@ -54,14 +55,12 @@ export const AddressForm: React.FC<Props> = ({
     [initialData, skipSubmission, addressID, updateAddress, createAddress, callback],
   )
 
-  const countryOptions = supportedCountries.map((c: any) => {
-    const val = typeof c === 'string' ? c : c.value
-    const lbl = typeof c === 'string' ? c : typeof c.label === 'string' ? c.label : val
-    return { label: lbl, value: val }
-  })
-  // The addresses collection validates `country` against this same list, so a value outside it can
-  // never be saved ('VN' used to be the default and every submit answered 400 invalid selection).
-  const defaultCountry = String(countryOptions[0]?.value ?? '')
+  // One list, one owner: the same `SUPPORTED_COUNTRIES` the plugin config hands to the addresses
+  // collection (decision 0015), so every option this form offers is a value the API accepts.
+  const countryOptions = SUPPORTED_COUNTRIES.map(({ label, value }) => ({ label, value }))
+  // `VN` leads the shared list, so a new address starts on Vietnam instead of the United States —
+  // the default that used to exist here was `US` only because the collection rejected `VN`.
+  const defaultCountry = SUPPORTED_COUNTRIES[0].value
 
   return (
     <Form

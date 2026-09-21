@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react'
 import type { Category, Product, SoftwareType } from '@/payload-types'
-import { Tabs, Button, Typography, Modal } from 'antd'
+import { Tabs, Button, Typography } from 'antd'
 import type { TabsProps } from 'antd'
 import {
   FileTextOutlined,
@@ -11,9 +11,7 @@ import {
   HddOutlined,
   SettingOutlined,
   CalendarOutlined,
-  WindowsOutlined,
   CheckOutlined,
-  UnorderedListOutlined,
   StarFilled,
   MessageOutlined,
   ProfileOutlined,
@@ -39,7 +37,6 @@ export function ProductDetailTabs({
   commentCount = 0,
 }: ProductDetailTabsProps) {
   const [activeTab, setActiveTab] = useState<string>('specs')
-  const [isFileListModalOpen, setIsFileListModalOpen] = useState(false)
 
   const specs = product.technicalSpecs || {}
   const primaryCategory = (product.categories || []).find(
@@ -180,55 +177,6 @@ export function ProductDetailTabs({
         className="product-detail-tabs"
       />
 
-      {/* Modal: Danh sách chi tiết tệp tin */}
-      <Modal
-        title={
-          <div className="flex items-center gap-2 text-base font-bold">
-            <UnorderedListOutlined className="text-[#1677ff]" />
-            <span>Danh mục bản vẽ & Tệp đính kèm</span>
-          </div>
-        }
-        open={isFileListModalOpen}
-        onCancel={() => setIsFileListModalOpen(false)}
-        footer={[
-          <Button key="close" type="primary" onClick={() => setIsFileListModalOpen(false)}>
-            Đóng
-          </Button>,
-        ]}
-        width={680}
-      >
-        <div className="space-y-4 py-3 text-sm">
-          <p className="text-slate-600 dark:text-slate-400">
-            Gói tài nguyên <strong className="text-slate-900 dark:text-white">{product.title}</strong> bao gồm đầy đủ các hạng mục:
-          </p>
-          <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden divide-y divide-slate-100 dark:divide-slate-800">
-            <div className="p-3 bg-slate-50 dark:bg-slate-800/50 font-semibold text-xs text-slate-500 uppercase tracking-wider flex justify-between">
-              <span>Hạng mục bản vẽ / Tệp tin</span>
-              <span>Định dạng</span>
-            </div>
-            <div className="p-3 flex justify-between items-center text-xs sm:text-sm">
-              <span>01. Bản vẽ mặt bằng tổng thể & bố trí công năng</span>
-              <span className="font-mono text-xs px-2 py-0.5 rounded bg-blue-50 text-[#1677ff]">.rvt / .dwg</span>
-            </div>
-            <div className="p-3 flex justify-between items-center text-xs sm:text-sm">
-              <span>02. Bản vẽ mặt đứng công trình & mặt cắt kỹ thuật</span>
-              <span className="font-mono text-xs px-2 py-0.5 rounded bg-blue-50 text-[#1677ff]">.rvt / .pdf</span>
-            </div>
-            <div className="p-3 flex justify-between items-center text-xs sm:text-sm">
-              <span>03. Thuyết minh thiết kế & tiêu chuẩn áp dụng</span>
-              <span className="font-mono text-xs px-2 py-0.5 rounded bg-amber-50 text-amber-600">.docx / .pdf</span>
-            </div>
-            <div className="p-3 flex justify-between items-center text-xs sm:text-sm">
-              <span>04. Bảng thống kê diện tích, phòng ban & vật liệu</span>
-              <span className="font-mono text-xs px-2 py-0.5 rounded bg-emerald-50 text-emerald-600">.xlsx</span>
-            </div>
-            <div className="p-3 flex justify-between items-center text-xs sm:text-sm">
-              <span>05. Thư viện Revit Family độc quyền đi kèm</span>
-              <span className="font-mono text-xs px-2 py-0.5 rounded bg-purple-50 text-purple-600">.rfa</span>
-            </div>
-          </div>
-        </div>
-      </Modal>
     </div>
   )
 }

@@ -40,6 +40,18 @@ if (typeof window !== 'undefined') {
 // ---------------------------------------------------------------------------
 // ROUTER & NAVIGATION MOCKS
 // ---------------------------------------------------------------------------
+// Wallet fixtures for the top-up modal cases: they lived inside the two discount tests that were
+// deleted with OrderSummaryCard's `discount` prop (t36), so they are restored here at module scope.
+const mockWalletData = {
+  id: 16,
+  balance: 1000000,
+  pendingBalance: 0,
+  currency: 'VND',
+  status: 'active',
+}
+
+const mockLedger: any[] = []
+
 const mockRouterPush = vi.fn()
 let mockPathname = '/'
 let mockSearchParams = new URLSearchParams()
@@ -365,7 +377,9 @@ describe('M5 Challenger 1: Empirical Verification & Adversarial Stress Tests (F2
       expect(screen.getAllByText('3.000.000 ₫').length).toBeGreaterThanOrEqual(1)
     })
 
-    it('applies coupon KIENTAO10 and recalculates total with 10% discount', async () => {
+    it('shows the sum of its items prices and no discount row', async () => {
+      // The money path charges each item's own price (decision 0002). There is no coupon/voucher/
+      // discount/promo table, so the cart may not announce a price the buyer will not be charged.
       mockCartState.cart = {
         items: [
           {
@@ -383,19 +397,14 @@ describe('M5 Challenger 1: Empirical Verification & Adversarial Stress Tests (F2
         </AntdConfigProvider>,
       )
 
-      const couponInput = screen.getByPlaceholderText(/mã ưu đãi/i)
-      const applyBtn = screen.getByRole('button', { name: /áp dụng/i })
-
-      fireEvent.change(couponInput, { target: { value: 'KIENTAO10' } })
-      fireEvent.click(applyBtn)
-
-      await waitFor(() => {
-        expect(screen.getByText(/Ưu đãi \(KIENTAO10 -10%\)/)).toBeDefined()
-        expect(screen.getByText(/-100\.000 ₫/)).toBeDefined()
-      })
+      // the item price is the total: no discount row, no voucher, no fabricated reduction
+      expect(screen.getAllByText(/1\.000\.000/).length).toBeGreaterThan(0)
+      expect(screen.queryByText(/Ưu đãi/)).toBeNull()
+      expect(screen.queryByText(/KIENTAO10/)).toBeNull()
+      expect(screen.queryByText(/đã giảm|Giảm \d+%/i)).toBeNull()
     })
 
-    it('rejects invalid or empty voucher code without breaking calculation', async () => {
+    it('offers no voucher input at all, because no coupon table exists', async () => {
       mockCartState.cart = {
         items: [
           {
@@ -413,14 +422,9 @@ describe('M5 Challenger 1: Empirical Verification & Adversarial Stress Tests (F2
         </AntdConfigProvider>,
       )
 
-      const couponInput = screen.getByPlaceholderText(/mã ưu đãi/i)
-      const applyBtn = screen.getByRole('button', { name: /áp dụng/i })
-
-      fireEvent.change(couponInput, { target: { value: 'INVALID_CODE' } })
-      fireEvent.click(applyBtn)
-
-      // Discount element should not be rendered
-      expect(screen.queryByText(/Ưu đãi \(KIENTAO10/)).toBeNull()
+      expect(screen.queryByPlaceholderText(/mã ưu đãi/i)).toBeNull()
+      expect(screen.queryByRole('button', { name: /áp dụng/i })).toBeNull()
+      expect(screen.getAllByText(/500\.000/).length).toBeGreaterThan(0)
     })
 
     it('provides clear cart action button with Popconfirm', () => {
@@ -516,89 +520,6 @@ describe('M5 Challenger 1: Empirical Verification & Adversarial Stress Tests (F2
       // Verify payment selection radios
       expect(screen.getByText('Thanh toán an toàn')).toBeDefined()
     })
-
-    it('OrderSummaryCard correctly computes subtotal, free platform fee (0 ₫), and wallet deduction', () => {
-      const items = [
-        {
-          id: 'item-1',
-          quantity: 2,
-          product: { id: 'p-1', title: 'Thiết kế Biệt thự Vườn', price: 600000 },
-        },
-      ]
-
-      render(
-        <AntdConfigProvider>
-          <OrderSummaryCard
-            items={items}
-            subtotal={1200000}
-            platformFee={0}
-            discount={100000}
-            walletDeduction={500000}
-          />
-        </AntdConfigProvider>,
-      )
-
-      expect(screen.getByText('Tóm tắt đơn hàng')).toBeDefined()
-      expect(screen.getAllByText('1.200.000 ₫').length).toBeGreaterThanOrEqual(1)
-      expect(screen.getByText('Miễn phí')).toBeDefined()
-      expect(screen.getByText('-100.000 ₫')).toBeDefined()
-      expect(screen.getByText('-500.000 ₫')).toBeDefined()
-      // Final amount: 1,200,000 + 0 - 100,000 - 500,000 = 600,000 ₫
-      expect(screen.getByText('600,000')).toBeDefined()
-    })
-
-    it('OrderSummaryCard ensures total amount never drops below 0 even with large discounts', () => {
-      const items = [
-        {
-          id: 'item-1',
-          quantity: 1,
-          product: { id: 'p-1', title: 'Bản vẽ rẻ', price: 50000 },
-        },
-      ]
-
-      render(
-        <AntdConfigProvider>
-          <OrderSummaryCard
-            items={items}
-            subtotal={50000}
-            platformFee={0}
-            discount={200000}
-            walletDeduction={0}
-          />
-        </AntdConfigProvider>,
-      )
-
-      // Total must be 0, not negative
-      expect(screen.getByText('0')).toBeDefined()
-    })
-  })
-
-  // =========================================================================
-  // 5. VIETQR TOP-UP MODAL & WALLET DASHBOARD (F39)
-  // =========================================================================
-  describe('5. VietQR Digital Wallet & Top-up Modal (F39)', () => {
-    const mockWalletData: WalletData = {
-      id: 'w-1',
-      balance: 750000,
-      pendingBalance: 50000,
-      currency: 'VND',
-      status: 'active',
-    }
-
-    const mockLedger: LedgerEntry[] = [
-      {
-        id: 1,
-        type: 'topup',
-        amount: 500000,
-        direction: 'credit',
-        referenceType: 'sepay',
-        referenceId: 'TOPUP-2026-001',
-        balanceBefore: 250000,
-        balanceAfter: 750000,
-        description: 'Nạp tiền VietQR',
-        createdAt: '2026-09-20T10:00:00Z',
-      },
-    ]
 
     it('renders 4 financial metric cards: balance, pending, spent, and reward points', () => {
       render(
