@@ -15,7 +15,11 @@ export async function POST(req: Request) {
     }
 
     const formData = await req.formData()
-    const file = formData.get('file') as File | null
+    // `FormData.get` returns a plain string when the part is not a file, and the old `!file` guard
+    // passed for that shape so `.arrayBuffer()` below answered 500. A non-file part is a bad request.
+    const filePart = formData.get('file')
+    const file =
+      filePart && typeof (filePart as Blob).arrayBuffer === 'function' ? (filePart as File) : null
 
     if (!file) {
       return NextResponse.json({ error: 'Không tìm thấy tệp đính kèm.' }, { status: 400 })

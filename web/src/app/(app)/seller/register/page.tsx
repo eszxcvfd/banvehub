@@ -48,7 +48,7 @@ export default async function SellerRegisterPage() {
             Đăng ký trở thành Người bán trên KienTaoHub
           </h1>
           <p className="text-sm text-muted-foreground">
-            Tiếp cận hàng nghìn kỹ sư, kiến trúc sư và sinh viên xây dựng trên toàn quốc. Đăng tải bản vẽ AutoCAD, Revit, SketchUp và kiếm doanh thu tự động 24/7.
+            Tiếp cận cộng đồng kỹ sư, kiến trúc sư và sinh viên xây dựng trên toàn quốc. Đăng tải bản vẽ AutoCAD, Revit, SketchUp và kiếm doanh thu tự động 24/7.
           </p>
         </div>
 

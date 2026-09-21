@@ -1,5 +1,13 @@
-import { Grid } from '@/components/Grid'
 import { ProductGridItem } from '@/components/ProductGridItem'
+import {
+  getProductStats,
+  getSellerNames,
+  sellerIdOf,
+  sellerNamesByProduct,
+} from '@/components/product/productStats'
+import { ProductListItem } from '@/components/layout/search/ProductListItem'
+import { ShopToolbar } from '@/components/layout/search/ShopToolbar'
+import { ShopPagination } from '@/components/layout/search/ShopPagination'
 import { mergeOpenGraph } from '@/utilities/mergeOpenGraph'
 import configPromise from '@payload-config'
 import type { Metadata } from 'next'
@@ -104,7 +112,7 @@ export async function generateMetadata({ searchParams }: Props): Promise<Metadat
 
   let softwareTitle: string | undefined
   if (softwareParam) {
-    const sw = await getSoftwareTypeData(payload, softwareParam)
+    const sw = await getSoftwareTypeData(payload, softwareParam.split(',')[0])
     if (sw) {
       softwareTitle = sw.title
     }
@@ -191,39 +199,63 @@ export default async function ShopPage({ searchParams }: Props) {
   const isFreeParam = typeof params.isFree === 'string' ? params.isFree.trim().toLowerCase() : ''
   const priceTypeParam =
     typeof params.priceType === 'string' ? params.priceType.trim().toLowerCase() : ''
+  const minPriceParam = typeof params.minPrice === 'string' ? parseInt(params.minPrice, 10) : undefined
+  const maxPriceParam = typeof params.maxPrice === 'string' ? parseInt(params.maxPrice, 10) : undefined
+  const page = typeof params.page === 'string' ? Math.max(1, parseInt(params.page, 10) || 1) : 1
+  const limit = typeof params.limit === 'string' ? Math.max(1, parseInt(params.limit, 10) || 12) : 12
+  const view = typeof params.view === 'string' && params.view === 'list' ? 'list' : 'grid'
 
   const payload = await getPayload({ config: configPromise })
 
-  // Resolve category if specified
+  // 1. Category Resolution
   let categoryId: number | null | undefined = undefined
   if (categoryParam) {
     const cat = await getCategoryData(payload, categoryParam)
     categoryId = cat ? cat.id : null
   }
 
-  // Resolve software type if specified
-  let softwareTypeId: number | null | undefined = undefined
-  if (softwareParam) {
-    const sw = await getSoftwareTypeData(payload, softwareParam)
-    softwareTypeId = sw ? sw.id : null
+  // 2. Software Types Resolution (Supports comma-separated slugs)
+  const softwareSlugs = softwareParam
+    ? softwareParam.split(',').map((s) => s.trim()).filter(Boolean)
+    : []
+  const resolvedSoftwareIds: number[] = []
+  let invalidSoftwareRequested = false
+
+  if (softwareSlugs.length > 0) {
+    for (const slug of softwareSlugs) {
+      const sw = await getSoftwareTypeData(payload, slug)
+      if (sw) {
+        resolvedSoftwareIds.push(sw.id)
+      } else if (softwareSlugs.length === 1) {
+        invalidSoftwareRequested = true
+      }
+    }
   }
 
-  // If a non-existent category or software was requested, safely render empty state
-  if (categoryId === null || softwareTypeId === null) {
+  // Safe Empty Guard
+  if (categoryId === null || invalidSoftwareRequested) {
     return (
       <div>
-        {rawSearch ? (
-          <p className="mb-4">
-            There are no products that match <span className="font-bold">&quot;{rawSearch}&quot;</span>
-          </p>
-        ) : (
-          <p className="mb-4">No products found. Please try different filters.</p>
-        )}
+        <ShopToolbar
+          totalDocs={0}
+          currentSort={rawSort || '-createdAt'}
+          currentView={view}
+          searchQuery={rawSearch}
+        />
+        <div className="py-12 text-center">
+          {rawSearch ? (
+            <p className="mb-4 text-base">
+              There are no products that match <span className="font-bold">&quot;{rawSearch}&quot;</span>
+            </p>
+          ) : (
+            <p className="mb-4 text-base">No products found. Please try different filters.</p>
+          )}
+        </div>
       </div>
     )
   }
 
-  // Build compound WHERE clauses
+  // 3. Build compound WHERE clauses
   const andConditions: Where[] = [
     {
       _status: {
@@ -232,7 +264,6 @@ export default async function ShopPage({ searchParams }: Props) {
     },
   ]
 
-  // Category filter
   if (typeof categoryId === 'number') {
     andConditions.push({
       categories: {
@@ -241,16 +272,24 @@ export default async function ShopPage({ searchParams }: Props) {
     })
   }
 
-  // Software type filter
-  if (typeof softwareTypeId === 'number') {
-    andConditions.push({
-      software_types: {
-        contains: softwareTypeId,
-      },
-    })
+  if (resolvedSoftwareIds.length > 0) {
+    if (resolvedSoftwareIds.length === 1) {
+      andConditions.push({
+        software_types: {
+          contains: resolvedSoftwareIds[0],
+        },
+      })
+    } else {
+      andConditions.push({
+        or: resolvedSoftwareIds.map((id) => ({
+          software_types: {
+            contains: id,
+          },
+        })),
+      })
+    }
   }
 
-  // Free vs Paid filter
   const isFreeRequested = isFreeParam === 'true' || isFreeParam === '1' || priceTypeParam === 'free'
   const isPaidRequested = isFreeParam === 'false' || isFreeParam === '0' || priceTypeParam === 'paid'
 
@@ -264,7 +303,23 @@ export default async function ShopPage({ searchParams }: Props) {
     })
   }
 
-  // Keyword search condition
+  if (typeof minPriceParam === 'number' && !isNaN(minPriceParam) && minPriceParam > 0) {
+    andConditions.push({
+      price: {
+        greater_than_equal: minPriceParam,
+      },
+    })
+  }
+
+  if (typeof maxPriceParam === 'number' && !isNaN(maxPriceParam) && maxPriceParam < 2000000) {
+    andConditions.push({
+      price: {
+        less_than_equal: maxPriceParam,
+      },
+    })
+  }
+
+  // 4. Keyword Search
   if (rawSearch) {
     const [matchedCats, matchedSws, matchedTags] = await Promise.all([
       payload.find({
@@ -320,13 +375,16 @@ export default async function ShopPage({ searchParams }: Props) {
     })
   }
 
-  // Safe sort
-  const sort = (rawSort && ALLOWED_SORTS[rawSort]) || 'title'
+  // 5. Sorting
+  const sort = (rawSort && ALLOWED_SORTS[rawSort]) || '-createdAt'
 
+  // 6. Query Products with Pagination
   const products = await payload.find({
     collection: 'products',
     draft: false,
     overrideAccess: false,
+    page,
+    limit,
     select: {
       title: true,
       slug: true,
@@ -334,8 +392,12 @@ export default async function ShopPage({ searchParams }: Props) {
       previewGallery: true,
       categories: true,
       software_types: true,
+      tags: true,
       price: true,
       isFree: true,
+      seller: true,
+      technicalSpecs: true,
+      createdAt: true,
     },
     sort,
     where: {
@@ -343,30 +405,77 @@ export default async function ShopPage({ searchParams }: Props) {
     },
   })
 
+  // Real aggregates per card (downloads from `download_events`, ratings from `reviews`) and the
+  // seller's own display name — the shop page must show each product's record, not a shared constant.
+  const gridStats = await getProductStats(products.docs.map((product) => product.id))
+  const gridSellerNames = sellerNamesByProduct(
+    products.docs,
+    await getSellerNames(products.docs.map((product) => sellerIdOf(product.seller))),
+  )
+
   const resultsText = products.docs.length > 1 ? 'results' : 'result'
 
   return (
     <div>
+      {/* Top Toolbar */}
+      <ShopToolbar
+        totalDocs={products.totalDocs}
+        currentSort={rawSort || '-createdAt'}
+        currentView={view}
+        searchQuery={rawSearch}
+      />
+
+      {/* Search Header Text if rawSearch is active */}
       {rawSearch ? (
-        <p className="mb-4">
-          {products.docs?.length === 0
+        <p className="mb-4 text-sm text-slate-600 dark:text-slate-400">
+          {products.docs.length === 0
             ? 'There are no products that match '
             : `Showing ${products.docs.length} ${resultsText} for `}
-          <span className="font-bold">&quot;{rawSearch}&quot;</span>
+          <span className="font-bold text-slate-900 dark:text-white">&quot;{rawSearch}&quot;</span>
         </p>
       ) : null}
 
-      {!rawSearch && products.docs?.length === 0 && (
-        <p className="mb-4">No products found. Please try different filters.</p>
-      )}
-
-      {products?.docs.length > 0 ? (
-        <Grid className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {products.docs.map((product) => {
-            return <ProductGridItem key={product.id} product={product} />
-          })}
-        </Grid>
+      {/* Empty States */}
+      {products.docs.length === 0 ? (
+        <div className="py-12 text-center">
+          {rawSearch ? (
+            <p className="mb-4 text-base">
+              There are no products that match <span className="font-bold">&quot;{rawSearch}&quot;</span>
+            </p>
+          ) : (
+            <p className="mb-4 text-base">No products found. Please try different filters.</p>
+          )}
+        </div>
       ) : null}
+
+      {/* Product Grid or List Presentation */}
+      {products.docs.length > 0 && view === 'grid' ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
+          {products.docs.map((product) => (
+            <ProductGridItem
+              key={product.id}
+              product={product}
+              stats={gridStats[String(product.id)]}
+              sellerName={gridSellerNames[String(product.id)] ?? null}
+            />
+          ))}
+        </div>
+      ) : null}
+
+      {products.docs.length > 0 && view === 'list' ? (
+        <div className="flex flex-col gap-4">
+          {products.docs.map((product) => (
+            <ProductListItem key={product.id} product={product} />
+          ))}
+        </div>
+      ) : null}
+
+      {/* Pagination */}
+      <ShopPagination
+        currentPage={products.page || page}
+        pageSize={products.limit || limit}
+        totalDocs={products.totalDocs}
+      />
     </div>
   )
 }

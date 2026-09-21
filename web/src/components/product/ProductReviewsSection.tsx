@@ -4,31 +4,54 @@ import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  Star,
-  CheckCircle2,
-  MessageSquare,
-  ShieldCheck,
-  Pencil,
-  Loader2,
-  Lock,
-  ChevronLeft,
-  ChevronRight,
-  MessageCircle,
-} from 'lucide-react'
-import { Button } from '@/components/ui/button'
+  Card,
+  Rate,
+  Progress,
+  Avatar,
+  Tag,
+  Button,
+  Modal,
+  Pagination,
+  Empty,
+  Spin,
+  Alert,
+  Typography,
+  Space,
+} from 'antd'
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { Label } from '@/components/ui/label'
+  StarFilled,
+  MessageOutlined,
+  SafetyCertificateFilled,
+  EditOutlined,
+  CheckCircleFilled,
+  LockOutlined,
+} from '@ant-design/icons'
 import { useAuth } from '@/providers/Auth'
 import { toast } from 'sonner'
+
+if (typeof window !== 'undefined') {
+  if (!window.matchMedia) {
+    window.matchMedia = ((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia
+  }
+  if (!window.ResizeObserver) {
+    window.ResizeObserver = class ResizeObserver {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof window.ResizeObserver
+  }
+}
+
+const { Title, Text, Paragraph } = Typography
 
 export type ReviewItem = {
   id: number
@@ -54,11 +77,11 @@ export type ReviewSummary = {
   averageRating: number
   totalCount: number
   distribution: {
-    1: number
-    2: number
-    3: number
-    4: number
-    5: number
+    1?: number
+    2?: number
+    3?: number
+    4?: number
+    5?: number
   }
 }
 
@@ -92,7 +115,6 @@ export function ProductReviewsSection({
     distribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
   })
   const [currentPage, setCurrentPage] = useState<number>(1)
-  const [totalPages, setTotalPages] = useState<number>(1)
   const [userReview, setUserReview] = useState<ReviewItem | null>(null)
   const [canReview, setCanReview] = useState<boolean>(false)
 
@@ -100,7 +122,6 @@ export function ProductReviewsSection({
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false)
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false)
   const [rating, setRating] = useState<number>(5)
-  const [hoverRating, setHoverRating] = useState<number>(0)
   const [title, setTitle] = useState<string>('')
   const [content, setContent] = useState<string>('')
   const [formError, setFormError] = useState<string | null>(null)
@@ -123,9 +144,6 @@ export function ProductReviewsSection({
           setReviews(data.reviews || [])
           if (data.summary) {
             setSummary(data.summary)
-          }
-          if (data.pagination) {
-            setTotalPages(data.pagination.totalPages || 1)
           }
           setUserReview(data.userReview || null)
           setCanReview(Boolean(data.canReview))
@@ -155,19 +173,15 @@ export function ProductReviewsSection({
       if (data?.success) {
         setReviews(data.reviews || [])
         if (data.summary) setSummary(data.summary)
-        if (data.pagination) setTotalPages(data.pagination.totalPages || 1)
         setUserReview(data.userReview || null)
         setCanReview(Boolean(data.canReview))
       }
-    } catch {
-      // Silently tolerate
-    }
+    } catch {}
   }
 
   const openCreateDialog = () => {
     setIsEditing(false)
     setRating(5)
-    setHoverRating(0)
     setTitle('')
     setContent('')
     setFormError(null)
@@ -178,7 +192,6 @@ export function ProductReviewsSection({
     if (!userReview) return
     setIsEditing(true)
     setRating(userReview.rating || 5)
-    setHoverRating(0)
     setTitle(userReview.title || '')
     setContent(userReview.content || '')
     setFormError(null)
@@ -205,9 +218,7 @@ export function ProductReviewsSection({
       const method = isEditing ? 'PUT' : 'POST'
       const res = await fetch(`/api/v1/products/${productId}/reviews`, {
         method,
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
           rating,
@@ -216,7 +227,7 @@ export function ProductReviewsSection({
         }),
       })
 
-      let data: any = null
+      let data: { success?: boolean; message?: string; error?: string } | null = null
       try {
         data = await res.json()
       } catch {
@@ -270,299 +281,257 @@ export function ProductReviewsSection({
   }
 
   return (
-    <section
-      id="reviews-section"
-      className={`rounded-2xl border bg-card text-card-foreground p-6 sm:p-8 shadow-xs ${className}`}
-    >
+    <Card id="reviews-section" className={`rounded-2xl border border-border shadow-xs ${className}`}>
       <div className="flex flex-col gap-8">
         {/* Section Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-6">
           <div>
-            <h2 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2.5">
-              <MessageSquare className="w-6 h-6 text-primary" />
-              Đánh giá & Nhận xét
-            </h2>
-            <p className="text-sm text-muted-foreground mt-1">
+            <Title level={3} className="!mb-1 flex items-center gap-2.5 text-xl sm:text-2xl font-bold">
+              <MessageOutlined className="text-[#1677ff]" />
+              <span>Đánh giá & Nhận xét</span>
+            </Title>
+            <Text type="secondary" className="text-sm">
               Phản hồi từ những kỹ sư, kiến trúc sư đã mua và sử dụng tài nguyên này.
-            </p>
+            </Text>
           </div>
 
           {/* Action Trigger Button */}
           {user ? (
             canReview ? (
               <Button
+                type="primary"
                 onClick={openCreateDialog}
-                className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold flex items-center gap-2 self-start sm:self-auto cursor-pointer"
+                icon={<StarFilled />}
+                className="font-semibold self-start sm:self-auto !bg-[#1677ff]"
               >
-                <Star className="w-4 h-4 fill-current" />
                 Viết đánh giá
               </Button>
             ) : userReview ? (
               <Button
-                variant="outline"
                 onClick={openEditDialog}
-                className="flex items-center gap-2 self-start sm:self-auto cursor-pointer"
+                icon={<EditOutlined />}
+                className="self-start sm:self-auto"
               >
-                <Pencil className="w-4 h-4" />
                 Chỉnh sửa đánh giá của bạn
               </Button>
             ) : null
           ) : (
-            <Button asChild variant="outline" className="self-start sm:self-auto">
-              <Link href={`/login?redirect=${encodeURIComponent(pathname || '/shop')}`}>
+            <Link href={`/login?redirect=${encodeURIComponent(pathname || '/shop')}`}>
+              <Button className="self-start sm:self-auto">
                 Đăng nhập để đánh giá
-              </Link>
-            </Button>
+              </Button>
+            </Link>
           )}
         </div>
 
-        {/* Rating Summary Breakdown Card */}
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center rounded-xl bg-muted/40 p-6 border">
-          {/* Left: Overall Score */}
-          <div className="md:col-span-4 flex flex-col items-center justify-center text-center border-b md:border-b-0 md:border-r border-border/80 pb-6 md:pb-0 md:pr-6">
-            <div className="text-5xl font-extrabold tracking-tight text-foreground font-mono">
-              {(Number(summary?.totalCount) || 0) > 0 ? Number(summary?.averageRating || 0).toFixed(1) : '0.0'}
+        {/* Rating Summary Breakdown Card: only what the reviews collection actually holds */}
+        {Number(summary?.totalCount || 0) > 0 && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center rounded-2xl bg-white dark:bg-slate-900 p-6 sm:p-7 border border-slate-200/90 dark:border-slate-800 shadow-xs">
+            {/* Block 1 (Left): Overall Score */}
+            <div className="lg:col-span-3 flex flex-col items-center justify-center text-center border-b lg:border-b-0 lg:border-r border-slate-100 dark:border-slate-800 pb-5 lg:pb-0 lg:pr-6">
+              <div className="flex items-baseline gap-1">
+                <span className="text-4xl sm:text-5xl font-black tracking-tight font-mono text-slate-900 dark:text-white">
+                  {Number(summary?.averageRating || 0).toFixed(1)}
+                </span>
+                <span className="text-base text-slate-400 font-semibold">/ 5</span>
+              </div>
+              <div className="my-2">
+                <Rate
+                  disabled
+                  allowHalf
+                  value={Number(summary?.averageRating || 0)}
+                  style={{ color: '#faad14', fontSize: 16 }}
+                />
+              </div>
+              <Text type="secondary" className="text-xs">
+                {`Dựa trên ${Number(summary?.totalCount || 0)} lượt đánh giá`}
+              </Text>
             </div>
-            <div className="flex items-center gap-1 my-2">
-              {[1, 2, 3, 4, 5].map((s) => {
-                const filled = s <= Math.round(Number(summary?.averageRating || 0))
+
+            {/* Block 2 (Center): 5-bar Distribution */}
+            <div className="lg:col-span-5 flex flex-col gap-2">
+              {[5, 4, 3, 2, 1].map((starVal) => {
+                const count = summary?.distribution?.[starVal as keyof typeof summary.distribution] || 0
+                const total = Number(summary?.totalCount || 0)
+                const percentage = total > 0 ? Math.round((count / total) * 100) : 0
+
                 return (
-                  <Star
-                    key={s}
-                    className={`w-5 h-5 ${
-                      filled
-                        ? 'text-amber-500 fill-amber-500'
-                        : 'text-muted-foreground/30'
-                    }`}
-                  />
+                  <div key={starVal} className="flex items-center gap-2.5 text-xs">
+                    <div className="flex items-center gap-1 w-11 font-medium shrink-0 text-slate-600 dark:text-slate-400">
+                      <span>{starVal} sao</span>
+                    </div>
+                    <div className="flex-1">
+                      <Progress
+                        percent={percentage}
+                        strokeColor="#1677ff"
+                        railColor="rgba(0,0,0,0.06)"
+                        showInfo={false}
+                        size="small"
+                      />
+                    </div>
+                    <div className="w-16 text-right text-slate-500 font-mono text-xs shrink-0">
+                      {`${count} (${percentage}%)`}
+                    </div>
+                  </div>
                 )
               })}
             </div>
-            <p className="text-sm text-muted-foreground">
-              {(Number(summary?.totalCount) || 0) > 0
-                ? `Dựa trên ${summary.totalCount} lượt đánh giá`
-                : 'Chưa có lượt đánh giá nào'}
-            </p>
-            <div className="mt-2.5 inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              100% người mua đã xác thực
-            </div>
           </div>
+        )}
 
-          {/* Right: 5-bar Distribution */}
-          <div className="md:col-span-8 flex flex-col gap-2.5">
-            {[5, 4, 3, 2, 1].map((starVal) => {
-              const count = summary?.distribution?.[starVal as keyof typeof summary.distribution] || 0
-              const total = Number(summary?.totalCount || 0)
-              const percentage =
-                total > 0 ? Math.round((count / total) * 100) : 0
-
-              return (
-                <div key={starVal} className="flex items-center gap-3 text-xs sm:text-sm">
-                  <div className="flex items-center gap-1 w-12 font-medium shrink-0">
-                    <span>{starVal}</span>
-                    <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
-                  </div>
-                  <div className="flex-1 h-2.5 bg-muted rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-amber-500 rounded-full transition-all duration-500"
-                      style={{ width: `${percentage}%` }}
-                    />
-                  </div>
-                  <div className="w-16 text-right text-muted-foreground font-mono shrink-0">
-                    {count} ({percentage}%)
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-
-        {/* User Status Notice (When authenticated but not entitled, or unauthenticated) */}
+        {/* User Status Notice */}
         {!user ? (
-          <div className="flex items-center gap-3 p-4 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-700 dark:text-blue-300 text-sm">
-            <Lock className="w-4 h-4 shrink-0" />
-            <div>
-              <span>Chỉ khách hàng đã mua sản phẩm mới có thể gửi đánh giá. </span>
-              <Link
-                href={`/login?redirect=${encodeURIComponent(pathname || '/shop')}`}
-                className="font-semibold underline underline-offset-2 hover:text-blue-900 dark:hover:text-blue-100"
-              >
-                Đăng nhập
-              </Link>{' '}
-              để kiểm tra quyền đánh giá của bạn.
-            </div>
-          </div>
+          <Alert
+            type="info"
+            showIcon
+            icon={<LockOutlined />}
+            title={
+              <span>
+                Chỉ khách hàng đã mua sản phẩm mới có thể gửi đánh giá.{' '}
+                <Link
+                  href={`/login?redirect=${encodeURIComponent(pathname || '/shop')}`}
+                  className="font-semibold underline hover:text-[#1677ff]"
+                >
+                  Đăng nhập
+                </Link>{' '}
+                để kiểm tra quyền đánh giá của bạn.
+              </span>
+            }
+          />
         ) : !canReview && !userReview ? (
-          <div className="flex items-center gap-3 p-4 rounded-xl bg-muted/60 border text-muted-foreground text-sm">
-            <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
-            <span>
-              Chỉ khách hàng đã sở hữu tài nguyên số này mới có thể gửi đánh giá theo chính sách bảo vệ chất lượng (BR-05).
-            </span>
-          </div>
+          <Alert
+            type="info"
+            showIcon
+            icon={<SafetyCertificateFilled />}
+            title="Chỉ khách hàng đã sở hữu tài nguyên số này mới có thể gửi đánh giá theo chính sách bảo vệ chất lượng (BR-05)."
+          />
         ) : null}
 
         {/* Your Submitted Review Highlight */}
         {userReview && (
-          <div className="p-5 rounded-xl border border-primary/30 bg-primary/5 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-primary/20 text-primary">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
+          <Card
+            size="small"
+            className="rounded-xl border border-[#1677ff]/30 bg-[#1677ff]/5"
+            styles={{ body: { padding: '16px' } }}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <Space>
+                <Tag color="processing" icon={<CheckCircleFilled />}>
                   Đánh giá của bạn
-                </span>
-                {userReview.status === 'pending' && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                    Chờ kiểm duyệt
-                  </span>
-                )}
-                {userReview.status === 'rejected' && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-destructive/10 text-destructive border border-destructive/20">
-                    Bị từ chối
-                  </span>
-                )}
-              </div>
+                </Tag>
+                {userReview.status === 'pending' && <Tag color="warning">Chờ kiểm duyệt</Tag>}
+                {userReview.status === 'rejected' && <Tag color="error">Bị từ chối</Tag>}
+              </Space>
               <Button
-                variant="ghost"
-                size="sm"
+                type="link"
+                size="small"
                 onClick={openEditDialog}
-                className="text-xs h-8 text-primary hover:text-primary/80 flex items-center gap-1"
+                icon={<EditOutlined />}
               >
-                <Pencil className="w-3.5 h-3.5" />
                 Sửa
               </Button>
             </div>
-            <div className="flex items-center gap-1">
-              {[1, 2, 3, 4, 5].map((s) => (
-                <Star
-                  key={s}
-                  className={`w-4 h-4 ${
-                    s <= userReview.rating
-                      ? 'text-amber-500 fill-amber-500'
-                      : 'text-muted-foreground/30'
-                  }`}
-                />
-              ))}
-              <span className="text-xs text-muted-foreground ml-2">
+            <div className="flex items-center gap-2 mb-2">
+              <Rate disabled value={userReview.rating} style={{ color: '#faad14', fontSize: 14 }} />
+              <Text type="secondary" className="text-xs">
                 {formatDate(userReview.createdAt)}
-              </span>
+              </Text>
             </div>
-            {userReview.title && (
-              <h4 className="font-semibold text-foreground text-sm">{userReview.title}</h4>
-            )}
-            <p className="text-sm text-foreground/90 whitespace-pre-wrap leading-relaxed">
-              {userReview.content}
-            </p>
+            {userReview.title && <Title level={5} className="!mb-1 text-sm">{userReview.title}</Title>}
+            <Paragraph className="!mb-0 text-sm whitespace-pre-wrap">{userReview.content}</Paragraph>
+
             {userReview.sellerReply?.comment && (
-              <div className="mt-3 p-3.5 rounded-lg bg-background/80 border border-primary/20 space-y-1 text-xs text-muted-foreground">
-                <div className="flex items-center justify-between font-semibold text-foreground">
-                  <span className="flex items-center gap-1.5 text-primary">
-                    <MessageSquare className="w-3.5 h-3.5" />
-                    Phản hồi từ người bán
-                  </span>
+              <div className="mt-3 p-3 rounded-lg bg-background/80 border border-[#1677ff]/20 text-xs">
+                <div className="flex items-center justify-between font-semibold mb-1 text-[#1677ff]">
+                  <Space>
+                    <MessageOutlined />
+                    <span>Phản hồi từ người bán</span>
+                  </Space>
                   {userReview.sellerReply.repliedAt && (
-                    <span className="text-muted-foreground font-normal">
+                    <Text type="secondary" className="text-xs font-normal">
                       {formatDate(userReview.sellerReply.repliedAt)}
-                    </span>
+                    </Text>
                   )}
                 </div>
-                <p className="leading-relaxed whitespace-pre-wrap">
-                  {userReview.sellerReply.comment}
-                </p>
+                <Paragraph className="!mb-0 whitespace-pre-wrap">{userReview.sellerReply.comment}</Paragraph>
               </div>
             )}
-          </div>
+          </Card>
         )}
 
         {/* Reviews List */}
         <div className="space-y-4">
-          <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
+          <Title level={5} className="!mb-0">
             Danh sách nhận xét ({summary.totalCount})
-          </h3>
+          </Title>
 
           {loading ? (
-            <div className="py-12 flex flex-col items-center justify-center gap-2 text-muted-foreground">
-              <Loader2 className="w-6 h-6 animate-spin text-primary" />
-              <span className="text-sm">Đang tải đánh giá...</span>
+            <div className="py-12 flex justify-center">
+              <Spin />
             </div>
           ) : reviews.length === 0 ? (
-            <div className="py-12 flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed p-8 text-center text-muted-foreground bg-muted/20">
-              <MessageCircle className="w-8 h-8 opacity-40 mb-1" />
-              <p className="font-medium text-foreground text-sm">Chưa có đánh giá nào</p>
-              <p className="text-xs max-w-md">
-                Tài nguyên này chưa nhận được đánh giá từ khách hàng. Sau khi mua và tải file, bạn có thể là người đầu tiên chia sẻ cảm nhận!
-              </p>
-            </div>
+            <Empty
+              image={<MessageOutlined style={{ fontSize: 40, color: '#bfbfbf' }} />}
+              description={
+                <div className="space-y-1">
+                  <p className="font-medium text-foreground text-sm">Chưa có đánh giá nào</p>
+                  <p className="text-xs text-muted-foreground max-w-md">
+                    Tài nguyên này chưa nhận được đánh giá từ khách hàng. Sau khi mua và tải file, bạn có thể là người đầu tiên chia sẻ cảm nhận!
+                  </p>
+                </div>
+              }
+              className="py-8"
+            />
           ) : (
             <div className="divide-y divide-border">
               {reviews.map((rev) => (
-                <div key={rev.id} className="py-6 flex flex-col gap-3">
-                  {/* Author Header */}
-                  <div className="flex items-start justify-between gap-4">
+                <div key={rev.id} className="py-5 flex flex-col gap-3">
+                  <div className="flex items-center justify-between gap-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-primary/10 text-primary font-bold text-sm flex items-center justify-center border border-primary/20 shrink-0">
+                      <Avatar
+                        style={{ backgroundColor: '#1677ff', verticalAlign: 'middle' }}
+                        size={40}
+                      >
                         {rev.user.initials || 'KH'}
-                      </div>
+                      </Avatar>
                       <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-semibold text-sm text-foreground">
-                            {rev.user.name}
-                          </span>
+                        <Space size={6} wrap>
+                          <Text strong className="text-sm">{rev.user.name}</Text>
                           {rev.verifiedPurchase && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                              <CheckCircle2 className="w-3 h-3" />
+                            <Tag color="success" icon={<CheckCircleFilled />} className="text-[11px] px-1.5 py-0">
                               Đã mua hàng
-                            </span>
+                            </Tag>
                           )}
-                        </div>
+                        </Space>
                         <div className="flex items-center gap-2 mt-0.5">
-                          <div className="flex items-center gap-0.5">
-                            {[1, 2, 3, 4, 5].map((s) => (
-                              <Star
-                                key={s}
-                                className={`w-3.5 h-3.5 ${
-                                  s <= rev.rating
-                                    ? 'text-amber-500 fill-amber-500'
-                                    : 'text-muted-foreground/30'
-                                }`}
-                              />
-                            ))}
-                          </div>
-                          <span className="text-xs text-muted-foreground">
+                          <Rate disabled value={rev.rating} style={{ color: '#faad14', fontSize: 13 }} />
+                          <Text type="secondary" className="text-xs">
                             • {formatDate(rev.createdAt)}
-                          </span>
+                          </Text>
                         </div>
                       </div>
                     </div>
                   </div>
 
-                  {/* Review Content */}
-                  {rev.title && (
-                    <h4 className="font-semibold text-foreground text-sm mt-1">
-                      {rev.title}
-                    </h4>
-                  )}
-                  <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                  {rev.title && <Title level={5} className="!mb-0 text-sm font-semibold">{rev.title}</Title>}
+                  <Paragraph className="!mb-0 text-sm text-foreground/90 whitespace-pre-wrap leading-relaxed">
                     {rev.content}
-                  </p>
+                  </Paragraph>
 
-                  {/* Seller Reply */}
                   {rev.sellerReply?.comment && (
-                    <div className="mt-2 p-4 rounded-lg bg-muted/60 border-l-2 border-primary space-y-1.5 text-xs text-muted-foreground">
-                      <div className="flex items-center justify-between font-semibold text-foreground">
-                        <span className="flex items-center gap-1.5 text-primary">
-                          <MessageSquare className="w-3.5 h-3.5" />
-                          Phản hồi từ người bán
-                        </span>
+                    <div className="mt-2 p-3.5 rounded-lg bg-muted/40 border-l-2 border-[#1677ff] text-xs">
+                      <div className="flex items-center justify-between font-semibold mb-1 text-[#1677ff]">
+                        <Space>
+                          <MessageOutlined />
+                          <span>Phản hồi từ người bán</span>
+                        </Space>
                         {rev.sellerReply.repliedAt && (
-                          <span className="text-muted-foreground font-normal">
+                          <Text type="secondary" className="text-xs font-normal">
                             {formatDate(rev.sellerReply.repliedAt)}
-                          </span>
+                          </Text>
                         )}
                       </div>
-                      <p className="leading-relaxed whitespace-pre-wrap">
-                        {rev.sellerReply.comment}
-                      </p>
+                      <Paragraph className="!mb-0 whitespace-pre-wrap">{rev.sellerReply.comment}</Paragraph>
                     </div>
                   )}
                 </div>
@@ -570,97 +539,74 @@ export function ProductReviewsSection({
             </div>
           )}
 
-          {/* Pagination Controls */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between pt-6 border-t">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={currentPage <= 1 || loading}
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                className="flex items-center gap-1 cursor-pointer"
-              >
-                <ChevronLeft className="w-4 h-4" />
-                Trang trước
-              </Button>
-              <span className="text-xs text-muted-foreground">
-                Trang {currentPage} / {totalPages}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={currentPage >= totalPages || loading}
-                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                className="flex items-center gap-1 cursor-pointer"
-              >
-                Trang sau
-                <ChevronRight className="w-4 h-4" />
-              </Button>
+          {/* Pagination */}
+          {summary.totalCount > 6 && (
+            <div className="flex justify-center pt-6 border-t border-border">
+              <Pagination
+                current={currentPage}
+                total={summary.totalCount}
+                pageSize={6}
+                onChange={(page) => setCurrentPage(page)}
+                showSizeChanger={false}
+              />
             </div>
           )}
         </div>
       </div>
 
-      {/* Review Dialog Form (Create or Edit) */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-lg">
-              <Star className="w-5 h-5 text-amber-500 fill-amber-500" />
-              {isEditing ? 'Chỉnh sửa đánh giá của bạn' : 'Viết đánh giá sản phẩm'}
-            </DialogTitle>
-            <DialogDescription>
-              Chia sẻ trải nghiệm sử dụng &quot;{productTitle}&quot; với cộng đồng KienTaoHub.
-            </DialogDescription>
-          </DialogHeader>
+      {/* Review Dialog Form (Ant Design Modal) */}
+      {isDialogOpen && (
+        <Modal
+          open={true}
+          getContainer={false}
+          onCancel={() => setIsDialogOpen(false)}
+          title={
+            <Space>
+              <StarFilled style={{ color: '#faad14' }} />
+              <span>{isEditing ? 'Chỉnh sửa đánh giá của bạn' : 'Viết đánh giá sản phẩm'}</span>
+            </Space>
+          }
+          footer={null}
+        >
+          <p className="text-xs text-muted-foreground mb-4">
+            Chia sẻ trải nghiệm sử dụng &quot;{productTitle}&quot; với cộng đồng KienTaoHub.
+          </p>
 
-          <form onSubmit={handleSubmitReview} className="space-y-4 py-2">
-            {formError && (
-              <div className="p-3 rounded-md bg-destructive/10 border border-destructive/20 text-destructive text-xs">
-                {formError}
-              </div>
-            )}
+          {formError && (
+            <Alert type="error" title={formError} showIcon className="mb-4 text-xs" />
+          )}
 
-            {/* Interactive 1-5 Star Rating Picker */}
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Mức độ hài lòng *</Label>
+          <form onSubmit={handleSubmitReview} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-1.5">Mức độ hài lòng *</label>
               <div className="flex items-center gap-2">
-                {[1, 2, 3, 4, 5].map((starVal) => {
-                  const active = hoverRating ? starVal <= hoverRating : starVal <= rating
-                  return (
-                    <button
-                      type="button"
-                      key={starVal}
-                      onClick={() => setRating(starVal)}
-                      onMouseEnter={() => setHoverRating(starVal)}
-                      onMouseLeave={() => setHoverRating(0)}
-                      className="p-1 rounded-md transition-transform hover:scale-110 focus:outline-hidden cursor-pointer"
-                      title={STAR_LABELS[starVal]}
-                      aria-label={STAR_LABELS[starVal]}
-                    >
-                      <Star
-                        className={`w-7 h-7 transition-colors ${
-                          active
-                            ? 'text-amber-500 fill-amber-500'
-                            : 'text-muted-foreground/30'
-                        }`}
-                      />
-                    </button>
-                  )
-                })}
+                {[1, 2, 3, 4, 5].map((starVal) => (
+                  <button
+                    key={starVal}
+                    type="button"
+                    onClick={() => setRating(starVal)}
+                    aria-label={STAR_LABELS[starVal]}
+                    className="p-1 cursor-pointer transition-colors focus:outline-none rounded hover:scale-110"
+                  >
+                    <StarFilled
+                      style={{
+                        fontSize: 26,
+                        color: starVal <= rating ? '#faad14' : '#d9d9d9',
+                      }}
+                    />
+                  </button>
+                ))}
               </div>
-              <p className="text-xs text-muted-foreground font-medium">
-                {STAR_LABELS[hoverRating || rating]}
-              </p>
+              <p className="text-xs text-muted-foreground mt-1">{STAR_LABELS[rating]}</p>
             </div>
 
-            {/* Title (Optional) */}
-            <div className="space-y-1.5">
-              <Label htmlFor="review-title" className="text-sm font-medium">
+            <div>
+              <label htmlFor="review-title" className="block text-sm font-medium mb-1.5">
                 Tiêu đề nhận xét (tùy chọn)
-              </Label>
-              <Input
+              </label>
+              <input
                 id="review-title"
+                className="w-full px-3 py-1.5 rounded-md border border-neutral-300 dark:border-neutral-700 bg-transparent text-sm focus:outline-none focus:border-[#1677ff] focus:ring-1 focus:ring-[#1677ff]"
                 placeholder="Tóm tắt ngắn gọn cảm nhận của bạn (vd: Bản vẽ rất chuẩn và chi tiết)"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
@@ -668,13 +614,13 @@ export function ProductReviewsSection({
               />
             </div>
 
-            {/* Content (Required, min 5 chars) */}
-            <div className="space-y-1.5">
-              <Label htmlFor="review-content" className="text-sm font-medium">
+            <div>
+              <label htmlFor="review-content" className="block text-sm font-medium mb-1.5">
                 Nội dung chi tiết *
-              </Label>
-              <Textarea
+              </label>
+              <textarea
                 id="review-content"
+                className="w-full p-3 rounded-md border border-neutral-300 dark:border-neutral-700 bg-transparent text-sm focus:outline-none focus:border-[#1677ff] focus:ring-1 focus:ring-[#1677ff]"
                 placeholder="Chất lượng file thế nào? Độ tương thích phần mềm? Có đầy đủ chi tiết kỹ thuật không? (tối thiểu 5 ký tự)"
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
@@ -682,40 +628,22 @@ export function ProductReviewsSection({
                 maxLength={5000}
                 required
               />
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-[11px] text-muted-foreground mt-1">
                 Tối thiểu 5 ký tự. Đánh giá của bạn sẽ được hiển thị công khai kèm huy hiệu &quot;Đã mua hàng&quot;.
               </p>
             </div>
 
-            <DialogFooter className="flex flex-col sm:flex-row gap-2 sm:justify-end pt-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setIsDialogOpen(false)}
-                disabled={isSubmitting}
-              >
+            <div className="flex justify-end gap-2 pt-3 border-t border-border">
+              <Button onClick={() => setIsDialogOpen(false)} disabled={isSubmitting}>
                 Hủy bỏ
               </Button>
-              <Button
-                type="submit"
-                disabled={isSubmitting}
-                className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold flex items-center gap-2 cursor-pointer"
-              >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Đang gửi...
-                  </>
-                ) : isEditing ? (
-                  'Lưu cập nhật'
-                ) : (
-                  'Gửi đánh giá'
-                )}
+              <Button type="primary" htmlType="submit" loading={isSubmitting} className="!bg-[#1677ff]">
+                {isEditing ? 'Lưu cập nhật' : 'Gửi đánh giá'}
               </Button>
-            </DialogFooter>
+            </div>
           </form>
-        </DialogContent>
-      </Dialog>
-    </section>
+        </Modal>
+      )}
+    </Card>
   )
 }

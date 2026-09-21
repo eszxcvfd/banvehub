@@ -2,20 +2,63 @@
 
 import React, { useState, useEffect, useRef } from 'react'
 import {
-  Wallet as WalletIcon,
-  ArrowUpRight,
-  ArrowDownLeft,
-  QrCode,
-  Copy,
-  Check,
-  RefreshCw,
-  Clock,
-  ShieldCheck,
-  AlertCircle,
-} from 'lucide-react'
-import { Button } from '@/components/ui/button'
+  Row,
+  Col,
+  Card,
+  Statistic,
+  Button,
+  Modal,
+  InputNumber,
+  Radio,
+  Typography,
+  Alert,
+  Table,
+  Tag,
+  Spin,
+  Result,
+  Empty,
+  Descriptions,
+  Space,
+} from 'antd'
+import type { ColumnsType } from 'antd/es/table'
+import {
+  WalletOutlined,
+  ShoppingOutlined,
+  TrophyOutlined,
+  PlusCircleOutlined,
+  ReloadOutlined,
+  ClockCircleOutlined,
+  QrcodeOutlined,
+  LoadingOutlined,
+  SafetyCertificateFilled,
+} from '@ant-design/icons'
+import { useSearchParams } from 'next/navigation'
 
-interface WalletData {
+// Vitest jsdom safety polyfills
+if (typeof window !== 'undefined') {
+  if (!window.matchMedia) {
+    window.matchMedia = (query) =>
+      ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      } as any)
+  }
+  if (!window.ResizeObserver) {
+    window.ResizeObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as any
+  }
+}
+
+export interface WalletData {
   id: number | string
   balance: number
   pendingBalance: number
@@ -23,7 +66,7 @@ interface WalletData {
   status: string
 }
 
-interface LedgerEntry {
+export interface LedgerEntry {
   id: number | string
   type: string
   amount: number
@@ -60,26 +103,58 @@ export function WalletClient({
 }) {
   const [wallet, setWallet] = useState<WalletData>(initialWallet)
   const [ledger, setLedger] = useState<LedgerEntry[]>(initialLedger)
-  const [selectedAmount, setSelectedAmount] = useState<number>(100000)
-  const [customAmount, setCustomAmount] = useState<string>('')
+  const [isTopupModalOpen, setIsTopupModalOpen] = useState(false)
+  const [selectedPreset, setSelectedPreset] = useState<number>(100000)
+  const [customAmount, setCustomAmount] = useState<number>(100000)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [activeIntent, setActiveIntent] = useState<TopupIntentResponse | null>(null)
-  const [copiedField, setCopiedField] = useState<string | null>(null)
   const [pollStatus, setPollStatus] = useState<'idle' | 'polling' | 'paid' | 'expired'>('idle')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const pollingRef = useRef<NodeJS.Timeout | null>(null)
 
-  const effectiveAmount = customAmount ? parseInt(customAmount, 10) || 0 : selectedAmount
+  // The checkout's VietQR branch creates the top-up intent and hands its code over in the URL, so the
+  // buyer lands on the payment step that already renders the QR, the transfer reference and the
+  // polling for the credit, instead of having to create a second intent by hand.
+  const searchParams = useSearchParams()
+  const resumedIntentCode = searchParams?.get('topup') ?? null
 
-  const handleCopy = (text: string, field: string) => {
-    navigator.clipboard.writeText(text)
-    setCopiedField(field)
-    setTimeout(() => setCopiedField(null), 2000)
-  }
+  useEffect(() => {
+    if (!resumedIntentCode || activeIntent) return
+
+    let cancelled = false
+
+    fetch(`/api/v1/payments/${encodeURIComponent(resumedIntentCode)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        const intent = data?.intent as TopupIntentResponse | undefined
+        if (cancelled || !intent?.code) return
+
+        setActiveIntent(intent)
+        setIsTopupModalOpen(true)
+        setPollStatus(intent.status === 'PENDING' ? 'polling' : intent.status === 'PAID' ? 'paid' : 'expired')
+      })
+      .catch(() => {
+        // An unreadable hand-off leaves the wallet page as it was: the buyer can still start a top-up.
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [resumedIntentCode, activeIntent])
+
+  // Calculate metrics
+  const totalSpent = ledger
+    .filter((e) => e.direction === 'debit' && e.type === 'purchase')
+    .reduce((sum, e) => sum + e.amount, 0)
+
+  // No loyalty derivation: the schema stores no points/rewards, so nothing may display a points figure.
+
+  const effectiveAmount = customAmount || selectedPreset
 
   const handleCreateTopup = async () => {
-    if (effectiveAmount < 10000) {
+    if (!effectiveAmount || effectiveAmount < 10000) {
       setErrorMessage('Số tiền nạp tối thiểu là 10.000₫')
       return
     }
@@ -108,12 +183,12 @@ export function WalletClient({
     }
   }
 
-  // Refresh wallet and ledger data
   const refreshData = async () => {
+    setIsRefreshing(true)
     try {
       const [wRes, lRes] = await Promise.all([
         fetch('/api/v1/me/wallet'),
-        fetch('/api/v1/me/wallet/ledger?limit=20'),
+        fetch('/api/v1/me/wallet/ledger?limit=50'),
       ])
       if (wRes.ok) {
         const wData = await wRes.json()
@@ -125,10 +200,12 @@ export function WalletClient({
       }
     } catch (err) {
       console.error('Error refreshing wallet:', err)
+    } finally {
+      setIsRefreshing(false)
     }
   }
 
-  // Polling for active intent payment status
+  // Polling for payment status
   useEffect(() => {
     if (!activeIntent || pollStatus !== 'polling') return
 
@@ -158,350 +235,446 @@ export function WalletClient({
     }
   }, [activeIntent, pollStatus])
 
-  return (
-    <div className="space-y-8">
-      {/* Overview Balance Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-card border rounded-2xl p-6 shadow-sm relative overflow-hidden">
-          <div className="flex items-center justify-between pb-4">
-            <div className="text-sm font-medium text-muted-foreground">Số dư khả dụng</div>
-            <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-              <WalletIcon className="h-5 w-5" />
-            </div>
-          </div>
-          <div className="text-3xl font-extrabold text-foreground tracking-tight">
-            {wallet.balance.toLocaleString('vi-VN')}₫
-          </div>
-          <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
-            <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" /> Được bảo vệ bởi Sổ cái bất biến (BR-03)
-          </p>
-        </div>
+  const handleCloseModal = () => {
+    setIsTopupModalOpen(false)
+    if (pollStatus === 'paid' || pollStatus === 'expired') {
+      setActiveIntent(null)
+      setPollStatus('idle')
+      setErrorMessage(null)
+    }
+  }
 
-        <div className="bg-card border rounded-2xl p-6 shadow-sm relative overflow-hidden">
-          <div className="flex items-center justify-between pb-4">
-            <div className="text-sm font-medium text-muted-foreground">Tạm giữ / Chờ xử lý</div>
-            <div className="h-10 w-10 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500">
-              <Clock className="h-5 w-5" />
-            </div>
-          </div>
-          <div className="text-3xl font-extrabold text-foreground tracking-tight">
-            {wallet.pendingBalance.toLocaleString('vi-VN')}₫
-          </div>
-          <p className="text-xs text-muted-foreground mt-2">Dành cho rút tiền hoặc đơn hàng đang xử lý</p>
-        </div>
+  const handleResetTopup = () => {
+    setActiveIntent(null)
+    setPollStatus('idle')
+    setErrorMessage(null)
+  }
 
-        <div className="bg-card border rounded-2xl p-6 shadow-sm relative overflow-hidden flex flex-col justify-between">
-          <div className="flex items-center justify-between pb-4">
-            <div className="text-sm font-medium text-muted-foreground">Trạng thái tài khoản</div>
-            <span
-              className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
-                wallet.status === 'active'
-                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                  : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
-              }`}
-            >
-              {wallet.status === 'active' ? '● Đang hoạt động' : 'Tạm khóa'}
-            </span>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={refreshData}
-            className="w-fit text-xs flex items-center gap-1.5"
+  // Ledger Table Columns
+  const ledgerColumns: ColumnsType<LedgerEntry> = [
+    {
+      title: 'Thời gian',
+      dataIndex: 'createdAt',
+      key: 'createdAt',
+      width: 170,
+      render: (dateStr: string) => (
+        <span className="text-xs text-muted-foreground">
+          {new Date(dateStr).toLocaleString('vi-VN')}
+        </span>
+      ),
+    },
+    {
+      title: 'Loại giao dịch',
+      dataIndex: 'type',
+      key: 'type',
+      width: 150,
+      render: (type: string) => {
+        if (type === 'topup') {
+          return <Tag color="green">Nạp tiền</Tag>
+        }
+        if (type === 'purchase') {
+          return <Tag color="blue">Mua bản vẽ</Tag>
+        }
+        if (type === 'refund') {
+          return <Tag color="purple">Hoàn tiền</Tag>
+        }
+        return <Tag color="orange">{type || 'Điều chỉnh'}</Tag>
+      },
+    },
+    {
+      title: 'Mã tham chiếu',
+      dataIndex: 'referenceId',
+      key: 'referenceId',
+      width: 180,
+      render: (refId: string, record: LedgerEntry) => (
+        <Typography.Text copyable code className="text-xs">
+          {refId || String(record.id)}
+        </Typography.Text>
+      ),
+    },
+    {
+      title: 'Biến động',
+      key: 'amount',
+      width: 160,
+      align: 'right',
+      render: (_: any, record: LedgerEntry) => {
+        const isCredit = record.direction === 'credit'
+        return (
+          <span
+            className={`font-mono font-bold text-sm ${
+              isCredit ? 'text-emerald-600' : 'text-rose-600'
+            }`}
           >
-            <RefreshCw className="h-3.5 w-3.5" /> Đồng bộ số dư
-          </Button>
-        </div>
-      </div>
+            {isCredit ? '+' : '-'}
+            {record.amount.toLocaleString('vi-VN')} ₫
+          </span>
+        )
+      },
+    },
+    {
+      title: 'Số dư sau',
+      dataIndex: 'balanceAfter',
+      key: 'balanceAfter',
+      width: 160,
+      align: 'right',
+      render: (bal: number) => (
+        <span className="font-mono text-xs font-semibold text-foreground">
+          {bal.toLocaleString('vi-VN')} ₫
+        </span>
+      ),
+    },
+    {
+      title: 'Nội dung',
+      dataIndex: 'description',
+      key: 'description',
+      ellipsis: true,
+      render: (desc: string) => (
+        <span className="text-xs text-muted-foreground">{desc || '-'}</span>
+      ),
+    },
+  ]
 
-      {/* Top-up Box and VietQR Display */}
-      <div className="bg-card border rounded-2xl p-6 md:p-8 shadow-sm">
-        <div className="flex items-center gap-3 pb-6 border-b">
-          <div className="h-9 w-9 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
-            <QrCode className="h-5 w-5" />
-          </div>
-          <div>
-            <h2 className="text-lg font-bold text-foreground">Nạp tiền vào ví qua VietQR (SePay)</h2>
-            <p className="text-xs text-muted-foreground">
-              Quét mã QR từ ứng dụng ngân hàng bất kỳ. Tiền vào ví tự động sau 3-5 giây (Tự động 24/7).
-            </p>
-          </div>
-        </div>
+  return (
+    <div className="space-y-6">
+      {/* Top Hero Section: Digital Wallet Card + Quick VietQR Top-up */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+        {/* Left: Luxury Digital Payment Card */}
+        <div className="lg:col-span-7 relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#0f172a] via-[#1e293b] to-[#020617] p-5 sm:p-6 text-white shadow-xl border border-slate-700/60 flex flex-col justify-between min-h-[280px]">
+          {/* Background Ambient Glow & Blueprint Grid Pattern */}
+          <div className="absolute -right-16 -top-16 w-64 h-64 rounded-full bg-blue-600/20 blur-3xl pointer-events-none" />
+          <div className="absolute -left-12 -bottom-12 w-48 h-48 rounded-full bg-indigo-600/15 blur-2xl pointer-events-none" />
+          <div
+            className="absolute inset-0 opacity-[0.03] pointer-events-none"
+            style={{
+              backgroundImage:
+                'radial-gradient(#ffffff 1px, transparent 1px), radial-gradient(#ffffff 1px, transparent 1px)',
+              backgroundSize: '20px 20px',
+              backgroundPosition: '0 0, 10px 10px',
+            }}
+          />
 
-        {errorMessage && (
-          <div className="mt-4 p-3.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-xl text-rose-700 dark:text-rose-300 text-sm flex items-center gap-2">
-            <AlertCircle className="h-4 w-4 shrink-0" />
-            <span>{errorMessage}</span>
-          </div>
-        )}
-
-        {!activeIntent ? (
-          <div className="mt-6 space-y-6">
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-3">Chọn số tiền nạp nhanh</label>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
-                {PRESET_AMOUNTS.map((amt) => (
-                  <button
-                    key={amt}
-                    type="button"
-                    onClick={() => {
-                      setSelectedAmount(amt)
-                      setCustomAmount('')
-                    }}
-                    className={`py-3 px-4 rounded-xl border text-sm font-semibold transition-all ${
-                      selectedAmount === amt && !customAmount
-                        ? 'border-primary bg-primary/10 text-primary shadow-sm ring-2 ring-primary/20'
-                        : 'border-border hover:bg-muted/60 text-foreground'
-                    }`}
-                  >
-                    {amt.toLocaleString('vi-VN')}₫
-                  </button>
-                ))}
+          {/* Card Header: Brand & Contactless Icon */}
+          <div className="relative z-10 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-blue-500/20 border border-blue-400/40 flex items-center justify-center font-bold text-white shadow-inner text-base">
+                K
+              </div>
+              <div>
+                <div className="font-bold text-sm tracking-wide leading-none text-white">
+                  KienTaoHub Pay
+                </div>
+                <div className="text-[10px] text-blue-300 font-mono tracking-wider mt-0.5">
+                  DIGITAL ASSET WALLET
+                </div>
               </div>
             </div>
 
+            {/* NFC / Contactless Wave SVG */}
+            <div className="text-slate-400/80">
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              >
+                <path d="M8.5 16.5a5 5 0 0 1 0-9" />
+                <path d="M12 19a8.5 8.5 0 0 0 0-14" />
+                <path d="M15.5 21.5a12 12 0 0 0 0-19" />
+              </svg>
+            </div>
+          </div>
+
+          {/* Middle: EMV Chip & Available Balance */}
+          <div className="relative z-10 my-4">
+            <div className="flex items-center gap-3 mb-2">
+              {/* Metallic Gold EMV Chip */}
+              <div className="w-10 h-7 rounded-md bg-gradient-to-br from-amber-200 via-amber-400 to-amber-500 p-0.5 shadow-sm flex items-center justify-center">
+                <div className="w-full h-full border border-amber-600/40 rounded-[3px] flex flex-col justify-around py-0.5 px-1">
+                  <div className="h-[1px] bg-amber-700/50 w-full" />
+                  <div className="h-[1px] bg-amber-700/50 w-full" />
+                </div>
+              </div>
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">
+                Số dư khả dụng
+              </span>
+            </div>
+
+            <div className="text-3xl sm:text-4xl font-black text-white font-mono tracking-tight drop-shadow-sm flex items-baseline gap-2">
+              <span>{wallet.balance.toLocaleString('vi-VN')}</span>
+              <span className="text-xl sm:text-2xl text-blue-400 font-bold">₫</span>
+            </div>
+          </div>
+
+          {/* Card Footer: Status, ID & Action Button */}
+          <div className="relative z-10 flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-700/60">
+            <div className="flex items-center gap-3">
+              <div className="text-xs text-emerald-400 flex items-center gap-1.5 font-medium">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-xs" />
+                <span>Sổ cái BR-03</span>
+              </div>
+              <span className="text-xs text-slate-400 font-mono">
+                ID: KT-{String(wallet.id || '88').padStart(4, '0')}
+              </span>
+            </div>
+
+            <Button
+              type="primary"
+              size="middle"
+              icon={<PlusCircleOutlined />}
+              onClick={() => setIsTopupModalOpen(true)}
+              className="!bg-[#1677ff] hover:!bg-blue-500 text-white font-bold text-xs rounded-xl h-9 px-4 shadow-md border-0 shrink-0"
+            >
+              Nạp tiền
+            </Button>
+          </div>
+        </div>
+
+        {/* Right: Quick VietQR Top-up Showcase Card */}
+        <div className="lg:col-span-5 rounded-3xl bg-white border border-slate-200/80 p-5 sm:p-6 shadow-sm flex flex-col justify-between overflow-hidden min-h-[280px]">
+          <div>
+            <div className="flex items-center justify-between gap-2 mb-2 pb-2.5 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 text-[#1677ff] border border-blue-100/60 flex items-center justify-center text-lg shadow-2xs shrink-0">
+                  <QrcodeOutlined />
+                </div>
+                <div>
+                  <div className="font-bold text-slate-900 text-sm sm:text-base leading-tight">
+                    Nạp tiền vào ví qua VietQR (SePay)
+                  </div>
+                  <div className="text-xs text-slate-400 mt-0.5">
+                    Thanh toán tự động 24/7 với VietQR Napas247
+                  </div>
+                </div>
+              </div>
+              <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-600 border border-emerald-200 shrink-0">
+                24/7 Auto
+              </span>
+            </div>
+
+            <div className="space-y-2 my-3">
+              <div className="flex items-start gap-2 text-xs text-slate-600">
+                <div className="w-4 h-4 rounded-full bg-blue-100 text-[#1677ff] flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
+                  1
+                </div>
+                <span>Chọn số tiền linh hoạt (tối thiểu chỉ từ 10.000₫)</span>
+              </div>
+              <div className="flex items-start gap-2 text-xs text-slate-600">
+                <div className="w-4 h-4 rounded-full bg-blue-100 text-[#1677ff] flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
+                  2
+                </div>
+                <span>Quét mã VietQR trên bất kỳ ứng dụng ngân hàng di động nào</span>
+              </div>
+              <div className="flex items-start gap-2 text-xs text-slate-600">
+                <div className="w-4 h-4 rounded-full bg-blue-100 text-[#1677ff] flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
+                  3
+                </div>
+                <span>Số dư tự động được cộng vào ví trong 3-5 giây qua SePay Webhook</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-1">
+            <Button
+              type="primary"
+              size="large"
+              icon={<PlusCircleOutlined />}
+              onClick={() => setIsTopupModalOpen(true)}
+              className="w-full !bg-[#1677ff] hover:!bg-blue-600 rounded-2xl font-bold text-xs sm:text-sm h-10 shadow-sm"
+            >
+              Mở cửa sổ nạp tiền
+            </Button>
+
+            <div className="flex flex-wrap items-center justify-center gap-1.5 mt-2.5 pt-2.5 border-t border-slate-100">
+              <Tag color="green" className="!m-0 text-[11px] px-2.5 py-0.5 rounded-full font-medium">
+                Miễn phí giao dịch
+              </Tag>
+              <Tag color="blue" className="!m-0 text-[11px] px-2.5 py-0.5 rounded-full font-medium">
+                Cộng tiền sau 3-5s
+              </Tag>
+              <Tag color="purple" className="!m-0 text-[11px] px-2.5 py-0.5 rounded-full font-medium">
+                Bảo mật chuẩn ngân hàng
+              </Tag>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Row 2: 3 Financial Activity Metric Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
+        {/* Card 1: Tạm giữ / Chờ xử lý */}
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-sm flex flex-col justify-between hover:shadow-md transition-all">
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Tạm giữ / Chờ xử lý
+            </span>
+            <div className="w-9 h-9 rounded-xl bg-amber-50 text-amber-500 border border-amber-100 flex items-center justify-center text-base">
+              <ClockCircleOutlined />
+            </div>
+          </div>
+          <div>
+            <div className="text-2xl font-extrabold text-slate-900 font-mono tracking-tight">
+              {wallet.pendingBalance.toLocaleString('vi-VN')} ₫
+            </div>
+            <div className="text-xs text-slate-400 mt-1">
+              Đơn hàng đang xử lý hoặc yêu cầu rút
+            </div>
+          </div>
+        </div>
+
+        {/* Card 2: Đã chi tiêu mua bản vẽ */}
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-sm flex flex-col justify-between hover:shadow-md transition-all">
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Đã chi tiêu mua bản vẽ
+            </span>
+            <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center text-base">
+              <ShoppingOutlined />
+            </div>
+          </div>
+          <div>
+            <div className="text-2xl font-extrabold text-slate-900 font-mono tracking-tight">
+              {totalSpent.toLocaleString('vi-VN')} ₫
+            </div>
+            <div className="text-xs text-slate-400 mt-1">
+              Tổng chi tiêu mua tài nguyên số
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* VietQR Top-up Ant Design Modal: presets → live intent → QR + transfer details */}
+      <Modal
+        open={isTopupModalOpen}
+        onCancel={handleCloseModal}
+        footer={null}
+        title={
+          <Space>
+            <QrcodeOutlined className="text-[#1677ff] text-lg" />
+            <span className="font-semibold">Nạp tiền vào ví qua VietQR (Tự động 24/7)</span>
+          </Space>
+        }
+      >
+        {!activeIntent ? (
+          <div className="space-y-4">
+            {errorMessage && <Alert type="warning" showIcon title={errorMessage} />}
             <div>
-              <label className="block text-sm font-medium text-foreground mb-2">Hoặc nhập số tiền khác (VND)</label>
-              <div className="max-w-md">
-                <input
-                  type="number"
-                  min="10000"
-                  step="10000"
-                  placeholder="Ví dụ: 250000"
-                  value={customAmount}
-                  onChange={(e) => setCustomAmount(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">
+                Chọn mệnh giá nạp
+              </div>
+              <Radio.Group
+                value={selectedPreset}
+                onChange={(e) => {
+                  setSelectedPreset(e.target.value)
+                  setCustomAmount(e.target.value)
+                }}
+                className="grid grid-cols-2 sm:grid-cols-3 gap-2 w-full"
+              >
+                {PRESET_AMOUNTS.map((amount) => (
+                  <Radio.Button key={amount} value={amount} className="!rounded-lg text-center">
+                    {amount.toLocaleString('vi-VN')}₫
+                  </Radio.Button>
+                ))}
+              </Radio.Group>
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">
+                Hoặc nhập số tiền khác
+              </div>
+              <InputNumber
+                min={10000}
+                step={10000}
+                placeholder="Nhập tối thiểu 10,000₫"
+                value={customAmount}
+                onChange={(value) => setCustomAmount(Number(value) || 0)}
+                className="w-full"
+                addonAfter="₫"
+              />
+            </div>
+            <Button
+              type="primary"
+              size="large"
+              block
+              loading={isSubmitting}
+              onClick={handleCreateTopup}
+              icon={<PlusCircleOutlined />}
+              className="!bg-[#1677ff]"
+            >
+              Tạo mã QR nạp {effectiveAmount.toLocaleString('vi-VN')}₫
+            </Button>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+              Quét mã QR từ ứng dụng ngân hàng bất kỳ. Tiền vào ví tự động sau 3-5 giây (Tự động 24/7).
+            </div>
+          </div>
+        ) : pollStatus === 'paid' ? (
+          <Result
+            status="success"
+            title={`Nạp tiền thành công ${activeIntent.amount.toLocaleString('vi-VN')}₫!`}
+            subTitle="Số dư ví của bạn đã được cập nhật."
+            extra={
+              <Button type="primary" key="ok" onClick={handleCloseModal} className="!bg-[#1677ff]">
+                Hoàn tất
+              </Button>
+            }
+          />
+        ) : (
+          <div className="space-y-4">
+            {activeIntent.checkoutUrl && (
+              <div className="flex justify-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={activeIntent.checkoutUrl}
+                  alt="VietQR Chuyển khoản"
+                  className="w-56 h-56 rounded-lg border border-slate-200 dark:border-slate-700"
                 />
               </div>
-            </div>
+            )}
 
-            <div className="pt-2">
-              <Button
-                onClick={handleCreateTopup}
-                disabled={isSubmitting || effectiveAmount < 10000}
-                className="px-6 py-2.5 font-medium rounded-xl text-sm"
-              >
-                {isSubmitting ? 'Đang tạo mã QR...' : `Tạo mã nạp ${effectiveAmount.toLocaleString('vi-VN')}₫`}
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="mt-6">
-            {pollStatus === 'paid' ? (
-              <div className="p-8 text-center bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900 rounded-2xl space-y-4">
-                <div className="h-14 w-14 bg-emerald-500 text-white rounded-full flex items-center justify-center mx-auto shadow-md">
-                  <Check className="h-7 w-7" />
-                </div>
-                <h3 className="text-xl font-bold text-emerald-900 dark:text-emerald-200">
-                  Nạp tiền thành công {activeIntent.amount.toLocaleString('vi-VN')}₫!
-                </h3>
-                <p className="text-sm text-emerald-700 dark:text-emerald-400">
-                  Hệ thống đã ghi nhận giao dịch vào Sổ cái bất biến và cập nhật số dư ví của bạn.
-                </p>
-                <div className="pt-2">
-                  <Button
-                    onClick={() => {
-                      setActiveIntent(null)
-                      setPollStatus('idle')
-                    }}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                  >
-                    Tiếp tục nạp thêm
-                  </Button>
-                </div>
-              </div>
-            ) : pollStatus === 'expired' ? (
-              <div className="p-8 text-center bg-muted/60 border rounded-2xl space-y-4">
-                <Clock className="h-10 w-10 text-muted-foreground mx-auto" />
-                <h3 className="text-lg font-bold text-foreground">Giao dịch đã hết hạn hiệu lực</h3>
-                <p className="text-sm text-muted-foreground">
-                  Vui lòng tạo giao dịch nạp mới để nhận mã chuyển khoản cập nhật.
-                </p>
-                <Button onClick={() => setActiveIntent(null)} variant="outline">
-                  Tạo giao dịch mới
-                </Button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-                {/* VietQR Image */}
-                <div className="lg:col-span-5 flex flex-col items-center p-4 bg-white dark:bg-zinc-900 rounded-2xl border shadow-sm">
-                  {activeIntent.checkoutUrl ? (
-                    <img
-                      src={activeIntent.checkoutUrl}
-                      alt="VietQR Chuyển khoản"
-                      className="w-64 h-64 object-contain rounded-lg"
-                    />
-                  ) : (
-                    <div className="w-64 h-64 flex items-center justify-center bg-muted rounded-lg">
-                      <QrCode className="h-16 w-16 text-muted-foreground" />
-                    </div>
-                  )}
-                  <div className="mt-3 flex items-center gap-2 text-xs font-semibold text-primary animate-pulse">
-                    <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Đang chờ hệ thống ngân hàng xác nhận...
-                  </div>
-                </div>
+            <Descriptions column={1} size="small" bordered>
+              <Descriptions.Item label="Ngân hàng">{activeIntent.bankCode || 'MBBank'}</Descriptions.Item>
+              <Descriptions.Item label="Số tài khoản">
+                {activeIntent.accountNo || '0987654321'}
+              </Descriptions.Item>
+              <Descriptions.Item label="Chủ tài khoản">
+                {activeIntent.accountName || 'KIENTAOHUB'}
+              </Descriptions.Item>
+              <Descriptions.Item label="Số tiền">
+                <Typography.Text copyable={{ text: String(activeIntent.amount) }}>
+                  {activeIntent.amount.toLocaleString('vi-VN')}₫
+                </Typography.Text>
+              </Descriptions.Item>
+              <Descriptions.Item label="Nội dung chuyển khoản">
+                <Typography.Text strong copyable={{ text: activeIntent.code }}>
+                  {activeIntent.code}
+                </Typography.Text>
+              </Descriptions.Item>
+            </Descriptions>
 
-                {/* Transfer Info */}
-                <div className="lg:col-span-7 space-y-4">
-                  <div className="bg-muted/40 p-4 rounded-xl space-y-3 text-sm border">
-                    <div className="flex items-center justify-between py-1 border-b border-border/50">
-                      <span className="text-muted-foreground">Ngân hàng thụ hưởng:</span>
-                      <span className="font-bold text-foreground">{activeIntent.bankCode || 'MBBank'}</span>
-                    </div>
-
-                    <div className="flex items-center justify-between py-1 border-b border-border/50">
-                      <span className="text-muted-foreground">Số tài khoản:</span>
-                      <div className="flex items-center gap-2 font-mono font-bold text-foreground">
-                        <span>{activeIntent.accountNo || '0987654321'}</span>
-                        <button
-                          type="button"
-                          onClick={() => handleCopy(activeIntent.accountNo || '0987654321', 'accountNo')}
-                          className="text-muted-foreground hover:text-foreground"
-                          title="Sao chép"
-                        >
-                          {copiedField === 'accountNo' ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between py-1 border-b border-border/50">
-                      <span className="text-muted-foreground">Chủ tài khoản:</span>
-                      <span className="font-semibold text-foreground uppercase">{activeIntent.accountName || 'KIENTAOHUB'}</span>
-                    </div>
-
-                    <div className="flex items-center justify-between py-1 border-b border-border/50">
-                      <span className="text-muted-foreground">Số tiền:</span>
-                      <div className="flex items-center gap-2 font-bold text-primary text-base">
-                        <span>{activeIntent.amount.toLocaleString('vi-VN')}₫</span>
-                        <button
-                          type="button"
-                          onClick={() => handleCopy(String(activeIntent.amount), 'amount')}
-                          className="text-muted-foreground hover:text-foreground"
-                          title="Sao chép"
-                        >
-                          {copiedField === 'amount' ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between py-1 bg-amber-50 dark:bg-amber-950/30 p-2.5 rounded-lg border border-amber-200 dark:border-amber-900">
-                      <span className="text-amber-900 dark:text-amber-300 font-medium">Nội dung chuyển khoản (bắt buộc):</span>
-                      <div className="flex items-center gap-2 font-mono font-extrabold text-amber-900 dark:text-amber-200 text-base">
-                        <span>{activeIntent.code}</span>
-                        <button
-                          type="button"
-                          onClick={() => handleCopy(activeIntent.code, 'code')}
-                          className="text-amber-800 dark:text-amber-300 hover:text-foreground"
-                          title="Sao chép mã"
-                        >
-                          {copiedField === 'code' ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <p className="text-xs text-muted-foreground italic">
-                    ⚠️ Lưu ý: Vui lòng giữ nguyên nội dung chuyển khoản <strong>{activeIntent.code}</strong> để hệ thống nhận diện và cộng tiền tự động ngay lập tức.
-                  </p>
-
-                  <div className="flex items-center gap-3 pt-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setActiveIntent(null)
-                        setPollStatus('idle')
-                      }}
-                    >
-                      Hủy giao dịch này
-                    </Button>
-                  </div>
-                </div>
+            {pollStatus === 'polling' && (
+              <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                <LoadingOutlined className="text-[#1677ff]" />
+                <span>Đang chờ chuyển khoản...</span>
               </div>
             )}
+
+            {pollStatus === 'expired' && (
+              <Alert type="error" showIcon title="Mã QR đã hết hạn. Vui lòng tạo giao dịch khác." />
+            )}
+
+            <Alert
+              title="Lưu ý: Giữ nguyên nội dung chuyển khoản để hệ thống nhận diện và cộng tiền tự động ngay lập tức."
+              type="warning"
+              showIcon
+            />
+
+            <div className="flex justify-end gap-2 pt-2 border-t">
+              <Button onClick={handleResetTopup}>Hủy và tạo giao dịch khác</Button>
+            </div>
           </div>
         )}
-      </div>
-
-      {/* Financial Ledger History Table */}
-      <div className="bg-card border rounded-2xl p-6 md:p-8 shadow-sm">
-        <div className="flex items-center justify-between pb-6 border-b">
-          <div>
-            <h2 className="text-lg font-bold text-foreground">Lịch sử biến động số dư (Ledger)</h2>
-            <p className="text-xs text-muted-foreground">
-              Hồ sơ ghi nhận minh bạch mọi giao dịch nạp tiền, chi tiêu và hoàn tiền.
-            </p>
-          </div>
-        </div>
-
-        {ledger.length === 0 ? (
-          <div className="py-12 text-center text-muted-foreground text-sm">
-            Chưa có giao dịch nào được ghi nhận trong sổ cái ví của bạn.
-          </div>
-        ) : (
-          <div className="overflow-x-auto mt-4">
-            <table className="w-full text-sm text-left">
-              <thead className="text-xs uppercase bg-muted/50 text-muted-foreground font-semibold border-b">
-                <tr>
-                  <th className="px-4 py-3">Thời gian</th>
-                  <th className="px-4 py-3">Loại giao dịch</th>
-                  <th className="px-4 py-3">Mã tham chiếu</th>
-                  <th className="px-4 py-3 text-right">Biến động</th>
-                  <th className="px-4 py-3 text-right">Số dư sau</th>
-                  <th className="px-4 py-3">Nội dung</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {ledger.map((entry) => (
-                  <tr key={entry.id} className="hover:bg-muted/30 transition-colors">
-                    <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
-                      {new Date(entry.createdAt).toLocaleString('vi-VN')}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                          entry.direction === 'credit'
-                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                            : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
-                        }`}
-                      >
-                        {entry.type === 'topup'
-                          ? 'Nạp tiền'
-                          : entry.type === 'purchase'
-                          ? 'Mua tài nguyên'
-                          : entry.type === 'refund'
-                          ? 'Hoàn tiền'
-                          : entry.type === 'adjustment'
-                          ? 'Điều chỉnh'
-                          : entry.type}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                      {entry.referenceId}
-                    </td>
-                    <td
-                      className={`px-4 py-3 text-right font-semibold ${
-                        entry.direction === 'credit'
-                          ? 'text-emerald-600 dark:text-emerald-400'
-                          : 'text-rose-600 dark:text-rose-400'
-                      }`}
-                    >
-                      {entry.direction === 'credit' ? '+' : '-'}
-                      {entry.amount.toLocaleString('vi-VN')}₫
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono text-xs text-foreground">
-                      {entry.balanceAfter.toLocaleString('vi-VN')}₫
-                    </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground max-w-xs truncate">
-                      {entry.description || '-'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      </Modal>
     </div>
   )
 }

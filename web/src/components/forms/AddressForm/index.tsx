@@ -1,47 +1,18 @@
 'use client'
-import React, { useCallback } from 'react'
-import { useForm } from 'react-hook-form'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { useAddresses } from '@payloadcms/plugin-ecommerce/client/react'
-import { defaultCountries as supportedCountries } from '@payloadcms/plugin-ecommerce/client/react'
+
+import React, { useState, useCallback } from 'react'
+import { Form, Input, Select, Button, Row, Col, Divider, message } from 'antd'
+import { useAddresses, defaultCountries as supportedCountries } from '@payloadcms/plugin-ecommerce/client/react'
 import { Address, Config } from '@/payload-types'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-
 import { titles } from './constants'
-import { Button } from '@/components/ui/button'
 import { deepMergeSimple } from 'payload/shared'
-import { FormError } from '@/components/forms/FormError'
-import { FormItem } from '@/components/forms/FormItem'
-
-type AddressFormValues = {
-  title?: string | null
-  firstName?: string | null
-  lastName?: string | null
-  company?: string | null
-  addressLine1?: string | null
-  addressLine2?: string | null
-  city?: string | null
-  state?: string | null
-  postalCode?: string | null
-  country?: string | null
-  phone?: string | null
-}
 
 type Props = {
   addressID?: Config['db']['defaultIDType']
   initialData?: Omit<Address, 'country' | 'id' | 'updatedAt' | 'createdAt'> & { country?: string }
   callback?: (data: Partial<Address>) => void
-  /**
-   * If true, the form will not submit to the API.
-   */
   skipSubmission?: boolean
+  onCancel?: () => void
 }
 
 export const AddressForm: React.FC<Props> = ({
@@ -49,178 +20,190 @@ export const AddressForm: React.FC<Props> = ({
   initialData,
   callback,
   skipSubmission,
+  onCancel,
 }) => {
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-    setValue,
-  } = useForm<AddressFormValues>({
-    defaultValues: initialData,
-  })
-
+  const [form] = Form.useForm()
   const { createAddress, updateAddress } = useAddresses()
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const onSubmit = useCallback(
-    async (data: AddressFormValues) => {
-      const newData = deepMergeSimple(initialData || {}, data)
+  const handleSubmit = useCallback(
+    async (values: any) => {
+      setIsSubmitting(true)
+      try {
+        const newData = deepMergeSimple(initialData || {}, values)
 
-      if (!skipSubmission) {
-        if (addressID) {
-          await updateAddress(addressID, newData)
-        } else {
-          await createAddress(newData)
+        if (!skipSubmission) {
+          if (addressID) {
+            await updateAddress(addressID, newData)
+            message.success('Cập nhật địa chỉ thành công!')
+          } else {
+            await createAddress(newData)
+            message.success('Thêm địa chỉ mới thành công!')
+          }
         }
-      }
 
-      if (callback) {
-        callback(newData)
+        if (callback) {
+          callback(newData)
+        }
+      } catch (error: any) {
+        message.error(error?.message || 'Có lỗi xảy ra khi lưu địa chỉ.')
+      } finally {
+        setIsSubmitting(false)
       }
     },
-    [initialData, skipSubmission, callback, addressID, updateAddress, createAddress],
+    [initialData, skipSubmission, addressID, updateAddress, createAddress, callback],
   )
 
+  const countryOptions = supportedCountries.map((c: any) => {
+    const val = typeof c === 'string' ? c : c.value
+    const lbl = typeof c === 'string' ? c : typeof c.label === 'string' ? c.label : val
+    return { label: lbl, value: val }
+  })
+  // The addresses collection validates `country` against this same list, so a value outside it can
+  // never be saved ('VN' used to be the default and every submit answered 400 invalid selection).
+  const defaultCountry = String(countryOptions[0]?.value ?? '')
+
   return (
-    <form onSubmit={handleSubmit(onSubmit)}>
-      <div className="flex flex-col gap-4 mb-8">
-        <div className="flex flex-col md:flex-row gap-4">
-          <FormItem className="shrink">
-            <Label htmlFor="title">Title</Label>
-
+    <Form
+      form={form}
+      layout="vertical"
+      initialValues={{
+        title: initialData?.title || undefined,
+        firstName: initialData?.firstName || '',
+        lastName: initialData?.lastName || '',
+        phone: initialData?.phone || '',
+        company: initialData?.company || '',
+        addressLine1: initialData?.addressLine1 || '',
+        addressLine2: initialData?.addressLine2 || '',
+        city: initialData?.city || '',
+        state: initialData?.state || '',
+        postalCode: initialData?.postalCode || '',
+        country: initialData?.country || defaultCountry,
+      }}
+      onFinish={handleSubmit}
+      requiredMark="optional"
+    >
+      <Row gutter={16}>
+        <Col xs={24} sm={8}>
+          <Form.Item name="title" label="Danh xưng">
             <Select
-              {...register('title')}
-              onValueChange={(value) => {
-                setValue('title', value, { shouldValidate: true })
-              }}
-              defaultValue={initialData?.title || ''}
-            >
-              <SelectTrigger id="title">
-                <SelectValue placeholder="Title" />
-              </SelectTrigger>
-              <SelectContent>
-                {titles.map((title) => (
-                  <SelectItem key={title} value={title}>
-                    {title}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {errors.title && <FormError message={errors.title.message} />}
-          </FormItem>
-
-          <FormItem>
-            <Label htmlFor="firstName">First name*</Label>
-            <Input
-              id="firstName"
-              autoComplete="given-name"
-              {...register('firstName', { required: 'First name is required.' })}
+              placeholder="Chọn"
+              allowClear
+              options={titles.map((t) => ({ label: t, value: t }))}
             />
-            {errors.firstName && <FormError message={errors.firstName.message} />}
-          </FormItem>
+          </Form.Item>
+        </Col>
 
-          <FormItem>
-            <Label htmlFor="lastName">Last name*</Label>
-            <Input
-              autoComplete="family-name"
-              id="lastName"
-              {...register('lastName', { required: 'Last name is required.' })}
-            />
-            {errors.lastName && <FormError message={errors.lastName.message} />}
-          </FormItem>
-        </div>
-
-        <FormItem>
-          <Label htmlFor="phone">Phone</Label>
-          <Input type="tel" id="phone" autoComplete="mobile tel" {...register('phone')} />
-          {errors.phone && <FormError message={errors.phone.message} />}
-        </FormItem>
-
-        <FormItem>
-          <Label htmlFor="company">Company</Label>
-          <Input id="company" autoComplete="organization" {...register('company')} />
-          {errors.company && <FormError message={errors.company.message} />}
-        </FormItem>
-
-        <FormItem>
-          <Label htmlFor="addressLine1">Address line 1*</Label>
-          <Input
-            id="addressLine1"
-            autoComplete="address-line1"
-            {...register('addressLine1', { required: 'Address line 1 is required.' })}
-          />
-          {errors.addressLine1 && <FormError message={errors.addressLine1.message} />}
-        </FormItem>
-
-        <FormItem>
-          <Label htmlFor="addressLine2">Address line 2</Label>
-          <Input id="addressLine2" autoComplete="address-line2" {...register('addressLine2')} />
-          {errors.addressLine2 && <FormError message={errors.addressLine2.message} />}
-        </FormItem>
-
-        <FormItem>
-          <Label htmlFor="city">City*</Label>
-          <Input
-            id="city"
-            autoComplete="address-level2"
-            {...register('city', { required: 'City is required.' })}
-          />
-          {errors.city && <FormError message={errors.city.message} />}
-        </FormItem>
-
-        <FormItem>
-          <Label htmlFor="state">State</Label>
-          <Input id="state" autoComplete="address-level1" {...register('state')} />
-          {errors.state && <FormError message={errors.state.message} />}
-        </FormItem>
-
-        <FormItem>
-          <Label htmlFor="postalCode">Zip Code*</Label>
-          <Input
-            id="postalCode"
-            {...register('postalCode', { required: 'Postal code is required.' })}
-          />
-          {errors.postalCode && <FormError message={errors.postalCode.message} />}
-        </FormItem>
-
-        <FormItem>
-          <Label htmlFor="country">Country*</Label>
-
-          <Select
-            {...register('country', {
-              required: 'Country is required.',
-            })}
-            onValueChange={(value) => {
-              setValue('country', value, { shouldValidate: true })
-            }}
-            required
-            defaultValue={initialData?.country || ''}
+        <Col xs={24} sm={8}>
+          <Form.Item
+            name="firstName"
+            label="Tên"
+            rules={[{ required: true, message: 'Vui lòng nhập tên' }]}
           >
-            <SelectTrigger id="country" className="w-full">
-              <SelectValue placeholder="Country" />
-            </SelectTrigger>
-            <SelectContent>
-              {supportedCountries.map((country) => {
-                const value = typeof country === 'string' ? country : country.value
-                const label =
-                  typeof country === 'string'
-                    ? country
-                    : typeof country.label === 'string'
-                      ? country.label
-                      : value
+            <Input placeholder="Văn A" />
+          </Form.Item>
+        </Col>
 
-                return (
-                  <SelectItem key={value} value={value}>
-                    {label}
-                  </SelectItem>
-                )
-              })}
-            </SelectContent>
-          </Select>
-          {errors.country && <FormError message={errors.country.message} />}
-        </FormItem>
+        <Col xs={24} sm={8}>
+          <Form.Item
+            name="lastName"
+            label="Họ & Tên đệm"
+            rules={[{ required: true, message: 'Vui lòng nhập họ' }]}
+          >
+            <Input placeholder="Nguyễn" />
+          </Form.Item>
+        </Col>
+      </Row>
+
+      <Row gutter={16}>
+        <Col xs={24} sm={12}>
+          <Form.Item name="phone" label="Số điện thoại">
+            <Input placeholder="0912 345 678" />
+          </Form.Item>
+        </Col>
+
+        <Col xs={24} sm={12}>
+          <Form.Item name="company" label="Tên công ty (tùy chọn)">
+            <Input placeholder="Công ty Kiến Trúc ABC" />
+          </Form.Item>
+        </Col>
+      </Row>
+
+      <Row gutter={16}>
+        <Col xs={24}>
+          <Form.Item
+            name="addressLine1"
+            label="Địa chỉ dòng 1"
+            rules={[{ required: true, message: 'Vui lòng nhập địa chỉ dòng 1' }]}
+          >
+            <Input placeholder="Số 123 đường Giải Phóng, Phường Đồng Tâm" />
+          </Form.Item>
+        </Col>
+
+        <Col xs={24}>
+          <Form.Item name="addressLine2" label="Địa chỉ dòng 2 (tùy chọn)">
+            <Input placeholder="Tòa nhà Landmark, Tầng 5, Phòng 502" />
+          </Form.Item>
+        </Col>
+      </Row>
+
+      <Row gutter={16}>
+        <Col xs={24} sm={8}>
+          <Form.Item
+            name="city"
+            label="Thành phố / Tỉnh"
+            rules={[{ required: true, message: 'Vui lòng nhập thành phố' }]}
+          >
+            <Input placeholder="Hà Nội" />
+          </Form.Item>
+        </Col>
+
+        <Col xs={24} sm={8}>
+          <Form.Item name="state" label="Quận / Huyện">
+            <Input placeholder="Hai Bà Trưng" />
+          </Form.Item>
+        </Col>
+
+        <Col xs={24} sm={8}>
+          <Form.Item
+            name="postalCode"
+            label="Mã bưu chính (Zip code)"
+            rules={[{ required: true, message: 'Vui lòng nhập mã bưu chính' }]}
+          >
+            <Input placeholder="100000" />
+          </Form.Item>
+        </Col>
+      </Row>
+
+      <Row gutter={16}>
+        <Col xs={24}>
+          <Form.Item
+            name="country"
+            label="Quốc gia"
+            rules={[{ required: true, message: 'Vui lòng chọn quốc gia' }]}
+          >
+            <Select
+              showSearch
+              placeholder="Chọn quốc gia"
+              optionFilterProp="label"
+              options={countryOptions}
+            />
+          </Form.Item>
+        </Col>
+      </Row>
+
+      <Divider className="my-4" />
+
+      <div className="flex justify-end gap-3">
+        {onCancel && (
+          <Button onClick={onCancel} disabled={isSubmitting}>
+            Hủy
+          </Button>
+        )}
+        <Button type="primary" htmlType="submit" loading={isSubmitting} className="!bg-[#1677ff]">
+          {addressID ? 'Cập nhật địa chỉ' : 'Lưu địa chỉ mới'}
+        </Button>
       </div>
-
-      <Button type="submit">Submit</Button>
-    </form>
+    </Form>
   )
 }

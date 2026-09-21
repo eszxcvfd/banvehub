@@ -390,16 +390,21 @@ describe('Challenger M3: Product Detail Data Rendering & Integrity', () => {
   })
 
   describe('3. SellerAttribution', () => {
-    it('renders default verified creator attribution', () => {
+    it('renders the seller record it is given, never an invented creator name', () => {
+      const { unmount } = render(<SellerAttribution sellerName="Thiết Kế Nội Thất An Cường" />)
+
+      expect(screen.getByText('Thiết Kế Nội Thất An Cường')).toBeDefined()
+      // No verification field exists on seller_profiles, so no seller carries the badge
+      expect(screen.queryByText('Đã xác minh')).toBeNull()
+      expect(screen.queryByText('Chuyên gia')).toBeNull()
+      // the fabricated default must not appear anywhere, with or without a seller
+      expect(screen.queryByText('KienTaoHub Studio & Creators')).toBeNull()
+      unmount()
+
       render(<SellerAttribution />)
-
-      expect(screen.getByText('KienTaoHub Studio & Creators')).toBeDefined()
-      expect(screen.getByText('Chuyên gia thiết kế CAD/BIM')).toBeDefined()
-      expect(screen.getByText('Đã xác minh')).toBeDefined()
-      expect(screen.getByText('Hỗ trợ kỹ thuật 1:1')).toBeDefined()
-
-      const catalogLink = screen.getByRole('link', { name: /Tất cả tài nguyên/i })
-      expect(catalogLink.getAttribute('href')).toBe('/shop')
+      // without a seller record the block renders nothing at all — no invented creator
+      expect(screen.queryByText('KienTaoHub Studio & Creators')).toBeNull()
+      expect(screen.queryByRole('link', { name: /Tất cả tài nguyên/i })).toBeNull()
     })
 
     it('renders custom author attribution with derived initials', () => {
@@ -582,8 +587,8 @@ describe('Challenger M3: Product Detail Data Rendering & Integrity', () => {
       // Title
       expect(screen.getByRole('heading', { level: 1, name: 'Hồ sơ bản vẽ thi công biệt thự' })).toBeDefined()
 
-      // Seller Attribution block included
-      expect(screen.getByText('KienTaoHub Studio & Creators')).toBeDefined()
+      // No seller record in this fixture, so no attribution block is rendered (never an invented one)
+      expect(screen.queryByText('KienTaoHub Studio & Creators')).toBeNull()
 
       // CTA included
       expect(screen.getByText('500.000')).toBeDefined()

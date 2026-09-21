@@ -30,6 +30,8 @@ documents here as real choices are accepted, then index them in this file.
 
 | [0013 Remove the unused template commerce ledger](0013-remove-unused-commerce-ledger.md) | Accepted | The template's `transactions`/`transactions_items` ledger and its Stripe payment endpoints are gone (phase-13 migration `20260920_160000_phase13_drop_unused_ecommerce_transactions`, which refuses to run while `transactions` holds a row); the plugin stays configured only for `customers` and `addresses`, which the account area reads through `useAddresses`; Stripe is not a rail of this application, so a future card provider arrives through `PLAN.md` FR-12's seam with a real writer, never by re-enabling the template ledger |
 
+| [0014 The storefront cart lives in the browser session](0014-cart-in-browser-session.md) | Accepted | The cart is client-side state in `sessionStorage` — no `carts` collection, no cart table and no migration, so decision 0013 stands; the UI keeps the same `useCart` surface (`cart`, `isLoading`, `addItem`, `removeItem`, `incrementItem`, `decrementItem`, `clearCart`, addressed by item id) and only the store behind it is ours; checkout money paths use the APIs this repository owns — `POST /api/v1/orders/purchase` per item (0002) and `POST /api/v1/payments/topup` for a VietQR top-up (0004) — and the card option gets a deterministic refusal from an existing endpoint instead of a 404, because card is not a P0 rail |
+
 ## Superseded
 
 The daptin-era decisions deleted in `366ac21` are not restored. They are

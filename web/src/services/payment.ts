@@ -1,4 +1,4 @@
-import type { Payload } from 'payload'
+import type { Payload, Where } from 'payload'
 import type { PaymentIntent, PaymentTransaction, PaymentWebhookEvent, User } from '@/payload-types'
 import { creditWallet } from '@/services/wallet'
 import { createNotification } from '@/services/notifications'
@@ -422,15 +422,24 @@ export async function handleSePayWebhook(
  */
 export async function getPaymentIntentWithLazyExpiry(
   payload: Payload,
-  { code, req }: { code: string; req?: any }
+  {
+    code,
+    req,
+    scopeUserId,
+  }: { code: string; req?: any; scopeUserId?: number | string | null }
 ): Promise<PaymentIntent | null> {
+  // `scopeUserId` lets a caller that has to resolve the row with `overrideAccess` still honour the
+  // collection's own rule (`paymentIntentReadAccess`: owner, or admin/financeAdmin): a scoped lookup
+  // answers like an unknown code for an intent the caller does not own, and it never reaches the
+  // lazy-expiry update below, so an outsider cannot advance someone else's intent to EXPIRED.
+  const where: Where =
+    scopeUserId === undefined || scopeUserId === null
+      ? { code: { equals: code } }
+      : { and: [{ code: { equals: code } }, { user: { equals: scopeUserId } }] }
+
   const result = await payload.find({
     collection: 'payment_intents',
-    where: {
-      code: {
-        equals: code,
-      },
-    },
+    where,
     limit: 1,
     overrideAccess: true,
     req,
