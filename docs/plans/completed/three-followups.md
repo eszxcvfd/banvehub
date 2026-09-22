@@ -56,8 +56,8 @@ generator fix.
    161 products) and is deliberately left alone — those rows render nowhere (the storefront and the API
    read `products`), the committed snapshot is the archive for the `products` rows only, and rewriting
    version history is an edit this decision does not authorise; the residual risk, recorded in decision
-   0020 clause 1 and in the migration header, is that restoring such a version through the admin would
-   write the invented value back into `products`, where it would render again.
+   0020 **clause 4** and in the migration header, is that restoring such a version through the admin
+   would write the invented value back into `products`, where it would render again.
 3. **t49** — `web/src/constants/countries.ts` with Vietnamese labels, the label test, and the header
    rule that nothing matches on a label. The decisions index `docs/decisions/README.md` gains the rows
    for 0019, 0020 and 0021 (captain, before dispatch) and is staged together with them. The int spec
@@ -73,6 +73,15 @@ generator fix.
    (integration) carry the `work` kind because the runtime refuses a captain takeover while a task's
    dependencies are open, so their contracts live in their objectives, acceptance and descriptions
    instead of the quality-kind fields. The three reviews are real `kind=review` gates.
+   **Correction (captain, after delivery):** that sentence is accurate for `t50` but not for `t51`. The
+   id was repurposed with `edit_plan update_task`, which can replace a task's subject, description,
+   assignee and dependencies but **not** its objective, acceptance or out-of-scope fields — so `t51`
+   kept the stale review objective ("Adversarially review t46 against decision 0019…") and the stale
+   reviewer out-of-scope list, while the integration contract the mapper executed lived in its
+   description. The mapper flagged this itself and executed the description; graded against the stored
+   objective, the integration would have read as out-of-scope on every path it committed. Use
+   `agent_teams_amend_task` (not `update_task`) when a repurposed id must carry a different
+   objective/acceptance, and re-read the stored contract before dispatching a repurposed task.
 
 ## Out of scope
 
@@ -378,8 +387,8 @@ Disclosures: `web/scripts/seed-realistic.mts` is staged by a single hunk (the re
 `vitest.challenger.config.mts`, the generated import map and every storefront- or refund-vertical file
 in the working tree are deliberately not staged; the purge covers `products` only, and the residual —
 Payload's `_products_v` holding 162 matching version rows that no surface renders but an admin
-"restore version" could write back into `products` — is documented in decision 0020 clause 1 and in the
-migration header; and two pre-existing seed-generator defects (a reset that truncates the dropped
+"restore version" could write back into `products` — is documented in decision 0020 **clause 4** and in
+the migration header; and two pre-existing seed-generator defects (a reset that truncates the dropped
 `transactions_items` table, and one that unlinks `public/media` before failing) are reported as
 follow-ups rather than fixed here.
 
