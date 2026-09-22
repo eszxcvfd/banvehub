@@ -146,6 +146,20 @@ generator fix.
   exit 0 / 31 files / 469 tests; (b) a browser on the `127.0.0.1` origin gets **403** for every
   `/_next/static/chunks/*`, so client-interaction checks must use `localhost` against the same server.
 
+- 2026-09-22, t51 complete (integrator): the increment landed as **`2411573`** (17 files). All six
+  gates ran green on the frozen revision `19a11b1` and only that revision — migrate exit 0;
+  `test:int` exit 0 with **43 files / 659 tests** and the guard
+  `address-countries-single-source.int.spec.ts (5 tests)` executing; `test:challenger` exit 0 with
+  **31 files / 469 tests** on the first run, the recorded rc-component flake absent so no re-run was
+  needed; `tsc --noEmit` exit 0; `lint` exit 0 with **0 errors** (1480 warnings); in-place `build`
+  exit 0 (`Compiled successfully in 10.3s`) — and the captain's dev server on `:3000` survived it,
+  answering **200** on `/`, `/shop` and `/admin/login` with no restart. Staging is the 17 declared
+  paths and nothing else, with `web/scripts/seed-realistic.mts` staged by one hunk (`0 1`) so the
+  refund vertical's `faultBasis` and `layout: []` hunks stay uncommitted. The one thing this task
+  proves that no other could: the artefact the owner will run is green **on the exact revision that was
+  committed**, with the reviewers' hashes still current at freeze time. Evidence:
+  `.lit/evidence/integration-t51/` (freeze, staging verification, the seven gate logs).
+
 _(updated as tasks report)_
 
 ## Review loop on the handoff (t52 → t58) and the captain's own defects
@@ -174,7 +188,56 @@ _(updated as tasks report)_
 
 ## Validation
 
-_(evidence from this cycle only; filled at integration)_
+_(evidence from this cycle only)_
+
+Frozen revision of record: **`19a11b1`** (`19a11b13846c9c1d86c4de15daae9e857edec041`), branch `main`,
+frozen 2026-09-22 10:20 +07 after t58, t60 and t54 all returned **pass**. Same tree for every gate
+below; 141 worktree entries at freeze (83 modified + 58 untracked), nothing staged. The observation is
+`.lit/evidence/integration-t51/frozen-revision.txt`, which carries the 17 declared paths with their
+state, mtime and sha256 — the hashes match the ones the three reviewers judged
+(`CreatorBanner/index.tsx` `e5ff4bb523160088`, `countries.ts` `f8abd74e20cbab83`, the phase-15
+migration `1e3aad49fb84c892`, the snapshot `da8fd0909b526753`, `migrations/index.ts`
+`951c28c51f46e832`, `probe-phase15-invented-spec-versions.mts` `cbbf8416fea30d52`,
+`seed-realistic.mts` `bae643e3b0335bca`). Every gate was run by the integrator on that revision; a
+gate not run is not listed.
+
+| # | gate | command | exit | its own summary line | log |
+|---|---|---|---|---|---|
+| 1 | migrations | `pnpm --prefix web payload migrate` | 0 | `Reading migration files from …/web/src/migrations` → `Done.` | `.lit/evidence/integration-t51/gates/migrate.log` |
+| 2 | integration tests | `pnpm --prefix web test:int` | 0 | `Test Files 43 passed (43)` · `Tests 659 passed (659)` · 154.20s | `.lit/evidence/integration-t51/gates/test-int.log` |
+| 3 | challenger tests | `pnpm --prefix web test:challenger` | 0 | `Test Files 31 passed (31)` · `Tests 469 passed (469)` · 127.10s | `.lit/evidence/integration-t51/gates/test-challenger-run1.log` |
+| 4 | types | `pnpm --prefix web exec tsc --noEmit` | 0 | no diagnostics (the log's only line is pnpm's config warning) | `.lit/evidence/integration-t51/gates/tsc.log` |
+| 5 | lint | `pnpm --prefix web lint` | 0 | `✖ 1480 problems (0 errors, 1480 warnings)` | `.lit/evidence/integration-t51/gates/lint.log` |
+| 6 | build (in place) | `pnpm --prefix web build` | 0 | `✓ Compiled successfully in 10.3s` · `Finished TypeScript in 9.4s` | `.lit/evidence/integration-t51/gates/build.log` |
+| 7 | dev server after the build | `curl -s -o /dev/null -w '%{http_code}' localhost:3000{/,\|/shop,\|/admin/login}` | — | `200` · `200` · `200` | `.lit/evidence/integration-t51/gates/dev-server-after-build.txt` |
+
+**The label guard ran, and did not skip.** Gate 2's log carries
+`✓ tests/int/address-countries-single-source.int.spec.ts (5 tests) 104ms` inside the 43 files / 659
+tests — the enum↔list test plus t49's new label test, both executed on the frozen revision. Counts
+match the pre-dispatch baseline exactly (43 files / 659 tests; challenger 31 files / 469 tests).
+
+**The known flake was absent, and that is reported as an observation, not as a fix.** Gate 3's first
+run exited 0 with 31 files / 469 tests and the log contains no `window is not defined` and no
+`Errors 3 errors`, so the single re-run the contract authorises was not needed. t50 hit the same
+signature once on this same revision family (`m4-challenger1-empirical.spec.tsx`, an implementer-side
+file, run 1 exit 1 → run 2 exit 0 / 31 files / 469 tests), and that history stays on the record.
+
+**The captain's dev server survived the in-place build.** It answered `200` on `/` before the build and
+`200` on `/`, `/shop` and `/admin/login` after it (10:26:42), with no restart and no managed job
+re-created — so the "if the build kills it" branch of the contract did not fire.
+
+**What was NOT run, and why.** `test:e2e` (Playwright) is not part of this increment's gate set. The
+rendered claims (the figure's visibility, its provenance mutation, the Vietnamese select) were measured
+by the author, verifier and reviewer instruments recorded under
+`.lit/evidence/{engineer-*,verifier-t50,reviewer-t52…t58,reviewer-t60,reviewer-t54}`; those directories
+are deliberately not committed, so those claims are cited by path and by the hashes above rather than by
+a gate in this table.
+
+**Commit of record.** Everything above was taken before the commit and on its parent revision; the
+increment landed as `2411573` (`24115735c78562cfd3d329559d416bd533311bc4`), 17 files, with
+`web/scripts/seed-realistic.mts` staged by a single hunk (`git show --numstat` → `0 1`) so the refund
+vertical's two hunks stay uncommitted in the working tree.
+
 
 ## t55 (engineer, 2026-09-21): containment handoff — the hidden-content findings are not this increment's to fix
 
@@ -288,3 +351,38 @@ contain 'sr-only'` (one per spec file). Restoring the file (sha1 back to `f254b0
 `pnpm --prefix web test:challenger` → exit 0, `Test Files 31 passed (31)`, `Tests 469 passed (469)`.
 `pnpm --prefix web exec tsc --noEmit` → exit 0. `grep -rn "creator-banner-compat" web/src web/tests` →
 no output (exit 1).
+
+## Delivered
+
+The increment landed as commit **`2411573`** (`24115735c78562cfd3d329559d416bd533311bc4`) on
+2026-09-22, 17 files, on the frozen revision `19a11b1`. It implements decisions **0019** (the
+revenue-share figure is visible: `70% Chia sẻ doanh thu mặc định cho người bán` from the setting, the
+`sr-only` compatibility block deleted, the three specs rewritten to assert a visible element),
+**0020** (the 161 invented `'<Software> 2022+'` spec versions nulled behind a count guard with a
+committed snapshot and a runnable rollback, and the seed generator line removed so a re-seed cannot
+restore them) and **0021** (48 hand-written Vietnamese country labels, values and order untouched, with
+a label guard test and the label-vs-token rule in the file header).
+
+Gates on that revision, all green and all run by the integrator: `payload migrate` 0 · `test:int` 0
+(43 files / 659 tests, guard 5 tests) · `test:challenger` 0 (31 files / 469 tests, first run) ·
+`tsc --noEmit` 0 · `lint` 0 with 0 errors · in-place `build` 0 · dev server 200/200/200 afterwards.
+The full table is `## Validation` above; the logs are `.lit/evidence/integration-t51/gates/`.
+
+Review chains closed before this commit, each with the reviewer's own control: 0019 t52
+needs_revision → t55 → t56 needs_revision → t57 → **t58 pass**; 0020 t53 needs_revision → t59 →
+**t60 pass**; 0021 **t54 pass**; independent verification t50 (10/10) preceded them.
+
+Disclosures: `web/scripts/seed-realistic.mts` is staged by a single hunk (the refund vertical's
+`faultBasis: 'SELLER'` and `layout: []` hunks stay uncommitted); `.lit/**`, `.agents/**`,
+`.agent-teams/**`, `package.json`, `pnpm-lock.yaml`, `next.config.ts`,
+`vitest.challenger.config.mts`, the generated import map and every storefront- or refund-vertical file
+in the working tree are deliberately not staged; the purge covers `products` only, and the residual —
+Payload's `_products_v` holding 162 matching version rows that no surface renders but an admin
+"restore version" could write back into `products` — is documented in decision 0020 clause 1 and in the
+migration header; and two pre-existing seed-generator defects (a reset that truncates the dropped
+`transactions_items` table, and one that unlinks `public/media` before failing) are reported as
+follow-ups rather than fixed here.
+
+Still with the owner, unchanged by this commit: the `_products_v` residual above, the two seed-generator
+defects, and a real voucher programme (which would need a coupon table, a redemption rule and a
+money-path change under decision 0002).
