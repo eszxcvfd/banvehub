@@ -327,37 +327,31 @@ describe('M3 Challenger 1: Empirical Verification & Stress Test Suite (Features 
       expect(screen.getByText('390.000 ₫')).toBeDefined()
     })
 
-    it('F14.1: CreatorBanner renders revenue share, VietQR instant payouts, guarantees and statistics', () => {
+    it('F14.1: CreatorBanner renders the visible revenue share and the banner interface', () => {
       render(<CreatorBanner memberCount={59} revenueSharePercent={70} />)
 
-      // Main header
-      expect(screen.getByText(/Nền Tảng Hợp Tác Kỹ Sư & Tác Giả Bản Vẽ/i)).toBeDefined()
-
-      // Creator pillar
-      expect(screen.getByText(/70% Chia sẻ doanh thu/i)).toBeDefined()
+      // Main header and the real member count
+      expect(screen.getByText(/Nền Tảng Kết Nối Cộng Đồng Kiến Trúc & Xây Dựng/i)).toBeDefined()
       expect(screen.getByText(/59 thành viên/i)).toBeDefined()
-      expect(screen.getByText(/Rút tiền tức thì 24\/7/i)).toBeDefined()
-      expect(screen.getByText(/Bảo vệ bản quyền số/i)).toBeDefined()
-      expect(screen.getByRole('link', { name: /Đăng Ký Bán Bản Vẽ Ngay/i })).toBeDefined()
 
-      // Customer guarantees pillar
-      expect(screen.getByText(/100% Hồ sơ đã kiểm duyệt/i)).toBeDefined()
-      expect(screen.getByText(/Chính sách hoàn tiền 100%/i)).toBeDefined()
-      expect(screen.getByText(/Tải lại không giới hạn/i)).toBeDefined()
-      expect(screen.getByRole('link', { name: /Khám Phá Bản Vẽ Đã Thẩm Định/i })).toBeDefined()
+      // The setting-derived revenue share, visible and labelled as the site default
+      // Reachability: the figure is a real, visible element — no ancestor may hide it
+      const figure = screen.getByTestId('creator-revenue-share')
+      expect(figure.textContent).toMatch(/(\d+)\s*%\s*Chia sẻ doanh thu/)
+      expect(figure.textContent).toContain('mặc định')
+      let node: HTMLElement | null = figure
+      while (node) {
+        expect(node.className).not.toContain('sr-only')
+        node = node.parentElement
+      }
+      // the two links that existed only inside the deleted hidden block are gone
+      expect(screen.queryByRole('link', { name: /Đăng Ký Bán Bản Vẽ Ngay/i })).toBeNull()
+      expect(screen.queryByRole('link', { name: /Khám Phá Bản Vẽ Đã Thẩm Định/i })).toBeNull()
 
-      // Statistics
-      expect(screen.getByText('Bản vẽ đã kiểm duyệt')).toBeDefined()
-      expect(screen.getByText('Tỷ lệ chia sẻ doanh thu')).toBeDefined()
-      expect(screen.getByText('Cam kết hoàn tiền')).toBeDefined()
-      expect(screen.getByText('Hỗ trợ kỹ thuật kỹ sư')).toBeDefined()
+      // The banner's call to action (the only link it renders besides the footer of each pillar)
+      expect(screen.getByRole('link', { name: /Tìm hiểu thêm/i })).toBeDefined()
     })
-  })
 
-  // ==========================================================================
-  // FEATURE F15: Shop Multi-Criteria Filters
-  // ==========================================================================
-  describe('F15: Shop Multi-Criteria Filter Sidebar', () => {
     it('F15.1: CategoryItem radio selection updates query and resets page', () => {
       const category: Category = {
         id: 10,

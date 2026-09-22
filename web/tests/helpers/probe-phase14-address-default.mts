@@ -34,8 +34,9 @@
  * deleted again. This probe mutates the dev database only for the duration of the run.
  *
  * Negative control (recorded in `.lit/evidence/engineer-schema-t31/`): pointing the form's
- * `defaultCountry` at `'US'` makes this probe FAIL and name `"United States"` against `"Vietnam"`;
- * restored, it PASSES.
+ * `defaultCountry` at `'US'` makes this probe FAIL and name the rendered label against the expected
+ * one. That run predates decision 0021, so it recorded `"United States"` against `"Vietnam"`; the
+ * same failure now names `"Hoa Kỳ"` against `"Việt Nam"`.
  */
 import 'dotenv/config'
 
@@ -174,11 +175,20 @@ try {
   check(
     'the opened list starts with the eight additions in the shared order',
     options.slice(0, 8),
-    ['Vietnam', 'Thailand', 'Laos', 'Cambodia', 'Myanmar', 'Philippines', 'Indonesia', 'China'],
+    [
+      'Việt Nam',
+      'Thái Lan',
+      'Lào',
+      'Campuchia',
+      'Myanmar',
+      'Philippines',
+      'Indonesia',
+      'Trung Quốc',
+    ],
   )
   checkTrue(
-    'the opened list continues with the plugin\u2019s 40 (first is the United States)',
-    options[8] === 'United States',
+    'the opened list continues with the plugin\u2019s 40 (first is Hoa Kỳ)',
+    options[8] === 'Hoa Kỳ',
     `visible options: ${options.slice(0, 10).join(', ')}`,
   )
 

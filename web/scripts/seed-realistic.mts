@@ -2135,7 +2135,6 @@ export async function seedRealistic() {
         tags: [tag1.id, tag2.id],
         technicalSpecs: {
           fileFormat: ext,
-          softwareVersion: `${sw.title} 2022+`,
           fileSize: `${(Math.random() * 60 + 15).toFixed(1)} MB`,
           unit: 'metric',
         },

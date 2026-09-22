@@ -250,16 +250,23 @@ describe('Milestone M5 Challenger: Compact Platform Banner & Recent Resources St
       ).toBeDefined()
     })
 
-    it('preserves test compatibility layer for F14.1 and other existing test suites', () => {
+    it('renders the revenue share as a visible line a user can read', () => {
       render(<CreatorBanner memberCount={59} revenueSharePercent={70} />)
 
-      const compatLayer = screen.getByTestId('creator-banner-compat')
-      expect(compatLayer).toBeDefined()
-      expect(compatLayer.getAttribute('aria-hidden')).toBeNull() // Crucial: must not have aria-hidden to pass accessibility queries
-
-      // Links inside compat layer are accessible to testing-library
-      expect(screen.getByRole('link', { name: /Đăng Ký Bán Bản Vẽ Ngay/i })).toBeDefined()
-      expect(screen.getByRole('link', { name: /Khám Phá Bản Vẽ Đã Thẩm Định/i })).toBeDefined()
+      // Reachability: the figure is a real, visible element — no ancestor may hide it
+      const figure = screen.getByTestId('creator-revenue-share')
+      expect(figure.textContent).toMatch(/(\d+)\s*%\s*Chia sẻ doanh thu/)
+      expect(figure.textContent).toContain('mặc định')
+      let node: HTMLElement | null = figure
+      while (node) {
+        expect(node.className).not.toContain('sr-only')
+        node = node.parentElement
+      }
+      // the two links that existed only inside the deleted hidden block are gone
+      expect(screen.queryByRole('link', { name: /Đăng Ký Bán Bản Vẽ Ngay/i })).toBeNull()
+      expect(screen.queryByRole('link', { name: /Khám Phá Bản Vẽ Đã Thẩm Định/i })).toBeNull()
+      // the banner's own call to action is still reachable by role
+      expect(screen.getByRole('link', { name: /Tìm hiểu thêm/i })).toBeDefined()
     })
   })
 

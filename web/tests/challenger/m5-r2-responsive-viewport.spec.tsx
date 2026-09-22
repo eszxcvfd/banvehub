@@ -128,12 +128,22 @@ describe('M5 Responsive Viewport & Image Configuration Challenger Suite', () => 
 
     it('verifies accessibility layer exposes links without aria-hidden="true"', () => {
       render(<CreatorBanner memberCount={59} revenueSharePercent={70} />)
-      const compat = screen.getByTestId('creator-banner-compat')
-      expect(compat.getAttribute('aria-hidden')).toBeNull()
-      expect(compat.className).toContain('sr-only')
+      // the visible figure, not a hidden compatibility block
+      // Reachability: the figure is a real, visible element — no ancestor may hide it
+      const figure = screen.getByTestId('creator-revenue-share')
+      expect(figure.textContent).toMatch(/(\d+)\s*%\s*Chia sẻ doanh thu/)
+      expect(figure.textContent).toContain('mặc định')
+      let node: HTMLElement | null = figure
+      while (node) {
+        expect(node.className).not.toContain('sr-only')
+        node = node.parentElement
+      }
+      // the two links that existed only inside the deleted hidden block are gone
+      expect(screen.queryByRole('link', { name: /Đăng Ký Bán Bản Vẽ Ngay/i })).toBeNull()
+      expect(screen.queryByRole('link', { name: /Khám Phá Bản Vẽ Đã Thẩm Định/i })).toBeNull()
 
-      // Check link to seller
-      const sellerLink = screen.getByRole('link', { name: /Đăng Ký Bán Bản Vẽ Ngay/i })
+      // the banner's call to action
+      const sellerLink = screen.getByRole('link', { name: /Tìm hiểu thêm/i })
       expect(sellerLink).toBeDefined()
       expect(sellerLink.getAttribute('href')).toBe('/seller')
     })

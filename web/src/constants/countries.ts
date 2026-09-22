@@ -18,11 +18,14 @@
  * entry is what the forms default to, which is how "a new address defaults to `VN`" is implemented
  * without a second constant to keep in sync.
  *
- * The labels are the plugin's own English names for those 40 values (the repository's
- * `src/blocks/Form/Country/options.ts` uses English country names too); the eight additions follow
- * the same convention. Only the values and their order are the contract — `SUPPORTED_COUNTRIES`
- * values must equal the labels of `enum_addresses_country` as a set, and
- * `tests/helpers/probe-phase14-address-countries.mts` fails if they drift.
+ * Decision 0021: the labels are Vietnamese, hand-written for this Vietnamese-facing product, and
+ * they are **display-only presentation**. The `value`s (ISO 3166-1 alpha-2) are the contract — they
+ * are what the Postgres enum `enum_addresses_country` stores and what the plugin configuration, the
+ * REST API and every stored address use — so a label may be reworded without a migration while a
+ * value may not move. **No code may match on a label**: a rule that needs a country matches the
+ * two-letter value (decision 0021 clause 4). `tests/int/address-countries-single-source.int.spec.ts`
+ * guards the labels (non-empty, different from the code, unique) and pins the values against the
+ * enum; `tests/helpers/probe-phase14-address-countries.mts` fails if the values drift.
  */
 export type SupportedCountry = {
   /** Human-readable country name, as rendered by the address forms. */
@@ -32,53 +35,53 @@ export type SupportedCountry = {
 }
 
 export const SUPPORTED_COUNTRIES: SupportedCountry[] = [
-  { label: 'Vietnam', value: 'VN' },
-  { label: 'Thailand', value: 'TH' },
-  { label: 'Laos', value: 'LA' },
-  { label: 'Cambodia', value: 'KH' },
+  { label: 'Việt Nam', value: 'VN' },
+  { label: 'Thái Lan', value: 'TH' },
+  { label: 'Lào', value: 'LA' },
+  { label: 'Campuchia', value: 'KH' },
   { label: 'Myanmar', value: 'MM' },
   { label: 'Philippines', value: 'PH' },
   { label: 'Indonesia', value: 'ID' },
-  { label: 'China', value: 'CN' },
+  { label: 'Trung Quốc', value: 'CN' },
   // The 40 values `@payloadcms/plugin-ecommerce` shipped, in its order.
-  { label: 'United States', value: 'US' },
-  { label: 'United Kingdom', value: 'GB' },
+  { label: 'Hoa Kỳ', value: 'US' },
+  { label: 'Vương quốc Anh', value: 'GB' },
   { label: 'Canada', value: 'CA' },
-  { label: 'Australia', value: 'AU' },
-  { label: 'Austria', value: 'AT' },
-  { label: 'Belgium', value: 'BE' },
+  { label: 'Úc', value: 'AU' },
+  { label: 'Áo', value: 'AT' },
+  { label: 'Bỉ', value: 'BE' },
   { label: 'Brazil', value: 'BR' },
   { label: 'Bulgaria', value: 'BG' },
-  { label: 'Cyprus', value: 'CY' },
-  { label: 'Czech Republic', value: 'CZ' },
-  { label: 'Denmark', value: 'DK' },
+  { label: 'Síp', value: 'CY' },
+  { label: 'Séc', value: 'CZ' },
+  { label: 'Đan Mạch', value: 'DK' },
   { label: 'Estonia', value: 'EE' },
-  { label: 'Finland', value: 'FI' },
-  { label: 'France', value: 'FR' },
-  { label: 'Germany', value: 'DE' },
-  { label: 'Greece', value: 'GR' },
-  { label: 'Hong Kong', value: 'HK' },
+  { label: 'Phần Lan', value: 'FI' },
+  { label: 'Pháp', value: 'FR' },
+  { label: 'Đức', value: 'DE' },
+  { label: 'Hy Lạp', value: 'GR' },
+  { label: 'Hồng Kông', value: 'HK' },
   { label: 'Hungary', value: 'HU' },
-  { label: 'India', value: 'IN' },
+  { label: 'Ấn Độ', value: 'IN' },
   { label: 'Ireland', value: 'IE' },
-  { label: 'Italy', value: 'IT' },
-  { label: 'Japan', value: 'JP' },
+  { label: 'Ý', value: 'IT' },
+  { label: 'Nhật Bản', value: 'JP' },
   { label: 'Latvia', value: 'LV' },
-  { label: 'Lithuania', value: 'LT' },
+  { label: 'Litva', value: 'LT' },
   { label: 'Luxembourg', value: 'LU' },
   { label: 'Malaysia', value: 'MY' },
   { label: 'Malta', value: 'MT' },
   { label: 'Mexico', value: 'MX' },
-  { label: 'Netherlands', value: 'NL' },
+  { label: 'Hà Lan', value: 'NL' },
   { label: 'New Zealand', value: 'NZ' },
-  { label: 'Norway', value: 'NO' },
-  { label: 'Poland', value: 'PL' },
-  { label: 'Portugal', value: 'PT' },
+  { label: 'Na Uy', value: 'NO' },
+  { label: 'Ba Lan', value: 'PL' },
+  { label: 'Bồ Đào Nha', value: 'PT' },
   { label: 'Romania', value: 'RO' },
   { label: 'Singapore', value: 'SG' },
   { label: 'Slovakia', value: 'SK' },
   { label: 'Slovenia', value: 'SI' },
-  { label: 'Spain', value: 'ES' },
-  { label: 'Sweden', value: 'SE' },
-  { label: 'Switzerland', value: 'CH' },
+  { label: 'Tây Ban Nha', value: 'ES' },
+  { label: 'Thụy Điển', value: 'SE' },
+  { label: 'Thụy Sĩ', value: 'CH' },
 ]

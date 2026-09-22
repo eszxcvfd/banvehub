@@ -44,6 +44,14 @@ export function CreatorBanner({
               <p className="text-xs text-slate-600 dark:text-slate-400 mb-4 leading-relaxed">
                 Chúng tôi mang đến hệ sinh thái tài nguyên và công cụ hỗ trợ để bạn làm việc hiệu quả hơn mỗi ngày.
               </p>
+              {/* The site default, derived from commission_settings.default_rate: 'mặc định' because
+                  resolveCommissionRate lets a seller carry an override (decision 0019, 0016). */}
+              <p
+                className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-4"
+                data-testid="creator-revenue-share"
+              >
+                {`${revenueSharePercent}% Chia sẻ doanh thu mặc định cho người bán`}
+              </p>
               <Link
                 href="/seller"
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg !bg-[#0f172a] hover:!bg-[#1e293b] !text-white text-xs font-semibold transition-colors no-underline shadow-sm"
@@ -118,22 +126,6 @@ export function CreatorBanner({
           </div>
         </div>
 
-        {/* Invariant Test Compatibility Layer (satisfies existing challenger assertions) */}
-        <div className="sr-only" data-testid="creator-banner-compat">
-          <span>Kiến Tạo Hub — Nền Tảng Hợp Tác Kỹ Sư & Tác Giả Bản Vẽ</span>
-          <span>{`${revenueSharePercent}% Chia sẻ doanh thu`}</span>
-          <span>Rút tiền tức thì 24/7</span>
-          <span>Bảo vệ bản quyền số</span>
-          <Link href="/seller">Đăng Ký Bán Bản Vẽ Ngay</Link>
-          <span>100% Hồ sơ đã kiểm duyệt</span>
-          <span>Chính sách hoàn tiền 100%</span>
-          <span>Tải lại không giới hạn</span>
-          <Link href="/shop">Khám Phá Bản Vẽ Đã Thẩm Định</Link>
-          <span>Bản vẽ đã kiểm duyệt</span>
-          <span>Tỷ lệ chia sẻ doanh thu</span>
-          <span>Cam kết hoàn tiền</span>
-          <span>Hỗ trợ kỹ thuật kỹ sư</span>
-        </div>
       </div>
     </section>
   )
