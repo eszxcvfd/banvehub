@@ -1,6 +1,5 @@
 'use client'
-import { useCurrency } from '@payloadcms/plugin-ecommerce/client/react'
-import React, { useMemo } from 'react'
+import React from 'react'
 
 type BaseProps = {
   className?: string
@@ -24,6 +23,17 @@ type PriceRange = {
 
 type Props = BaseProps & (PriceFixed | PriceRange)
 
+/**
+ * Standardize VND price formatting across KienTaoHub:
+ * e.g. 390000 -> "390.000 ₫"
+ */
+export function formatVND(value?: number | null): string {
+  if (value === undefined || value === null || isNaN(value)) {
+    return '0 ₫'
+  }
+  return `${Number(value).toLocaleString('vi-VN')} ₫`
+}
+
 export const Price = ({
   amount,
   className,
@@ -32,21 +42,48 @@ export const Price = ({
   currencyCode: currencyCodeFromProps,
   as = 'p',
 }: Props & React.ComponentProps<'p'>) => {
-  const { formatCurrency, supportedCurrencies } = useCurrency()
-
   const Element = as
 
-  const currencyToUse = useMemo(() => {
-    if (currencyCodeFromProps) {
-      return supportedCurrencies.find((currency) => currency.code === currencyCodeFromProps)
-    }
-    return undefined
-  }, [currencyCodeFromProps, supportedCurrencies])
+  // If a non-VND currency is explicitly passed (e.g. USD)
+  if (currencyCodeFromProps && currencyCodeFromProps.toUpperCase() !== 'VND') {
+    const isUSD = currencyCodeFromProps.toUpperCase() === 'USD'
+    const formatter = new Intl.NumberFormat(isUSD ? 'en-US' : 'vi-VN', {
+      style: 'currency',
+      currency: currencyCodeFromProps,
+    })
 
+    if (typeof amount === 'number') {
+      return (
+        <Element className={className} suppressHydrationWarning>
+          {formatter.format(amount)}
+        </Element>
+      )
+    }
+
+    if (highestAmount && highestAmount !== lowestAmount) {
+      return (
+        <Element className={className} suppressHydrationWarning>
+          {`${formatter.format(lowestAmount)} - ${formatter.format(highestAmount)}`}
+        </Element>
+      )
+    }
+
+    if (lowestAmount) {
+      return (
+        <Element className={className} suppressHydrationWarning>
+          {formatter.format(lowestAmount)}
+        </Element>
+      )
+    }
+
+    return null
+  }
+
+  // Default currency is Vietnamese Dong (VND)
   if (typeof amount === 'number') {
     return (
       <Element className={className} suppressHydrationWarning>
-        {formatCurrency(amount, { currency: currencyToUse })}
+        {formatVND(amount)}
       </Element>
     )
   }
@@ -54,7 +91,7 @@ export const Price = ({
   if (highestAmount && highestAmount !== lowestAmount) {
     return (
       <Element className={className} suppressHydrationWarning>
-        {`${formatCurrency(lowestAmount, { currency: currencyToUse })} - ${formatCurrency(highestAmount, { currency: currencyToUse })}`}
+        {`${formatVND(lowestAmount)} - ${formatVND(highestAmount)}`}
       </Element>
     )
   }
@@ -62,10 +99,11 @@ export const Price = ({
   if (lowestAmount) {
     return (
       <Element className={className} suppressHydrationWarning>
-        {`${formatCurrency(lowestAmount, { currency: currencyToUse })}`}
+        {formatVND(lowestAmount)}
       </Element>
     )
   }
 
   return null
 }
+

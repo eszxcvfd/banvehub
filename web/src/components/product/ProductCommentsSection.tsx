@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
@@ -20,6 +20,28 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { useAuth } from '@/providers/Auth'
 import { toast } from 'sonner'
+
+if (typeof window !== 'undefined') {
+  if (!window.matchMedia) {
+    window.matchMedia = ((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia
+  }
+  if (!window.ResizeObserver) {
+    window.ResizeObserver = class ResizeObserver {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof window.ResizeObserver
+  }
+}
 
 export type CommentItem = {
   id: number
@@ -119,8 +141,8 @@ export function ProductCommentsSection({
         }
         setLoading(false)
       })
-      .catch((err: any) => {
-        if (err?.name === 'AbortError') return
+      .catch((err: unknown) => {
+        if ((err as { name?: string })?.name === 'AbortError') return
         if (mounted) setLoading(false)
       })
 
@@ -164,7 +186,7 @@ export function ProductCommentsSection({
       } else {
         toast.error(data.message || 'Không thể gửi câu hỏi. Vui lòng thử lại.')
       }
-    } catch (err) {
+    } catch {
       toast.error('Đã xảy ra lỗi mạng. Vui lòng thử lại.')
     } finally {
       setIsSubmittingQuestion(false)
@@ -207,7 +229,7 @@ export function ProductCommentsSection({
       } else {
         toast.error(data.message || 'Không thể gửi câu trả lời. Vui lòng thử lại.')
       }
-    } catch (err) {
+    } catch {
       toast.error('Đã xảy ra lỗi mạng. Vui lòng thử lại.')
     } finally {
       setIsSubmittingReply(false)
@@ -251,19 +273,21 @@ export function ProductCommentsSection({
     <section
       id="comments-section"
       aria-label="Hỏi đáp và bình luận sản phẩm"
-      className={`rounded-2xl border bg-card text-card-foreground p-4 sm:p-6 md:p-8 shadow-xs ${className}`}
+      className={`w-full bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 text-slate-900 dark:text-slate-100 p-6 sm:p-8 shadow-xs ${className}`}
     >
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-6 border-b gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-6 border-b border-slate-100 dark:border-slate-800 gap-4">
         <div>
           <div className="flex items-center gap-2.5">
-            <MessageSquareText className="w-5 h-5 text-primary" />
-            <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Hỏi đáp & Bình luận</h2>
-            <span className="inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
+            <MessageSquareText className="w-5 h-5 text-[#1677ff]" />
+            <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+              Hỏi đáp & Bình luận
+            </h2>
+            <span className="inline-flex items-center rounded-full bg-blue-50 dark:bg-blue-950/60 border border-blue-100 dark:border-blue-900/40 px-2.5 py-0.5 text-xs font-semibold text-[#1677ff] dark:text-blue-400">
               {totalComments}
             </span>
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
             Trao đổi trực tiếp với tác giả hoặc cộng đồng về &quot;{productTitle}&quot;.
           </p>
         </div>
@@ -288,17 +312,17 @@ export function ProductCommentsSection({
               placeholder="Đặt câu hỏi về tài nguyên này..."
               rows={3}
               maxLength={5000}
-              className="resize-y"
+              className="resize-y rounded-xl border border-slate-200 dark:border-slate-700 focus:border-[#1677ff] focus:ring-1 focus:ring-[#1677ff] bg-slate-50/50 dark:bg-slate-800/40 text-slate-900 dark:text-slate-100 placeholder:text-slate-400"
               aria-label="Đặt câu hỏi về tài nguyên này"
             />
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs text-slate-500 dark:text-slate-400">
                 Tối thiểu 3 ký tự. Câu hỏi sẽ hiển thị công khai để người bán và cộng đồng hỗ trợ.
               </span>
               <Button
                 type="submit"
                 disabled={isSubmittingQuestion || questionContent.trim().length < 3}
-                className="self-end sm:self-auto cursor-pointer"
+                className="self-end sm:self-auto cursor-pointer !bg-[#1677ff] hover:!bg-[#4096ff] text-white font-medium shadow-sm rounded-lg px-5 py-2 text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed border-0"
               >
                 {isSubmittingQuestion ? (
                   <>
@@ -315,19 +339,21 @@ export function ProductCommentsSection({
             </div>
           </form>
         ) : (
-          <div className="rounded-xl border border-dashed p-5 bg-muted/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="rounded-xl border border-blue-100 dark:border-blue-900/40 p-5 bg-blue-50/50 dark:bg-blue-950/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-full bg-primary/10 text-primary">
+              <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/50 text-[#1677ff] flex items-center justify-center shrink-0">
                 <Lock className="w-5 h-5" />
               </div>
               <div>
-                <p className="text-sm font-semibold">Bạn có thắc mắc về tài nguyên này?</p>
-                <p className="text-xs text-muted-foreground mt-0.5">
+                <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  Bạn có thắc mắc về tài nguyên này?
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                   Đăng nhập để đặt câu hỏi hoặc trao đổi trực tiếp với người bán.
                 </p>
               </div>
             </div>
-            <Button asChild variant="outline" size="sm" className="cursor-pointer">
+            <Button asChild size="sm" className="cursor-pointer !bg-[#1677ff] hover:!bg-[#4096ff] text-white font-medium shadow-sm border-0 rounded-lg px-4 py-2 text-sm">
               <Link href={`/login?redirect=${encodeURIComponent(pathname || '/')}`}>
                 Đăng nhập ngay
               </Link>
@@ -344,10 +370,12 @@ export function ProductCommentsSection({
             <p className="text-sm text-muted-foreground">Đang tải danh sách câu hỏi...</p>
           </div>
         ) : comments.length === 0 ? (
-          <div className="py-12 text-center rounded-xl border border-dashed space-y-3">
-            <MessageCircle className="w-10 h-10 mx-auto text-muted-foreground/50" />
-            <p className="text-base font-semibold text-foreground">Chưa có câu hỏi nào</p>
-            <p className="text-sm text-muted-foreground max-w-sm mx-auto">
+          <div className="py-12 text-center rounded-xl border border-dashed border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/40 space-y-3">
+            <div className="w-12 h-12 rounded-full bg-blue-50 dark:bg-blue-950/60 text-[#1677ff] flex items-center justify-center mx-auto">
+              <MessageCircle className="w-6 h-6" />
+            </div>
+            <p className="text-base font-semibold text-slate-900 dark:text-slate-100">Chưa có câu hỏi nào</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400 max-w-sm mx-auto">
               Hãy là người đầu tiên đặt câu hỏi cho người bán về tài nguyên này!
             </p>
           </div>
@@ -360,17 +388,17 @@ export function ProductCommentsSection({
               return (
                 <div
                   key={comment.id}
-                  className="rounded-xl border p-4 sm:p-5 bg-card/60 transition-colors hover:border-border"
+                  className="rounded-xl border border-slate-200/90 dark:border-slate-800 p-4 sm:p-5 bg-white dark:bg-slate-900/80 shadow-xs transition-colors hover:border-slate-300 dark:hover:border-slate-700"
                 >
                   {/* Top-level comment author header */}
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full bg-primary/10 text-primary font-bold flex items-center justify-center text-xs">
+                      <div className="w-9 h-9 rounded-full bg-blue-50 dark:bg-blue-950/80 text-[#1677ff] font-bold flex items-center justify-center text-xs border border-blue-200 dark:border-blue-900/60">
                         {comment.user.initials}
                       </div>
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-semibold text-sm text-foreground">
+                          <span className="font-semibold text-sm text-slate-900 dark:text-slate-100">
                             {comment.user.name}
                           </span>
                           {comment.isAdminReply && (
@@ -386,7 +414,7 @@ export function ProductCommentsSection({
                             </span>
                           )}
                         </div>
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-xs text-slate-500 dark:text-slate-400">
                           {formatTimeAgo(comment.createdAt)}
                         </span>
                       </div>
@@ -398,7 +426,7 @@ export function ProductCommentsSection({
                         size="sm"
                         disabled={hidingCommentId === comment.id}
                         onClick={() => handleHideComment(comment.id)}
-                        className="h-8 px-2.5 text-xs text-muted-foreground hover:text-destructive cursor-pointer min-h-[36px] sm:min-h-0 touch-manipulation"
+                        className="h-8 px-2.5 text-xs text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 cursor-pointer min-h-[36px] sm:min-h-0 touch-manipulation"
                         title="Ẩn bình luận"
                         aria-label="Ẩn bình luận"
                       >
@@ -409,7 +437,7 @@ export function ProductCommentsSection({
                   </div>
 
                   {/* Comment content */}
-                  <div className="mt-3 text-sm text-foreground/90 whitespace-pre-wrap leading-relaxed">
+                  <div className="mt-3 text-sm text-slate-800 dark:text-slate-200 whitespace-pre-wrap leading-relaxed">
                     {comment.content}
                   </div>
 
@@ -427,7 +455,7 @@ export function ProductCommentsSection({
                           setReplyContent('')
                         }
                       }}
-                      className="h-8 px-2.5 text-xs font-medium text-primary hover:text-primary/80 cursor-pointer min-h-[36px] sm:min-h-0 touch-manipulation"
+                      className="h-8 px-2.5 text-xs font-medium text-[#1677ff] hover:text-[#4096ff] hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-lg cursor-pointer min-h-[36px] sm:min-h-0 touch-manipulation"
                     >
                       <CornerDownRight className="w-3.5 h-3.5 mr-1" />
                       Trả lời
@@ -436,7 +464,7 @@ export function ProductCommentsSection({
 
                   {/* Inline reply form */}
                   {replyingToId === comment.id && (
-                    <div className="mt-3 p-3.5 rounded-lg border bg-muted/30 space-y-3">
+                    <div className="mt-3 p-3.5 rounded-xl border border-blue-100 dark:border-blue-900/40 bg-blue-50/30 dark:bg-blue-950/20 space-y-3">
                       {user ? (
                         <div className="space-y-2">
                           {(isSeller || isAdmin) && (
@@ -469,7 +497,7 @@ export function ProductCommentsSection({
                             placeholder="Viết câu trả lời..."
                             rows={2}
                             maxLength={5000}
-                            className="text-sm"
+                            className="text-sm rounded-lg border border-slate-200 dark:border-slate-700 focus:border-[#1677ff] focus:ring-1 focus:ring-[#1677ff] bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-400"
                             aria-label="Viết câu trả lời"
                           />
                           <div className="flex items-center justify-end gap-2">
@@ -482,6 +510,7 @@ export function ProductCommentsSection({
                                 setReplyingToId(null)
                                 setReplyContent('')
                               }}
+                              className="border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 text-xs px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
                             >
                               Hủy
                             </Button>
@@ -490,6 +519,7 @@ export function ProductCommentsSection({
                               size="sm"
                               disabled={isSubmittingReply || replyContent.trim().length < 3}
                               onClick={() => handleSubmitReply(comment.id)}
+                              className="!bg-[#1677ff] hover:!bg-[#4096ff] text-white font-medium text-xs px-3.5 py-1.5 rounded-lg border-0 shadow-sm cursor-pointer disabled:opacity-50"
                             >
                               {isSubmittingReply ? (
                                 <>
@@ -503,9 +533,9 @@ export function ProductCommentsSection({
                           </div>
                         </div>
                       ) : (
-                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
                           <span>Vui lòng đăng nhập để gửi câu trả lời.</span>
-                          <Button asChild variant="outline" size="sm" className="h-7 text-xs">
+                          <Button asChild size="sm" className="h-7 text-xs !bg-[#1677ff] hover:!bg-[#4096ff] text-white border-0 rounded-lg">
                             <Link href={`/login?redirect=${encodeURIComponent(pathname || '/')}`}>
                               Đăng nhập
                             </Link>
@@ -517,7 +547,7 @@ export function ProductCommentsSection({
 
                   {/* 1-Level Nested Replies */}
                   {comment.replies && comment.replies.length > 0 && (
-                    <div className="mt-4 pt-3 border-t space-y-3 pl-4 sm:pl-6 border-l-2 border-primary/20 ml-2">
+                    <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3 pl-4 sm:pl-6 border-l-2 border-[#1677ff]/30 ml-2">
                       {comment.replies.map((reply) => {
                         const isReplyAuthor = Boolean(user && String(user.id) === String(reply.user.id))
                         const canHideReply = isReplyAuthor || isPrivileged
@@ -526,10 +556,10 @@ export function ProductCommentsSection({
                           <div key={reply.id} className="space-y-1.5">
                             <div className="flex items-start justify-between gap-2">
                               <div className="flex items-center gap-2 flex-wrap">
-                                <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold text-foreground">
+                                <div className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-950 text-[#1677ff] flex items-center justify-center text-[10px] font-bold">
                                   {reply.user.initials}
                                 </div>
-                                <span className="font-semibold text-xs text-foreground">
+                                <span className="font-semibold text-xs text-slate-900 dark:text-slate-100">
                                   {reply.user.name}
                                 </span>
                                 {reply.isAdminReply && (
@@ -544,7 +574,7 @@ export function ProductCommentsSection({
                                     Tác giả / Người bán
                                   </span>
                                 )}
-                                <span className="text-[11px] text-muted-foreground">
+                                <span className="text-[11px] text-slate-400 dark:text-slate-500">
                                   • {formatTimeAgo(reply.createdAt)}
                                 </span>
                               </div>
@@ -554,7 +584,7 @@ export function ProductCommentsSection({
                                   type="button"
                                   disabled={hidingCommentId === reply.id}
                                   onClick={() => handleHideComment(reply.id)}
-                                  className="text-[11px] text-muted-foreground hover:text-destructive cursor-pointer p-1.5 -m-1 touch-manipulation min-h-[32px] sm:min-h-0 inline-flex items-center disabled:opacity-50"
+                                  className="text-[11px] text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 cursor-pointer p-1.5 -m-1 touch-manipulation min-h-[32px] sm:min-h-0 inline-flex items-center disabled:opacity-50"
                                   title="Ẩn câu trả lời"
                                   aria-label="Ẩn câu trả lời"
                                 >
@@ -562,7 +592,7 @@ export function ProductCommentsSection({
                                 </button>
                               )}
                             </div>
-                            <p className="text-xs text-foreground/90 whitespace-pre-wrap leading-relaxed pl-8">
+                            <p className="text-xs text-slate-800 dark:text-slate-200 whitespace-pre-wrap leading-relaxed pl-8">
                               {reply.content}
                             </p>
                           </div>
@@ -578,18 +608,18 @@ export function ProductCommentsSection({
 
         {/* Pagination Controls */}
         {totalPages > 1 && (
-          <div className="flex items-center justify-between pt-6 border-t">
+          <div className="flex items-center justify-between pt-6 border-t border-slate-100 dark:border-slate-800">
             <Button
               variant="outline"
               size="sm"
               disabled={currentPage <= 1 || loading}
               onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              className="flex items-center gap-1 cursor-pointer"
+              className="flex items-center gap-1 cursor-pointer border-slate-200 dark:border-slate-700 hover:border-[#1677ff] hover:text-[#1677ff]"
             >
               <ChevronLeft className="w-4 h-4" />
               Trang trước
             </Button>
-            <span className="text-xs text-muted-foreground">
+            <span className="text-xs text-slate-500 dark:text-slate-400">
               Trang {currentPage} / {totalPages}
             </span>
             <Button
@@ -597,7 +627,7 @@ export function ProductCommentsSection({
               size="sm"
               disabled={currentPage >= totalPages || loading}
               onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-              className="flex items-center gap-1 cursor-pointer"
+              className="flex items-center gap-1 cursor-pointer border-slate-200 dark:border-slate-700 hover:border-[#1677ff] hover:text-[#1677ff]"
             >
               Trang sau
               <ChevronRight className="w-4 h-4" />

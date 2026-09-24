@@ -216,7 +216,7 @@ async function ensureFixtureProductSeller(
       limit: 1,
       overrideAccess: true,
     })
-  ).docs[0] as Record<string, unknown> | undefined
+  ).docs[0] as unknown as Record<string, unknown> | undefined
 
   const currentSeller = relationshipId(mainRow?.seller)
   if (currentSeller !== null && String(currentSeller) === String(sellerId)) return doc

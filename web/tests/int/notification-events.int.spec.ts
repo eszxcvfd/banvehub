@@ -548,6 +548,7 @@ describe('§13 in-app notifications — emissions, API and invariants', () => {
         orderId: Number(purchaseOrderId),
         reason: 'Sản phẩm không đúng mô tả',
         actorId: Number(financeAdmin.id),
+        faultBasis: 'SELLER',
       })
       expect(refund.status).toBe('COMPLETED')
 
@@ -564,6 +565,7 @@ describe('§13 in-app notifications — emissions, API and invariants', () => {
           orderId: Number(purchaseOrderId),
           reason: 'Thử hoàn tiền lần hai',
           actorId: Number(financeAdmin.id),
+          faultBasis: 'SELLER',
         }),
       ).rejects.toThrow()
       const after = await notificationsOfType(Number(buyer1.id), 'REFUND')

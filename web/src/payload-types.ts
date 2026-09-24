@@ -1528,7 +1528,7 @@ export interface Refund {
    */
   faultBasis: 'SELLER' | 'PLATFORM';
   /**
-   * True khi yêu cầu hoàn tiền được gửi sau 5 ngày kể từ orders.paidAt và người vận hành đã ghi đè có chủ đích (Decision 0012 §6).
+   * Cho biết lệnh hoàn tiền này CÓ CẦN ghi đè ngoài cửa sổ 5 ngày hay không, và ghi đè đó đã được ghi lại hay chưa (Decision 0012 §6, làm rõ F2) — không phải "yêu cầu có nằm trong cửa sổ hay không". Vì vậy false cũng bao gồm các bản ghi hoàn tiền được thực hiện trước khi quy tắc 5 ngày tồn tại.
    */
   outOfWindow: boolean;
   status: 'COMPLETED' | 'FAILED';

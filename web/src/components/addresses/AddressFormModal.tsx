@@ -9,7 +9,7 @@ import {
   Row,
   Col,
   Button,
-  message,
+  App,
 } from 'antd'
 import {
   UserOutlined,
@@ -55,6 +55,7 @@ export function AddressFormModal({
   modalTitle,
   skipSubmission = false,
 }: AddressFormModalProps) {
+  const { message } = App.useApp()
   const [form] = Form.useForm()
   const [submitting, setSubmitting] = useState(false)
   const { createAddress, updateAddress } = useAddresses()

@@ -38,8 +38,13 @@ export function RefundPolicyView() {
         type="success"
         showIcon
         icon={<SafetyCertificateOutlined className="text-xl" />}
-        message={
-          <span className="font-semibold text-base">Hỗ trợ kỹ thuật và hoàn tiền theo chính sách</span>
+        title={
+          <div>
+            <span className="font-semibold text-base">Cam kết bảo vệ quyền lợi kỹ sư 100%</span>
+            <span className="block text-sm font-normal text-slate-600 dark:text-slate-300 mt-1">
+              Hỗ trợ kỹ thuật và hoàn tiền theo chính sách
+            </span>
+          </div>
         }
         description="Mọi bản vẽ AutoCAD, Revit, SketchUp, 3ds Max tải xuống từ Kiến Tạo Hub đều được hỗ trợ kỹ thuật. Nếu tệp tin lỗi thuộc về người bán và không thể khắc phục, bạn được hoàn 100% số tiền đã thanh toán vào số dư ví."
         className="mb-8 !rounded-xl !p-4"
@@ -84,29 +89,33 @@ export function RefundPolicyView() {
           title={
             <div className="flex items-center gap-2 text-[#1677ff]">
               <RollbackOutlined />
-              <span>2. Quy Trình Yêu Cầu Hoàn Tiền</span>
+              <span>2. Quy Trình Hoàn Tiền 4 Bước Đơn Giản</span>
             </div>
           }
         >
           <Steps
-            direction="vertical"
+            orientation="vertical"
             current={-1}
             items={[
               {
-                title: 'Bước 1: Liên hệ bộ phận vận hành',
-                description: 'Gửi yêu cầu qua kênh liên hệ ở chân trang (email hoặc điện thoại) kèm mã đơn hàng và ảnh chụp màn hình lỗi. Yêu cầu cần được gửi trong vòng 5 ngày kể từ khi bạn thanh toán.',
+                title: 'Bước 1: Gửi yêu cầu hỗ trợ hoặc báo cáo',
+                content:
+                  'Gửi yêu cầu qua kênh liên hệ ở chân trang (email hoặc điện thoại) kèm mã đơn hàng và ảnh chụp màn hình lỗi. Yêu cầu cần được gửi trong vòng 5 ngày kể từ khi bạn thanh toán.',
               },
               {
-                title: 'Bước 2: Vận hành xác minh',
-                description: 'Bộ phận vận hành kiểm tra tệp tin, đối chiếu với mô tả và hình xem trước do người bán cung cấp, rồi xác định lỗi thuộc về người bán hay thuộc về nền tảng.',
+                title: 'Bước 2: Xác minh kỹ thuật (Trong vòng 24 giờ)',
+                content:
+                  'Bộ phận vận hành kiểm tra tệp tin, đối chiếu với mô tả và hình xem trước do người bán cung cấp, rồi xác định lỗi thuộc về người bán hay thuộc về nền tảng.',
               },
               {
-                title: 'Bước 3: Quyết định hoàn tiền',
-                description: 'Nếu lỗi thuộc về người bán hoặc thuộc về nền tảng, vận hành thực hiện hoàn tiền và ghi lại căn cứ lỗi. Yêu cầu gửi quá 5 ngày chỉ được hoàn khi vận hành chấp thuận ngoại lệ và ghi rõ ngoại lệ đó.',
+                title: 'Bước 3: Trao đổi với Tác giả / Người bán',
+                content:
+                  'Vận hành đối chiếu với người bán. Nếu lỗi thuộc về người bán hoặc nền tảng, hoàn tiền sẽ được phê duyệt và ghi lại căn cứ lỗi.',
               },
               {
-                title: 'Bước 4: Nhận tiền hoàn vào ví',
-                description: 'Số tiền được hoàn vào Số dư Ví Kiến Tạo Hub của bạn. Người bán chỉ được chi trả sau 7 ngày kể từ khi bản vẽ được nhận.',
+                title: 'Bước 4: Nhận lại 100% tiền hoàn',
+                content:
+                  'Số tiền được hoàn 100% vào Số dư Ví Kiến Tạo Hub của bạn. Người bán chỉ được chi trả sau 7 ngày kể từ khi bản vẽ được nhận.',
               },
             ]}
           />

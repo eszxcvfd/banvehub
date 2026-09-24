@@ -11,7 +11,7 @@ import {
   Checkbox,
   Button,
   Alert,
-  message,
+  App,
   Row,
   Col,
   Upload,
@@ -54,6 +54,7 @@ export function ProductEditorModal({
   categories,
   softwareTypes,
 }: ProductEditorModalProps) {
+  const { message } = App.useApp()
   const router = useRouter()
   const [form] = Form.useForm()
 

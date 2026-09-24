@@ -1,19 +1,9 @@
 'use client'
 
 import React, { useState } from 'react'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react'
+import { Modal, Button, Result } from 'antd'
+import { WarningOutlined, ExclamationCircleOutlined } from '@ant-design/icons'
+import Link from 'next/link'
 import { toast } from 'sonner'
 
 export type DisputeProductItem = {
@@ -53,8 +43,7 @@ export function OrderDisputeModal({
   onSuccess,
 }: OrderDisputeModalProps) {
   const [open, setOpen] = useState(false)
-  // An order can hold several rows of the same product: only distinct products count
-  // as "multiple products" (the API applies the same rule).
+
   const distinctProducts = React.useMemo(() => {
     const seen = new Set<number>()
     return products.filter((product) => {
@@ -63,16 +52,13 @@ export function OrderDisputeModal({
       return true
     })
   }, [products])
-  // The order's products may only become available after mount (async data), so the
-  // effective selection is derived on every render instead of being synced in an
-  // effect: an explicit user choice wins, then the preselected prop, then the only
-  // distinct product. A multi-product order deliberately stays empty so the user must
-  // pick one (the API refuses to guess).
+
   const [selectedProductId, setSelectedProductId] = useState<number | undefined>(undefined)
   const effectiveProductId =
     selectedProductId ??
     preselectedProductId ??
     (distinctProducts.length === 1 ? distinctProducts[0].id : undefined)
+
   const [reason, setReason] = useState('FILE_CORRUPTED')
   const [subject, setSubject] = useState('')
   const [description, setDescription] = useState('')
@@ -81,16 +67,13 @@ export function OrderDisputeModal({
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [createdTicket, setCreatedTicket] = useState<any | null>(null)
 
-  const handleOpenChange = (newOpen: boolean) => {
-    setOpen(newOpen)
-    if (!newOpen) {
-      // Reset form if closed after success
-      if (createdTicket) {
-        setCreatedTicket(null)
-        setSubject('')
-        setDescription('')
-        setErrorMsg(null)
-      }
+  const handleClose = () => {
+    setOpen(false)
+    if (createdTicket) {
+      setCreatedTicket(null)
+      setSubject('')
+      setDescription('')
+      setErrorMsg(null)
     }
   }
 
@@ -108,8 +91,6 @@ export function OrderDisputeModal({
       return
     }
 
-    // Never let the client pick a product on the user's behalf when the order holds
-    // several distinct products: the dispute must be attributed to the right seller.
     if (distinctProducts.length > 0 && !effectiveProductId) {
       setErrorMsg('Vui lòng chọn sản phẩm gặp sự cố trước khi gửi khiếu nại.')
       return
@@ -148,63 +129,77 @@ export function OrderDisputeModal({
         onSuccess(data.ticket)
       }
     } catch (err: any) {
-      setErrorMsg(err.message || 'Đã có lỗi xảy ra khi tạo khiếu nại.')
+      const msg = err.message || 'Đã có lỗi xảy ra khi tạo khiếu nại.'
+      setErrorMsg(msg)
       toast.error('Lỗi khi gửi khiếu nại', {
-        description: err.message,
+        description: msg,
       })
     } finally {
       setIsSubmitting(false)
     }
   }
 
-  return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger asChild>
-        <Button
-          variant={buttonVariant}
-          size={buttonSize}
-          className={`flex items-center gap-1.5 ${className}`}
-        >
-          <AlertTriangle className="w-4 h-4 text-amber-500" />
-          <span>{buttonText}</span>
-        </Button>
-      </DialogTrigger>
+  // Antd button type mapping
+  const antdType =
+    buttonVariant === 'destructive' ? 'primary' : buttonVariant === 'ghost' ? 'dashed' : 'default'
+  const antdDanger = buttonVariant === 'destructive'
+  const antdSize = buttonSize === 'sm' ? 'small' : buttonSize === 'lg' ? 'large' : 'middle'
 
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-base font-semibold">
-            <AlertTriangle className="w-5 h-5 text-amber-500" />
-            Báo lỗi / Khiếu nại đơn hàng
-          </DialogTitle>
-          <DialogDescription className="text-xs text-muted-foreground">
-            Đơn hàng #{orderCode || orderId}. Chúng tôi sẽ kết nối bạn với người bán và ban quản trị để giải quyết sự cố.
-          </DialogDescription>
-        </DialogHeader>
+  return (
+    <>
+      <Button
+        type={antdType}
+        danger={antdDanger}
+        size={antdSize}
+        icon={<ExclamationCircleOutlined style={{ color: '#faad14' }} />}
+        onClick={() => setOpen(true)}
+        className={className}
+      >
+        <span>{buttonText}</span>
+      </Button>
+
+      <Modal
+        open={open}
+        onCancel={handleClose}
+        footer={null}
+        title={
+          <div className="flex items-center gap-2 text-base font-semibold text-neutral-900 dark:text-neutral-100">
+            <WarningOutlined style={{ color: '#faad14' }} />
+            <span>Báo lỗi / Khiếu nại đơn hàng</span>
+          </div>
+        }
+        destroyOnHidden
+        width={560}
+      >
+        <p className="text-xs text-neutral-500 mb-4">
+          Đơn hàng #{orderCode || orderId}. Chúng tôi sẽ kết nối bạn với người bán và ban quản trị để giải quyết sự cố.
+        </p>
 
         {createdTicket ? (
-          <div className="py-6 flex flex-col items-center text-center space-y-4">
-            <div className="w-12 h-12 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-emerald-600">
-              <CheckCircle2 className="w-7 h-7" />
-            </div>
-            <div className="space-y-1">
-              <h3 className="font-semibold text-base">Đã tạo khiếu nại thành công!</h3>
-              <p className="text-xs text-muted-foreground font-mono">
-                Mã định danh: <span className="font-bold text-foreground">{createdTicket.code}</span>
-              </p>
-            </div>
-            <p className="text-sm text-muted-foreground max-w-sm">
-              Yêu cầu của bạn đã được chuyển tới người bán và bộ phận hỗ trợ kỹ thuật. Bạn có thể theo dõi phản hồi trong lịch sử khiếu nại của đơn hàng.
-            </p>
-            <DialogFooter className="w-full sm:justify-center pt-2">
-              <Button onClick={() => setOpen(false)}>Đóng cửa sổ</Button>
-            </DialogFooter>
-          </div>
+          <Result
+            status="success"
+            title="Đã tạo khiếu nại thành công!"
+            subTitle={
+              <div>
+                <span>Mã định danh: </span>
+                <strong className="font-mono text-neutral-900 dark:text-neutral-100">{createdTicket.code}</strong>
+                <p className="text-xs text-neutral-500 mt-2">
+                  Yêu cầu của bạn đã được chuyển tới người bán và bộ phận hỗ trợ kỹ thuật.
+                </p>
+              </div>
+            }
+            extra={[
+              <Button type="primary" key="close" onClick={handleClose} className="!bg-[#1677ff]">
+                Đóng cửa sổ
+              </Button>,
+            ]}
+          />
         ) : (
-          <form onSubmit={handleSubmit} noValidate className="space-y-4 pt-2">
+          <form onSubmit={handleSubmit} noValidate className="space-y-4">
             {errorMsg && (
               <div
                 role="alert"
-                className="p-3 bg-destructive/10 border border-destructive/20 text-destructive text-sm rounded-md"
+                className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/40 text-red-600 dark:text-red-400 text-sm rounded-md mb-3"
               >
                 {errorMsg}
               </div>
@@ -213,12 +208,15 @@ export function OrderDisputeModal({
             {/* Product selection if multiple distinct products exist */}
             {distinctProducts.length > 1 && (
               <div className="space-y-1.5">
-                <label htmlFor="ticket-product" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Sản phẩm gặp sự cố <span className="text-destructive">*</span>
+                <label
+                  htmlFor="ticket-product"
+                  className="block text-xs font-semibold uppercase tracking-wider text-neutral-500"
+                >
+                  Sản phẩm gặp sự cố <span className="text-red-500">*</span>
                 </label>
                 <select
                   id="ticket-product"
-                  className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  className="w-full h-9 px-3 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-sm outline-none focus:ring-2 focus:ring-[#1677ff]"
                   value={effectiveProductId ?? ''}
                   onChange={(e) =>
                     setSelectedProductId(e.target.value ? Number(e.target.value) : undefined)
@@ -231,46 +229,46 @@ export function OrderDisputeModal({
                     </option>
                   ))}
                 </select>
-                <p className="text-xs text-muted-foreground">
-                  Đơn hàng có nhiều sản phẩm của nhiều người bán khác nhau. Vui lòng chọn đúng sản
-                  phẩm gặp sự cố để khiếu nại được gửi tới người bán phù hợp.
+                <p className="text-xs text-neutral-500">
+                  Đơn hàng có nhiều sản phẩm của nhiều người bán khác nhau. Vui lòng chọn đúng sản phẩm gặp sự cố để khiếu nại được gửi tới người bán phù hợp.
                 </p>
               </div>
             )}
 
-            {/* If a single distinct product, show info */}
+            {/* Single product indicator */}
             {distinctProducts.length === 1 && (
-              <div className="text-xs text-muted-foreground bg-muted/50 p-2.5 rounded-md">
-                <span className="font-medium text-foreground">Sản phẩm:</span>{' '}
-                {distinctProducts[0].title}
+              <div className="text-xs text-neutral-500 bg-neutral-100 dark:bg-neutral-800 p-2.5 rounded-md">
+                <span className="font-medium text-neutral-900 dark:text-neutral-100">Sản phẩm: </span>
+                <span>{distinctProducts[0].title}</span>
               </div>
             )}
 
-            {/* No product list available: deep-link to the order detail page, where the
-                user can pick the exact product (and therefore the right seller). */}
+            {/* Unknown products deep-link helper */}
             {distinctProducts.length === 0 && (
-              <div className="text-xs text-muted-foreground bg-muted/50 p-2.5 rounded-md space-y-1">
+              <div className="text-xs text-neutral-500 bg-neutral-100 dark:bg-neutral-800 p-2.5 rounded-md space-y-1">
                 <p>
-                  Nếu đơn hàng gồm nhiều sản phẩm, vui lòng chọn đúng sản phẩm gặp sự cố trước khi
-                  gửi khiếu nại.
+                  Nếu đơn hàng gồm nhiều sản phẩm, vui lòng chọn đúng sản phẩm gặp sự cố trước khi gửi khiếu nại.
                 </p>
                 <a
                   href={`/orders/${orderId}`}
-                  className="inline-flex items-center gap-1 font-medium text-primary underline underline-offset-2"
+                  className="inline-flex items-center gap-1 font-medium text-[#1677ff] underline underline-offset-2"
                 >
                   Mở chi tiết đơn hàng để chọn sản phẩm
                 </a>
               </div>
             )}
 
-            {/* Reason selector */}
+            {/* Dispute Reason */}
             <div className="space-y-1.5">
-              <label htmlFor="ticket-reason" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Lý do khiếu nại <span className="text-destructive">*</span>
+              <label
+                htmlFor="ticket-reason"
+                className="block text-xs font-semibold uppercase tracking-wider text-neutral-500"
+              >
+                Lý do khiếu nại <span className="text-red-500">*</span>
               </label>
               <select
                 id="ticket-reason"
-                className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                className="w-full h-9 px-3 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-sm outline-none focus:ring-2 focus:ring-[#1677ff]"
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
               >
@@ -282,44 +280,51 @@ export function OrderDisputeModal({
               </select>
             </div>
 
-            {/* Subject */}
+            {/* Dispute Subject */}
             <div className="space-y-1.5">
-              <label htmlFor="ticket-subject" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Tiêu đề sự cố <span className="text-destructive">*</span>
+              <label
+                htmlFor="ticket-subject"
+                className="block text-xs font-semibold uppercase tracking-wider text-neutral-500"
+              >
+                Tiêu đề sự cố <span className="text-red-500">*</span>
               </label>
-              <Input
+              <input
                 id="ticket-subject"
-                placeholder="VD: Không giải nén được file RAR, báo lỗi hỏng dữ liệu..."
+                type="text"
+                placeholder="Ví dụ: File Revit 2022 báo lỗi corrup khi mở"
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
                 maxLength={200}
-                required
+                className="w-full h-9 px-3 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-sm outline-none focus:ring-2 focus:ring-[#1677ff]"
               />
             </div>
 
-            {/* Description */}
+            {/* Dispute Description */}
             <div className="space-y-1.5">
-              <label htmlFor="ticket-description" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Mô tả chi tiết <span className="text-destructive">*</span>
+              <label
+                htmlFor="ticket-description"
+                className="block text-xs font-semibold uppercase tracking-wider text-neutral-500"
+              >
+                Mô tả chi tiết <span className="text-red-500">*</span>
               </label>
-              <Textarea
+              <textarea
                 id="ticket-description"
                 rows={4}
-                placeholder="Mô tả cụ thể lỗi gặp phải, phần mềm và phiên bản đã sử dụng để mở file (VD: AutoCAD 2024, WinRAR 7.0), ảnh chụp màn hình lỗi nếu có..."
+                placeholder="Mô tả cụ thể sự cố bạn gặp phải, phiên bản phần mềm bạn dùng để mở file..."
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                required
+                className="w-full p-3 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-sm outline-none focus:ring-2 focus:ring-[#1677ff] resize-none"
               />
             </div>
 
             {/* Priority */}
             <div className="space-y-1.5">
-              <label htmlFor="ticket-priority" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <label htmlFor="ticket-priority" className="block text-xs font-semibold uppercase tracking-wider text-neutral-500">
                 Mức độ khẩn cấp
               </label>
               <select
                 id="ticket-priority"
-                className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                className="w-full h-9 px-3 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-sm outline-none focus:ring-2 focus:ring-[#1677ff]"
                 value={priority}
                 onChange={(e) => setPriority(e.target.value)}
               >
@@ -330,29 +335,22 @@ export function OrderDisputeModal({
               </select>
             </div>
 
-            <DialogFooter className="pt-2">
+            <div className="flex justify-end gap-3 pt-3 border-t border-neutral-100 dark:border-neutral-800">
+              <Button onClick={handleClose} disabled={isSubmitting}>
+                Hủy bỏ
+              </Button>
               <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setOpen(false)}
-                disabled={isSubmitting}
+                type="primary"
+                htmlType="submit"
+                loading={isSubmitting}
+                danger
               >
-                Hủy
+                Gửi khiếu nại
               </Button>
-              <Button type="submit" disabled={isSubmitting} className="min-w-28">
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin mr-1" />
-                    Đang gửi...
-                  </>
-                ) : (
-                  'Gửi khiếu nại'
-                )}
-              </Button>
-            </DialogFooter>
+            </div>
           </form>
         )}
-      </DialogContent>
-    </Dialog>
+      </Modal>
+    </>
   )
 }

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { Metadata } from 'next'
+import { AntdRegistry } from '@ant-design/nextjs-registry'
 
 import { AdminBar } from '@/components/AdminBar'
 import { Footer } from '@/components/Footer'
@@ -77,14 +78,16 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <link href="/favicon.svg" rel="icon" type="image/svg+xml" />
       </head>
       <body>
-        <Providers>
-          <AdminBar />
-          <LivePreviewListener />
+        <AntdRegistry>
+          <Providers>
+            <AdminBar />
+            <LivePreviewListener />
 
-          <Header />
-          <main>{children}</main>
-          <Footer />
-        </Providers>
+            <Header />
+            <main>{children}</main>
+            <Footer />
+          </Providers>
+        </AntdRegistry>
       </body>
     </html>
   )

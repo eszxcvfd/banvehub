@@ -1,14 +1,20 @@
 import { getPayload, type Payload } from 'payload'
 import config from '@/payload.config'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { User, Wallet } from '@/payload-types'
 import { creditWallet, getOrCreateWallet } from '@/services/wallet'
+import { releaseMaturedEarnings } from '@/services/earnings'
+import { POST as postAdminRefund } from '@/app/api/v1/admin/refunds/route'
 
-// Interface contracts per PROJECT.md § Refund Service
+// Interface contracts per PROJECT.md § Refund Service, extended by decision 0012:
+// the fault basis is REQUIRED (no default), and an out-of-window refund needs the
+// operator's explicit, recorded override.
 export interface RefundParams {
   orderId: number
   reason: string
   actorId: number
+  faultBasis: 'SELLER' | 'PLATFORM'
+  overrideWindow?: boolean
   revokeEntitlement?: boolean
 }
 
@@ -17,6 +23,10 @@ export interface RefundResult {
   orderId: number
   buyerId: number
   amountRefunded: number
+  sellerAmountRefunded: number
+  platformFeeRefunded: number
+  faultBasis: 'SELLER' | 'PLATFORM'
+  outOfWindow: boolean
   reversalLedgerEntryId?: number
   entitlementRevoked: boolean
   status: string
@@ -387,11 +397,12 @@ describe('Phase 6: Compensating Refund Flow & Ledger Immutability (FLOW-U15, BR-
     expect(purchaseLedgerDocs.docs.length).toBe(1)
     const purchaseLedger = purchaseLedgerDocs.docs[0]
 
-    // Finance Admin executes refund
+    // Finance Admin executes refund (seller fault: the delivered drawing is not as described)
     const refundResult = await processRefundFn(payload, {
       orderId: Number(purchase.orderId),
       reason: 'Bản vẽ CAD lỗi font chữ và thiếu mặt cắt trục 3-4',
       actorId: financeAdminUser.id,
+      faultBasis: 'SELLER',
       revokeEntitlement: true,
     })
 
@@ -459,8 +470,9 @@ describe('Phase 6: Compensating Refund Flow & Ledger Immutability (FLOW-U15, BR-
     // Refund order
     const refundResult = await processRefundFn(payload, {
       orderId: Number(purchase.orderId),
-      reason: 'Yêu cầu hủy mua do nhầm định dạng',
+      reason: 'File CAD không đúng định dạng đã mô tả',
       actorId: financeAdminUser.id,
+      faultBasis: 'SELLER',
     })
     cleanup.refunds.push(refundResult.refundId)
 
@@ -574,8 +586,9 @@ describe('Phase 6: Compensating Refund Flow & Ledger Immutability (FLOW-U15, BR-
     // Execute refund with revokeEntitlement: false (goodwill compensation)
     const refundResult = await processRefundFn(payload, {
       orderId: Number(purchase.orderId),
-      reason: 'Bồi thường thiện chí khách hàng',
+      reason: 'File bị lỗi so với mô tả, giữ quyền tải cho người mua như bồi thường thiện chí',
       actorId: financeAdminUser.id,
+      faultBasis: 'SELLER',
       revokeEntitlement: false,
     })
     cleanup.refunds.push(refundResult.refundId)
@@ -603,6 +616,7 @@ describe('Phase 6: Compensating Refund Flow & Ledger Immutability (FLOW-U15, BR-
         orderId: refundedOrderId,
         reason: 'Thử hoàn tiền lần thứ 2',
         actorId: financeAdminUser.id,
+        faultBasis: 'SELLER',
       })
     ).rejects.toThrow(/already|refund/i)
   })
@@ -618,6 +632,7 @@ describe('Phase 6: Compensating Refund Flow & Ledger Immutability (FLOW-U15, BR-
         orderId: 9999999,
         reason: 'Refund order không tồn tại',
         actorId: financeAdminUser.id,
+        faultBasis: 'SELLER',
       })
     ).rejects.toThrow(/not found|eligible/i)
 
@@ -627,6 +642,7 @@ describe('Phase 6: Compensating Refund Flow & Ledger Immutability (FLOW-U15, BR-
         orderId: Number(cleanup.orders[0]),
         reason: '',
         actorId: financeAdminUser.id,
+        faultBasis: 'SELLER',
       })
     ).rejects.toThrow()
   })
@@ -668,5 +684,469 @@ describe('Phase 6: Compensating Refund Flow & Ledger Immutability (FLOW-U15, BR-
 
     // Wallet balance strictly matches sum of ledger entries
     expect(Number(finalWallet.balance)).toBe(calculatedBalance)
+  })
+
+  /**
+   * Decision 0012: the fault basis is a REQUIRED input that decides who bears the refund
+   * (seller fault reverses the seller's earning, platform fault refunds the buyer only), and the
+   * 5-day window runs from `orders.paidAt` with an explicit, recorded operator override.
+   */
+  describe('Decision 0012: fault basis and the 5-day refund window', () => {
+    const createCommercialProduct = async (price: number) => {
+      const product = await payload.create({
+        collection: 'products',
+        data: {
+          title: `Decision 0012 Blueprint ${getSeq()}`,
+          slug: `d0012-${Date.now()}-${getSeq()}`,
+          price,
+          isFree: false,
+          seller: sellerUser.id,
+          originalFiles: [uploadedFile.fileDoc.id],
+          copyrightDeclared: true,
+          moderationStatus: 'approved',
+          _status: 'published',
+        },
+        overrideAccess: true,
+      })
+      cleanup.products.push(product.id)
+      return product
+    }
+
+    const buyProduct = async (buyerId: number, productId: number, price: number) => {
+      await creditWallet(payload, {
+        userId: buyerId,
+        amount: price,
+        type: 'topup',
+        referenceType: 'payment_intent',
+        referenceId: `TOPUP_D0012_${Date.now()}_${getSeq()}`,
+        description: 'Topup for decision 0012 refund tests',
+      })
+
+      const purchase = await purchaseProductFn!(payload, { buyerId, productId })
+      cleanup.orders.push(purchase.orderId)
+      cleanup.entitlements.push(purchase.entitlementId)
+      return purchase
+    }
+
+    const earningOfOrder = async (orderId: string) => {
+      const found = await payload.find({
+        collection: 'seller_earnings' as any,
+        where: { order: { equals: orderId } },
+        overrideAccess: true,
+      })
+      expect(found.totalDocs).toBe(1)
+      return found.docs[0] as any
+    }
+
+    const refundLedgerRowsOf = async (orderCode: string) => {
+      const found = await payload.find({
+        collection: 'wallet_ledger',
+        where: {
+          and: [{ referenceId: { equals: orderCode } }, { type: { equals: 'refund' } }],
+        },
+        overrideAccess: true,
+      })
+      return found.totalDocs
+    }
+
+    const refundsOfOrder = async (orderId: number) => {
+      const found = await payload.find({
+        collection: 'refunds',
+        where: { order: { equals: orderId } },
+        overrideAccess: true,
+      })
+      return found.totalDocs
+    }
+
+    it('refuses a refund that states no fault basis, then records the seller share on a seller-fault refund', async () => {
+      if (!processRefundFn || !purchaseProductFn) {
+        throw new Error('M4 pending: services not yet implemented')
+      }
+
+      const product = await createCommercialProduct(150000)
+      const purchase = await buyProduct(buyerUser.id, product.id, 150000)
+      const orderId = Number(purchase.orderId)
+
+      const earning = await earningOfOrder(purchase.orderId)
+      const sellerShare = Number(earning.sellerAmount)
+      const platformFee = Number(earning.platformFee)
+      expect(sellerShare).toBeGreaterThan(0)
+
+      // No fault basis: the money path refuses, and it refuses before moving anything at all.
+      await expect(
+        processRefundFn(payload, {
+          orderId,
+          reason: 'Yêu cầu hoàn tiền không nêu cơ sở lỗi',
+          actorId: financeAdminUser.id,
+        } as any),
+      ).rejects.toThrow(/fault basis/i)
+
+      expect(await refundLedgerRowsOf(purchase.orderCode)).toBe(0)
+      expect(await refundsOfOrder(orderId)).toBe(0)
+      expect(
+        (await payload.findByID({ collection: 'orders', id: orderId, overrideAccess: true })).status,
+      ).toBe('COMPLETED')
+
+      // The same order refunds normally once the basis is stated: seller fault.
+      const refund = await processRefundFn(payload, {
+        orderId,
+        reason: 'File bàn giao thiếu mặt cắt so với mô tả',
+        actorId: financeAdminUser.id,
+        faultBasis: 'SELLER',
+      })
+      cleanup.refunds.push(refund.refundId)
+
+      expect(refund.faultBasis).toBe('SELLER')
+      expect(refund.sellerAmountRefunded).toBe(sellerShare)
+      expect(refund.platformFeeRefunded).toBe(platformFee)
+      expect(refund.outOfWindow).toBe(false)
+
+      const earningAfter = (await payload.findByID({
+        collection: 'seller_earnings' as any,
+        id: earning.id,
+        overrideAccess: true,
+      })) as any
+      expect(earningAfter.status).toBe('REVERSED')
+      expect(earningAfter.reversedAt).toBeDefined()
+      expect(Number(earningAfter.sellerAmount)).toBe(sellerShare)
+
+      expect(
+        (await payload.findByID({ collection: 'orders', id: orderId, overrideAccess: true })).status,
+      ).toBe('REFUNDED')
+    })
+
+    it('platform fault: buyer refunded, seller earning untouched (still PENDING) and matures on schedule with sellerAmountRefunded = 0', async () => {
+      if (!processRefundFn || !purchaseProductFn) {
+        throw new Error('M4 pending: services not yet implemented')
+      }
+
+      const product = await createCommercialProduct(200000)
+      const purchase = await buyProduct(buyerUser.id, product.id, 200000)
+      const orderId = Number(purchase.orderId)
+
+      const earning = await earningOfOrder(purchase.orderId)
+      const sellerShare = Number(earning.sellerAmount)
+      const platformFee = Number(earning.platformFee)
+      const holdUntil = earning.holdUntil as string
+      expect(sellerShare).toBeGreaterThan(0)
+      expect(platformFee).toBeGreaterThan(0)
+
+      const walletBefore = await getOrCreateWallet(payload, { userId: buyerUser.id })
+
+      const refund = await processRefundFn(payload, {
+        orderId,
+        reason: 'Lỗi hệ thống: không thể tải file dù đơn hàng đã thanh toán',
+        actorId: financeAdminUser.id,
+        faultBasis: 'PLATFORM',
+      })
+      cleanup.refunds.push(refund.refundId)
+
+      expect(refund.faultBasis).toBe('PLATFORM')
+      expect(refund.sellerAmountRefunded).toBe(0)
+      expect(refund.platformFeeRefunded).toBe(platformFee)
+
+      // The buyer is refunded through the one money write path, with its paired ledger row.
+      const walletAfter = await getOrCreateWallet(payload, { userId: buyerUser.id })
+      expect(Number(walletAfter.balance)).toBe(Number(walletBefore.balance) + 200000)
+
+      const refundDoc = (await payload.findByID({
+        collection: 'refunds',
+        id: refund.refundId,
+        overrideAccess: true,
+      })) as any
+      expect(refundDoc.faultBasis).toBe('PLATFORM')
+      expect(Number(refundDoc.sellerAmountRefunded)).toBe(0)
+      expect(refundDoc.outOfWindow).toBe(false)
+
+      // The refund points at the compensating ledger row it produced (a fresh row, never an edit).
+      expect(refund.reversalLedgerEntryId).toBeDefined()
+      const refundDocLedgerId =
+        typeof refundDoc.ledgerTransaction === 'object' && refundDoc.ledgerTransaction !== null
+          ? refundDoc.ledgerTransaction.id
+          : refundDoc.ledgerTransaction
+      expect(Number(refundDocLedgerId)).toBe(Number(refund.reversalLedgerEntryId))
+
+      const pairedLedger = await payload.findByID({
+        collection: 'wallet_ledger',
+        id: Number(refund.reversalLedgerEntryId),
+        overrideAccess: true,
+      })
+      expect(pairedLedger.type).toBe('refund')
+      expect(pairedLedger.direction).toBe('credit')
+      expect(Number(pairedLedger.amount)).toBe(200000)
+      expect(String(pairedLedger.referenceId)).toBe(purchase.orderCode)
+
+      // The seller's earning is untouched: same status, same hold instant, nothing recovered.
+      const earningAfter = (await payload.findByID({
+        collection: 'seller_earnings' as any,
+        id: earning.id,
+        overrideAccess: true,
+      })) as any
+      expect(earningAfter.status).toBe('PENDING')
+      expect(earningAfter.holdUntil).toBe(holdUntil)
+      expect(Number(earningAfter.sellerAmount)).toBe(sellerShare)
+      expect(earningAfter.reversedAt ?? null).toBeNull()
+
+      // It does not mature early...
+      await releaseMaturedEarnings(payload, { sellerId: sellerUser.id, asOf: new Date() })
+      expect(
+        (
+          (await payload.findByID({
+            collection: 'seller_earnings' as any,
+            id: earning.id,
+            overrideAccess: true,
+          })) as any
+        ).status,
+      ).toBe('PENDING')
+
+      // ...and it matures on schedule, paying the seller their share in full.
+      await releaseMaturedEarnings(payload, {
+        sellerId: sellerUser.id,
+        asOf: new Date(new Date(holdUntil).getTime() + 1000),
+      })
+      const matured = (await payload.findByID({
+        collection: 'seller_earnings' as any,
+        id: earning.id,
+        overrideAccess: true,
+      })) as any
+      expect(matured.status).toBe('AVAILABLE')
+      expect(Number(matured.sellerAmount)).toBe(sellerShare)
+
+      expect(
+        (await payload.findByID({ collection: 'orders', id: orderId, overrideAccess: true })).status,
+      ).toBe('REFUNDED')
+    })
+
+    it('measures the 5-day window from orders.paidAt: day 4 is in policy, day 6 is refused without the operator override', async () => {
+      if (!processRefundFn || !purchaseProductFn) {
+        throw new Error('M4 pending: services not yet implemented')
+      }
+
+      const day = 24 * 60 * 60 * 1000
+
+      // Inside the window: no override needed, and the record says it was in policy.
+      const inWindowProduct = await createCommercialProduct(100000)
+      const inWindowPurchase = await buyProduct(buyerUser.id, inWindowProduct.id, 100000)
+      const inWindowOrderId = Number(inWindowPurchase.orderId)
+      await payload.update({
+        collection: 'orders',
+        id: inWindowOrderId,
+        data: { paidAt: new Date(Date.now() - 4 * day).toISOString() },
+        overrideAccess: true,
+      })
+
+      const inWindowRefund = await processRefundFn(payload, {
+        orderId: inWindowOrderId,
+        reason: 'File lỗi phát hiện trong cửa sổ 5 ngày',
+        actorId: financeAdminUser.id,
+        faultBasis: 'SELLER',
+      })
+      cleanup.refunds.push(inWindowRefund.refundId)
+      expect(inWindowRefund.outOfWindow).toBe(false)
+
+      // Outside the window: the anchor is orders.paidAt, not the first download.
+      const outOfWindowProduct = await createCommercialProduct(100000)
+      const outOfWindowPurchase = await buyProduct(buyerUser.id, outOfWindowProduct.id, 100000)
+      const outOfWindowOrderId = Number(outOfWindowPurchase.orderId)
+      await payload.update({
+        collection: 'orders',
+        id: outOfWindowOrderId,
+        data: { paidAt: new Date(Date.now() - 6 * day).toISOString() },
+        overrideAccess: true,
+      })
+
+      await expect(
+        processRefundFn(payload, {
+          orderId: outOfWindowOrderId,
+          reason: 'Yêu cầu hoàn tiền sau 5 ngày',
+          actorId: financeAdminUser.id,
+          faultBasis: 'SELLER',
+        }),
+      ).rejects.toThrow(/window/i)
+
+      expect(await refundLedgerRowsOf(outOfWindowPurchase.orderCode)).toBe(0)
+      expect(await refundsOfOrder(outOfWindowOrderId)).toBe(0)
+      expect(
+        (
+          await payload.findByID({
+            collection: 'orders',
+            id: outOfWindowOrderId,
+            overrideAccess: true,
+          })
+        ).status,
+      ).toBe('COMPLETED')
+
+      // The operator may still act, but only by overriding, and the override is recorded.
+      const overrideRefund = await processRefundFn(payload, {
+        orderId: outOfWindowOrderId,
+        reason: 'Lỗi người bán chỉ phát hiện sau 5 ngày, người vận hành ghi đè ngoài chính sách',
+        actorId: financeAdminUser.id,
+        faultBasis: 'SELLER',
+        overrideWindow: true,
+      })
+      cleanup.refunds.push(overrideRefund.refundId)
+
+      expect(overrideRefund.outOfWindow).toBe(true)
+      const overrideDoc = (await payload.findByID({
+        collection: 'refunds',
+        id: overrideRefund.refundId,
+        overrideAccess: true,
+      })) as any
+      expect(overrideDoc.outOfWindow).toBe(true)
+      expect(overrideDoc.faultBasis).toBe('SELLER')
+    })
+
+    it('refuses an anchorless order (no paidAt) without the override and records the override when given', async () => {
+      if (!processRefundFn || !purchaseProductFn) {
+        throw new Error('M4 pending: services not yet implemented')
+      }
+
+      const product = await createCommercialProduct(100000)
+      const purchase = await buyProduct(buyerUser.id, product.id, 100000)
+      const orderId = Number(purchase.orderId)
+
+      // No anchor: absent paidAt is never treated as "inside the window".
+      await payload.update({
+        collection: 'orders',
+        id: orderId,
+        data: { paidAt: null },
+        overrideAccess: true,
+      })
+
+      await expect(
+        processRefundFn(payload, {
+          orderId,
+          reason: 'Đơn hàng không có paidAt',
+          actorId: financeAdminUser.id,
+          faultBasis: 'PLATFORM',
+        }),
+      ).rejects.toThrow(/paidAt|window/i)
+
+      expect(await refundsOfOrder(orderId)).toBe(0)
+
+      const refund = await processRefundFn(payload, {
+        orderId,
+        reason: 'Người vận hành ghi đè cho đơn không xác định được mốc cửa sổ',
+        actorId: financeAdminUser.id,
+        faultBasis: 'PLATFORM',
+        overrideWindow: true,
+      })
+      cleanup.refunds.push(refund.refundId)
+      expect(refund.outOfWindow).toBe(true)
+    })
+
+    it('POST /api/v1/admin/refunds: keeps the financeAdmin/admin authorization and rejects a missing, unknown or ill-typed fault basis', async () => {
+      if (!processRefundFn || !purchaseProductFn) {
+        throw new Error('M4 pending: services not yet implemented')
+      }
+
+      const product = await createCommercialProduct(120000)
+      const purchase = await buyProduct(buyerUser2.id, product.id, 120000)
+      const orderId = Number(purchase.orderId)
+      await payload.update({
+        collection: 'orders',
+        id: orderId,
+        data: { paidAt: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString() },
+        overrideAccess: true,
+      })
+
+      const refundRequest = (body: Record<string, unknown>) =>
+        new Request('http://localhost:3000/api/v1/admin/refunds', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+
+      const asUser = (user: unknown) =>
+        vi.spyOn(payload, 'auth').mockResolvedValueOnce({ user } as any)
+
+      // Authorization is unchanged: unauthenticated 401, non-finance role 403.
+      const anon = asUser(null)
+      expect(
+        (await postAdminRefund(refundRequest({ orderId, reason: 'x', faultBasis: 'SELLER' })))
+          .status,
+      ).toBe(401)
+      anon.mockRestore()
+
+      const asBuyer = asUser(buyerUser2)
+      expect(
+        (await postAdminRefund(refundRequest({ orderId, reason: 'x', faultBasis: 'SELLER' })))
+          .status,
+      ).toBe(403)
+      asBuyer.mockRestore()
+
+      // The fault basis is required and restricted to the two policy values.
+      const missingBasis = asUser(financeAdminUser)
+      const missingRes = await postAdminRefund(
+        refundRequest({ orderId, reason: 'Thiếu cơ sở lỗi' }),
+      )
+      expect(missingRes.status).toBe(400)
+      expect((await missingRes.json()).message).toMatch(/faultBasis/)
+      missingBasis.mockRestore()
+
+      const unknownBasis = asUser(financeAdminUser)
+      expect(
+        (
+          await postAdminRefund(
+            refundRequest({ orderId, reason: 'Cơ sở lỗi không hợp lệ', faultBasis: 'CHANGE_OF_MIND' }),
+          )
+        ).status,
+      ).toBe(400)
+      unknownBasis.mockRestore()
+
+      // A stringly-typed override must not be coerced into authorising an out-of-window refund.
+      const illTypedOverride = asUser(financeAdminUser)
+      expect(
+        (
+          await postAdminRefund(
+            refundRequest({
+              orderId,
+              reason: 'Cờ ghi đè không phải boolean',
+              faultBasis: 'SELLER',
+              overrideWindow: 'true',
+            }),
+          )
+        ).status,
+      ).toBe(400)
+      illTypedOverride.mockRestore()
+
+      // Out of window without the override: refused, and nothing moved.
+      const noOverride = asUser(financeAdminUser)
+      const noOverrideRes = await postAdminRefund(
+        refundRequest({ orderId, reason: 'Ngoài cửa sổ 5 ngày', faultBasis: 'SELLER' }),
+      )
+      expect(noOverrideRes.status).toBe(400)
+      expect((await noOverrideRes.json()).message).toMatch(/window/i)
+      noOverride.mockRestore()
+      expect(await refundLedgerRowsOf(purchase.orderCode)).toBe(0)
+
+      // With the explicit override the same request executes and stamps the record.
+      const withOverride = asUser(financeAdminUser)
+      const okRes = await postAdminRefund(
+        refundRequest({
+          orderId,
+          reason: 'Lỗi hệ thống phát hiện sau cửa sổ, người vận hành ghi đè',
+          faultBasis: 'PLATFORM',
+          overrideWindow: true,
+        }),
+      )
+      expect(okRes.status).toBe(200)
+      const okBody = await okRes.json()
+      expect(okBody.data.faultBasis).toBe('PLATFORM')
+      expect(okBody.data.outOfWindow).toBe(true)
+      cleanup.refunds.push(okBody.data.refundId)
+      withOverride.mockRestore()
+
+      const refundDoc = (await payload.findByID({
+        collection: 'refunds',
+        id: okBody.data.refundId,
+        overrideAccess: true,
+      })) as any
+      expect(refundDoc.faultBasis).toBe('PLATFORM')
+      expect(refundDoc.outOfWindow).toBe(true)
+      expect(
+        (await payload.findByID({ collection: 'orders', id: orderId, overrideAccess: true })).status,
+      ).toBe('REFUNDED')
+    })
   })
 })

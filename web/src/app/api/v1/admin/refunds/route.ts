@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getPayload, type Where } from 'payload'
 import configPromise from '@payload-config'
 import { headers as getHeaders } from 'next/headers'
-import { processRefund } from '@/services/refund'
+import { processRefund, normalizeFaultBasis } from '@/services/refund'
 
 async function getAuthContext(req: Request) {
   let headers: Headers
@@ -33,7 +33,13 @@ export async function POST(req: Request) {
       )
     }
 
-    let body: { orderId?: unknown; reason?: unknown; revokeEntitlement?: unknown } | null = null
+    let body: {
+      orderId?: unknown
+      reason?: unknown
+      faultBasis?: unknown
+      overrideWindow?: unknown
+      revokeEntitlement?: unknown
+    } | null = null
     try {
       body = await req.json()
     } catch {
@@ -43,7 +49,7 @@ export async function POST(req: Request) {
       )
     }
 
-    const { orderId, reason, revokeEntitlement } = body || {}
+    const { orderId, reason, faultBasis, overrideWindow, revokeEntitlement } = body || {}
 
     if (!orderId || isNaN(Number(orderId))) {
       return NextResponse.json(
@@ -59,10 +65,41 @@ export async function POST(req: Request) {
       )
     }
 
+    // Decision 0012 §7: the fault basis decides who bears the refund, so it is a required input
+    // of the operator's action and there is no default. The shared normaliser keeps this check
+    // and the service's check on exactly the same vocabulary.
+    const normalizedFaultBasis = normalizeFaultBasis(faultBasis)
+
+    if (!normalizedFaultBasis) {
+      return NextResponse.json(
+        {
+          error: 'BAD_REQUEST',
+          message:
+            'Cơ sở lỗi (faultBasis) là bắt buộc và phải là "SELLER" (lỗi người bán) hoặc "PLATFORM" (lỗi hệ thống).',
+        },
+        { status: 400 },
+      )
+    }
+
+    // The out-of-policy override must be an explicit boolean: coercing a truthy string such as
+    // "false" would silently authorise an out-of-window refund, so anything but a real boolean is
+    // rejected rather than interpreted.
+    if (overrideWindow !== undefined && typeof overrideWindow !== 'boolean') {
+      return NextResponse.json(
+        {
+          error: 'BAD_REQUEST',
+          message: 'Cờ ghi đè ngoài cửa sổ (overrideWindow) nếu có phải là giá trị boolean.',
+        },
+        { status: 400 },
+      )
+    }
+
     const result = await processRefund(payload, {
       orderId: Number(orderId),
       reason: reason.trim(),
       actorId: user.id,
+      faultBasis: normalizedFaultBasis,
+      overrideWindow: overrideWindow === true ? true : undefined,
       revokeEntitlement: revokeEntitlement !== undefined ? Boolean(revokeEntitlement) : undefined,
     })
 

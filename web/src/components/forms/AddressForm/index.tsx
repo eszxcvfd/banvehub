@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useCallback } from 'react'
-import { Form, Input, Select, Button, Row, Col, Divider, message } from 'antd'
+import { Form, Input, Select, Button, Row, Col, Divider, App } from 'antd'
 import { useAddresses } from '@payloadcms/plugin-ecommerce/client/react'
 import { SUPPORTED_COUNTRIES } from '@/constants/countries'
 import { Address, Config } from '@/payload-types'
@@ -23,6 +23,7 @@ export const AddressForm: React.FC<Props> = ({
   skipSubmission,
   onCancel,
 }) => {
+  const { message } = App.useApp()
   const [form] = Form.useForm()
   const { createAddress, updateAddress } = useAddresses()
   const [isSubmitting, setIsSubmitting] = useState(false)

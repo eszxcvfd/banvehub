@@ -20,6 +20,8 @@ export const Refunds: CollectionConfig = {
       'seller',
       'amount',
       'status',
+      'faultBasis',
+      'outOfWindow',
       'processedBy',
       'createdAt',
     ],
@@ -148,6 +150,33 @@ export const Refunds: CollectionConfig = {
       label: 'Lý do hoàn tiền',
       admin: {
         readOnly: true,
+      },
+    },
+    {
+      name: 'faultBasis',
+      type: 'select',
+      required: true,
+      label: 'Cơ sở lỗi (Fault basis)',
+      options: [
+        { label: 'Lỗi người bán (SELLER)', value: 'SELLER' },
+        { label: 'Lỗi hệ thống (PLATFORM)', value: 'PLATFORM' },
+      ],
+      admin: {
+        readOnly: true,
+        description:
+          'Bên chịu trách nhiệm hoàn tiền (Decision 0012 §7). SELLER: doanh thu người bán bị đảo ngược. PLATFORM: chỉ người mua được hoàn, doanh thu người bán giữ nguyên và đơn hàng không tính doanh thu nền tảng.',
+      },
+    },
+    {
+      name: 'outOfWindow',
+      type: 'checkbox',
+      required: true,
+      defaultValue: false,
+      label: 'Hoàn tiền ngoài cửa sổ 5 ngày',
+      admin: {
+        readOnly: true,
+        description:
+          'Cho biết lệnh hoàn tiền này CÓ CẦN ghi đè ngoài cửa sổ 5 ngày hay không, và ghi đè đó đã được ghi lại hay chưa (Decision 0012 §6, làm rõ F2) — không phải "yêu cầu có nằm trong cửa sổ hay không". Vì vậy false cũng bao gồm các bản ghi hoàn tiền được thực hiện trước khi quy tắc 5 ngày tồn tại.',
       },
     },
     {

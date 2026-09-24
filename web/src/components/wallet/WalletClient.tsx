@@ -583,15 +583,19 @@ export function WalletClient({
               <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">
                 Hoặc nhập số tiền khác
               </div>
-              <InputNumber
-                min={10000}
-                step={10000}
-                placeholder="Nhập tối thiểu 10,000₫"
-                value={customAmount}
-                onChange={(value) => setCustomAmount(Number(value) || 0)}
-                className="w-full"
-                addonAfter="₫"
-              />
+              <Space.Compact className="w-full">
+                <InputNumber
+                  min={10000}
+                  step={10000}
+                  placeholder="Nhập tối thiểu 10,000₫"
+                  value={customAmount}
+                  onChange={(value) => setCustomAmount(Number(value) || 0)}
+                  className="w-full"
+                />
+                <Button disabled className="!bg-slate-100 dark:!bg-neutral-800 !text-slate-600 dark:!text-slate-300 font-medium cursor-default">
+                  ₫
+                </Button>
+              </Space.Compact>
             </div>
             <Button
               type="primary"

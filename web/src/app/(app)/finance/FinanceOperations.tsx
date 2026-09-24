@@ -45,12 +45,38 @@ export interface AdminRefundItem {
   createdAt: string
 }
 
+/**
+ * The refund window state of one order, evaluated server-side in `page.tsx` by the same
+ * `evaluateRefundWindow` the refund route enforces (Decision 0012 §6, measured from
+ * `orders.paidAt`). `inWindow === null` means the console cannot judge this order — it is not in
+ * the recent-order list — so the operator may submit, and the route's refusal is what tells them
+ * (and the message is surfaced, never swallowed).
+ */
+export interface AdminOrderWindowItem {
+  id: number
+  code: string
+  status: string
+  totalAmount: number
+  paidAt?: string | null
+  inWindow: boolean | null
+  windowClosesAt?: string | null
+}
+
+export type RefundFaultBasis = 'SELLER' | 'PLATFORM'
+
 interface Props {
   initialWithdrawals: AdminWithdrawalItem[]
   initialRefunds: AdminRefundItem[]
+  initialOrders?: AdminOrderWindowItem[]
+  refundWindowDays?: number
 }
 
-export function FinanceOperations({ initialWithdrawals, initialRefunds }: Props) {
+export function FinanceOperations({
+  initialWithdrawals,
+  initialRefunds,
+  initialOrders = [],
+  refundWindowDays = 5,
+}: Props) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<'withdrawals' | 'refunds'>('withdrawals')
   const [withdrawals, setWithdrawals] = useState<AdminWithdrawalItem[]>(initialWithdrawals)
@@ -66,6 +92,13 @@ export function FinanceOperations({ initialWithdrawals, initialRefunds }: Props)
   const [refundOrderId, setRefundOrderId] = useState('')
   const [refundReason, setRefundReason] = useState('')
   const [refundRevokeEntitlement, setRefundRevokeEntitlement] = useState(true)
+  // Decision 0012 §7: the fault basis is not a default — the operator must choose who bears the
+  // cost, because that choice decides the money (seller fault reverses the earning; platform fault
+  // leaves it maturing and the platform absorbs it).
+  const [refundFaultBasis, setRefundFaultBasis] = useState<RefundFaultBasis | ''>('')
+  // Decision 0012 §6: an out-of-window refund is only allowed with this explicit, recorded override.
+  const [refundOverrideWindow, setRefundOverrideWindow] = useState(false)
+  const [refundWindowRefused, setRefundWindowRefused] = useState(false)
 
   // Loading & error
   const [actionLoading, setActionLoading] = useState(false)
@@ -214,6 +247,38 @@ export function FinanceOperations({ initialWithdrawals, initialRefunds }: Props)
   }
 
   // 6. Process Refund
+  //
+  // The route (`/api/v1/admin/refunds`) requires a fault basis and, for an order outside the
+  // Decision 0012 §6 window, an explicit `overrideWindow`. This action therefore states the basis,
+  // states the window, and surfaces every refusal the route returns as a message the operator can
+  // act on — an out-of-window refusal re-opens the override checkbox instead of dead-ending.
+  const orderWindowOf = (rawOrderId: string): AdminOrderWindowItem | null => {
+    const parsed = parseInt(rawOrderId, 10)
+    if (isNaN(parsed) || parsed <= 0) return null
+    return initialOrders.find((order) => order.id === parsed) ?? null
+  }
+
+  const selectedOrderWindow = orderWindowOf(refundOrderId)
+  // Three verdicts, not two: a row the console rendered while the order was not COMPLETED carries
+  // `inWindow: null` (the server cannot judge it), exactly like an order that is not in the list at
+  // all. Only an explicit `false` means "outside the window".
+  const windowVerdict: 'IN' | 'OUT' | 'UNKNOWN' =
+    selectedOrderWindow && selectedOrderWindow.inWindow !== null
+      ? selectedOrderWindow.inWindow
+        ? 'IN'
+        : 'OUT'
+      : 'UNKNOWN'
+  // Known to be outside the window: the override is mandatory before this action may be submitted.
+  const isKnownOutOfWindow = windowVerdict === 'OUT'
+
+  const refundBlockedReason = (() => {
+    if (!refundFaultBasis) return 'Vui lòng chọn cơ sở lỗi (lỗi người bán hoặc lỗi hệ thống).'
+    if (isKnownOutOfWindow && !refundOverrideWindow) {
+      return `Đơn hàng đã quá ${refundWindowDays} ngày kể từ thời điểm thanh toán: hoàn tiền ngoài chính sách, cần bật xác nhận ghi đè.`
+    }
+    return null
+  })()
+
   const handleRefundSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     clearNotifications()
@@ -229,6 +294,21 @@ export function FinanceOperations({ initialWithdrawals, initialRefunds }: Props)
       return
     }
 
+    // Decision 0012 §7: no refund may be submitted without stating who bore the cost.
+    if (!refundFaultBasis) {
+      setError('Vui lòng chọn cơ sở lỗi (lỗi người bán hoặc lỗi hệ thống).')
+      return
+    }
+
+    // Decision 0012 §6: an order the console knows to be past the window needs the explicit
+    // override, so the operator never sends it as an ordinary refund.
+    if (isKnownOutOfWindow && !refundOverrideWindow) {
+      setError(
+        `Đơn hàng đã quá ${refundWindowDays} ngày kể từ thời điểm thanh toán. Hoàn tiền ngoài chính sách chỉ được thực hiện khi bật xác nhận ghi đè.`,
+      )
+      return
+    }
+
     setActionLoading(true)
     try {
       const res = await fetch('/api/v1/admin/refunds', {
@@ -237,17 +317,37 @@ export function FinanceOperations({ initialWithdrawals, initialRefunds }: Props)
         body: JSON.stringify({
           orderId: orderIdNum,
           reason: refundReason.trim(),
+          faultBasis: refundFaultBasis,
+          // Only an explicit operator acknowledgement is ever sent; the route refuses a
+          // non-boolean value rather than coercing it.
+          overrideWindow: refundOverrideWindow ? true : undefined,
           revokeEntitlement: refundRevokeEntitlement,
         }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.message || data.error || 'Thực hiện hoàn tiền thất bại.')
+      if (!res.ok) {
+        const message = data.message || data.error || 'Thực hiện hoàn tiền thất bại.'
+        // The order turned out to be out of window (the console could not know it, e.g. the list
+        // was loaded before the window closed): make the override available instead of leaving the
+        // operator with a dead button.
+        if (/cửa sổ|window/i.test(String(message)) && !refundOverrideWindow) {
+          setRefundWindowRefused(true)
+        }
+        throw new Error(message)
+      }
 
-      setSuccessMessage(`Đã thực hiện bồi hoàn đơn hàng #${orderIdNum} thành công!`)
+      setSuccessMessage(
+        `Đã thực hiện bồi hoàn đơn hàng #${orderIdNum} thành công (cơ sở lỗi: ${
+          refundFaultBasis === 'SELLER' ? 'lỗi người bán' : 'lỗi hệ thống'
+        }).`,
+      )
       setIsRefundModalOpen(false)
       setRefundOrderId('')
       setRefundReason('')
       setRefundRevokeEntitlement(true)
+      setRefundFaultBasis('')
+      setRefundOverrideWindow(false)
+      setRefundWindowRefused(false)
 
       // Refresh refunds list
       const refundsRes = await fetch('/api/v1/admin/refunds')
@@ -379,7 +479,15 @@ export function FinanceOperations({ initialWithdrawals, initialRefunds }: Props)
 
         {activeTab === 'refunds' && (
           <Button
-            onClick={() => setIsRefundModalOpen(true)}
+            onClick={() => {
+              // A fresh decision every time the modal opens: no basis, no override, no stale
+              // window verdict from a previous order.
+              setRefundFaultBasis('')
+              setRefundOverrideWindow(false)
+              setRefundWindowRefused(false)
+              clearNotifications()
+              setIsRefundModalOpen(true)
+            }}
             size="sm"
             className="bg-rose-600 hover:bg-rose-700 text-white font-semibold shadow-sm"
           >
@@ -760,10 +868,12 @@ export function FinanceOperations({ initialWithdrawals, initialRefunds }: Props)
         </div>
       )}
 
-      {/* Modal: Process Refund */}
+      {/* Modal: Process Refund. The panel scrolls internally (`max-h-[90vh]`): with the fault basis,
+          the window panel, the override and the refusal message the modal can outgrow the viewport,
+          and a submit button the operator cannot reach is the dead button this action must not be. */}
       {isRefundModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-card border rounded-xl max-w-md w-full p-6 shadow-2xl space-y-4">
+          <div className="bg-card border rounded-xl max-w-md w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b pb-2">
               <h3 className="text-lg font-bold text-foreground">Thực hiện hoàn tiền bồi hoàn</h3>
               <button
@@ -775,8 +885,8 @@ export function FinanceOperations({ initialWithdrawals, initialRefunds }: Props)
               </button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Hệ thống sẽ ghi nhận bút toán đảo ngược doanh thu seller, hoàn tiền vào ví người mua và cập nhật
-              trạng thái đơn hàng sang REFUNDED.
+              Hệ thống sẽ ghi nhận bút toán hoàn tiền vào ví người mua, cập nhật trạng thái đơn hàng sang
+              REFUNDED và xử lý doanh thu người bán theo cơ sở lỗi được chọn.
             </p>
 
             <form onSubmit={handleRefundSubmit} className="space-y-4">
@@ -789,11 +899,129 @@ export function FinanceOperations({ initialWithdrawals, initialRefunds }: Props)
                   type="number"
                   placeholder="Ví dụ: 12"
                   value={refundOrderId}
-                  onChange={(e) => setRefundOrderId(e.target.value)}
+                  onChange={(e) => {
+                    setRefundOrderId(e.target.value)
+                    // The window verdict belongs to the order, so a new id re-opens the question.
+                    setRefundOverrideWindow(false)
+                    setRefundWindowRefused(false)
+                    clearNotifications()
+                  }}
                   disabled={actionLoading}
                   required
                 />
               </div>
+
+              {/* Decision 0012 §6: the window is measured from orders.paidAt, and the operator is
+                  told which case they are in instead of being left to guess. */}
+              {windowVerdict === 'IN' && selectedOrderWindow && (
+                <div
+                  data-testid="refund-window-status"
+                  className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs space-y-1"
+                >
+                  <p className="font-semibold text-emerald-700">
+                    Trong cửa sổ {refundWindowDays} ngày
+                  </p>
+                  <p className="text-muted-foreground">
+                    Đơn {selectedOrderWindow.code} đã thanh toán lúc{' '}
+                    {selectedOrderWindow.paidAt
+                      ? new Date(selectedOrderWindow.paidAt).toLocaleString('vi-VN')
+                      : '—'}{' '}
+                    — trong chính sách hoàn tiền.
+                  </p>
+                </div>
+              )}
+
+              {windowVerdict === 'OUT' && selectedOrderWindow && (
+                <div
+                  data-testid="refund-window-status"
+                  className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs space-y-1"
+                >
+                  <p className="font-semibold text-amber-700">
+                    ⚠ Ngoài cửa sổ {refundWindowDays} ngày — ngoài chính sách hoàn tiền
+                  </p>
+                  <p className="text-muted-foreground">
+                    Đơn {selectedOrderWindow.code} đã thanh toán lúc{' '}
+                    {selectedOrderWindow.paidAt
+                      ? new Date(selectedOrderWindow.paidAt).toLocaleString('vi-VN')
+                      : '—'}
+                    {selectedOrderWindow.windowClosesAt
+                      ? `, cửa sổ đã đóng lúc ${new Date(
+                          selectedOrderWindow.windowClosesAt,
+                        ).toLocaleString('vi-VN')}`
+                      : ''}
+                    . Hoàn tiền vẫn thực hiện được, nhưng bản ghi hoàn tiền sẽ ghi rõ là ngoài cửa sổ.
+                  </p>
+                </div>
+              )}
+
+              {windowVerdict === 'UNKNOWN' &&
+                refundOrderId.trim() !== '' &&
+                !isNaN(parseInt(refundOrderId, 10)) && (
+                  <div
+                    data-testid="refund-window-status"
+                    className="rounded-lg border border-muted-foreground/30 bg-muted/40 p-3 text-xs space-y-1"
+                  >
+                    <p className="font-semibold text-foreground">
+                      Chưa xác định được cửa sổ {refundWindowDays} ngày
+                    </p>
+                    <p className="text-muted-foreground">
+                      Trung tâm vận hành chưa có trạng thái cửa sổ của đơn này. Nếu đơn đã quá{' '}
+                      {refundWindowDays} ngày kể từ thời điểm thanh toán, hệ thống sẽ từ chối và yêu cầu
+                      xác nhận ghi đè bên dưới.
+                    </p>
+                  </div>
+                )}
+
+              {/* Decision 0012 §7: the basis decides who bears the refund — never a default. */}
+              <fieldset className="space-y-2" disabled={actionLoading}>
+                <legend className="text-sm font-medium">
+                  Cơ sở lỗi (bắt buộc) <span className="text-destructive">*</span>
+                </legend>
+                <label
+                  htmlFor="faultBasisSeller"
+                  className="flex items-start gap-2 rounded-lg border p-2.5 text-xs cursor-pointer hover:bg-muted/40"
+                >
+                  <input
+                    type="radio"
+                    id="faultBasisSeller"
+                    name="refundFaultBasis"
+                    value="SELLER"
+                    checked={refundFaultBasis === 'SELLER'}
+                    onChange={() => setRefundFaultBasis('SELLER')}
+                    disabled={actionLoading}
+                    className="mt-0.5 w-4 h-4"
+                    required
+                  />
+                  <span>
+                    <span className="font-semibold text-foreground">Lỗi người bán</span>
+                    <span className="block text-muted-foreground">
+                      Đảo ngược doanh thu người bán và hoàn luôn phí sàn cho người mua.
+                    </span>
+                  </span>
+                </label>
+                <label
+                  htmlFor="faultBasisPlatform"
+                  className="flex items-start gap-2 rounded-lg border p-2.5 text-xs cursor-pointer hover:bg-muted/40"
+                >
+                  <input
+                    type="radio"
+                    id="faultBasisPlatform"
+                    name="refundFaultBasis"
+                    value="PLATFORM"
+                    checked={refundFaultBasis === 'PLATFORM'}
+                    onChange={() => setRefundFaultBasis('PLATFORM')}
+                    disabled={actionLoading}
+                    className="mt-0.5 w-4 h-4"
+                  />
+                  <span>
+                    <span className="font-semibold text-foreground">Lỗi hệ thống (nền tảng)</span>
+                    <span className="block text-muted-foreground">
+                      Chỉ hoàn người mua: doanh thu người bán giữ nguyên và vẫn được trả đủ, đơn hàng không
+                      tính doanh thu nền tảng.
+                    </span>
+                  </span>
+                </label>
+              </fieldset>
 
               <div className="space-y-1.5">
                 <Label htmlFor="refundReason">
@@ -809,6 +1037,28 @@ export function FinanceOperations({ initialWithdrawals, initialRefunds }: Props)
                 />
               </div>
 
+              {(isKnownOutOfWindow || refundWindowRefused) && (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 space-y-2">
+                  <p className="text-xs font-semibold text-amber-700">
+                    Xác nhận ghi đè ngoài cửa sổ {refundWindowDays} ngày (bắt buộc)
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="overrideWindow"
+                      checked={refundOverrideWindow}
+                      onChange={(e) => setRefundOverrideWindow(e.target.checked)}
+                      disabled={actionLoading}
+                      className="rounded border-border text-primary focus:ring-primary w-4 h-4"
+                    />
+                    <Label htmlFor="overrideWindow" className="text-xs font-normal cursor-pointer">
+                      Tôi xác nhận đơn hàng đã quá {refundWindowDays} ngày kể từ thời điểm thanh toán và
+                      thực hiện hoàn tiền ngoài chính sách (bản ghi sẽ ghi rõ out-of-window).
+                    </Label>
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center gap-2 pt-1">
                 <input
                   type="checkbox"
@@ -823,6 +1073,25 @@ export function FinanceOperations({ initialWithdrawals, initialRefunds }: Props)
                 </Label>
               </div>
 
+              {refundBlockedReason && (
+                <p data-testid="refund-blocked-reason" className="text-xs text-destructive">
+                  {refundBlockedReason}
+                </p>
+              )}
+
+              {/* The route's refusal, where the operator is actually looking: the page-level
+                  banner sits behind this modal's overlay, so a rejection would otherwise read as a
+                  dead button. */}
+              {error && (
+                <div
+                  data-testid="refund-error"
+                  role="alert"
+                  className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs font-medium text-destructive"
+                >
+                  {error}
+                </div>
+              )}
+
               <div className="flex items-center justify-end gap-3 pt-3 border-t">
                 <Button
                   type="button"
@@ -834,7 +1103,7 @@ export function FinanceOperations({ initialWithdrawals, initialRefunds }: Props)
                 </Button>
                 <Button
                   type="submit"
-                  disabled={actionLoading}
+                  disabled={actionLoading || Boolean(refundBlockedReason)}
                   className="bg-rose-600 hover:bg-rose-700 text-white font-semibold"
                 >
                   {actionLoading ? 'Đang bồi hoàn...' : 'Xác nhận hoàn tiền'}

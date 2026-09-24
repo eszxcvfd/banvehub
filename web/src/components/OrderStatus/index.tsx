@@ -1,28 +1,65 @@
+'use client'
+
+import React from 'react'
+import { Tag } from 'antd'
+import {
+  CheckCircleOutlined,
+  ClockCircleOutlined,
+  CloseCircleOutlined,
+  RollbackOutlined,
+  QuestionCircleOutlined,
+} from '@ant-design/icons'
 import type { Order } from '@/payload-types'
-import { cn } from '@/utilities/cn'
 
 export type StatusOptions = Order['status']
 
 type Props = {
   status: StatusOptions
   className?: string
+  showIcon?: boolean
 }
 
-export const OrderStatus: React.FC<Props> = ({ status, className }) => {
+export const ORDER_STATUS_MAP: Record<
+  string,
+  { label: string; color: string; icon: React.ReactNode }
+> = {
+  COMPLETED: {
+    label: 'Đã thanh toán',
+    color: 'green',
+    icon: <CheckCircleOutlined />,
+  },
+  PENDING: {
+    label: 'Chờ thanh toán',
+    color: 'orange',
+    icon: <ClockCircleOutlined />,
+  },
+  CANCELLED: {
+    label: 'Đã hủy',
+    color: 'red',
+    icon: <CloseCircleOutlined />,
+  },
+  REFUNDED: {
+    label: 'Đã hoàn tiền',
+    color: 'purple',
+    icon: <RollbackOutlined />,
+  },
+}
+
+export const OrderStatus: React.FC<Props> = ({ status, className, showIcon = true }) => {
+  const config = (status && ORDER_STATUS_MAP[status]) || {
+    label: status || 'Không xác định',
+    color: 'default',
+    icon: <QuestionCircleOutlined />,
+  }
+
   return (
-    <div
-      className={cn(
-        'text-xs tracking-widest font-mono uppercase py-0.5 px-2.5 rounded-full w-fit font-semibold border',
-        className,
-        {
-          'bg-amber-500/10 text-amber-600 border-amber-500/20': status === 'PENDING',
-          'bg-emerald-500/10 text-emerald-600 border-emerald-500/20': status === 'COMPLETED',
-          'bg-destructive/10 text-destructive border-destructive/20': status === 'CANCELLED',
-          'bg-purple-500/10 text-purple-600 border-purple-500/20': status === 'REFUNDED',
-        },
-      )}
+    <Tag
+      color={config.color}
+      icon={showIcon ? config.icon : undefined}
+      className={`font-mono text-xs font-semibold uppercase ${className || ''}`}
+      style={{ margin: 0, padding: '2px 8px', borderRadius: 12 }}
     >
-      {status}
-    </div>
+      {config.label}
+    </Tag>
   )
 }

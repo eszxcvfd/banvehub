@@ -190,6 +190,8 @@ export default async function ProductPage({ params }: Args) {
     : undefined
   const sellerProfile = sellerProfileRow
     ? {
+        id: sellerProfileRow.id,
+        slug: (sellerProfileRow as { slug?: string }).slug ?? null,
         displayName: (sellerProfileRow as { displayName?: string }).displayName ?? null,
         bio: (sellerProfileRow as { bio?: string }).bio ?? null,
       }

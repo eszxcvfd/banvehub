@@ -3,7 +3,13 @@ import { getPayload } from 'payload'
 import configPromise from '@payload-config'
 import { headers as getHeaders } from 'next/headers'
 import { checkRole } from '@/access/utilities'
-import { FinanceOperations, type AdminWithdrawalItem, type AdminRefundItem } from './FinanceOperations'
+import { REFUND_WINDOW_DAYS, evaluateRefundWindow } from '@/services/refund'
+import {
+  FinanceOperations,
+  type AdminWithdrawalItem,
+  type AdminRefundItem,
+  type AdminOrderWindowItem,
+} from './FinanceOperations'
 
 export const metadata = {
   title: 'Trung tâm Vận hành Tài chính (Finance Operations) | KienTaoHub',
@@ -70,6 +76,33 @@ export default async function FinancePage() {
     processedBy: r.processedBy,
     createdAt: r.createdAt,
   }))
+
+  // 3. Fetch recent orders so the refund action can state the Decision 0012 §6 window instead of
+  //    leaving the operator to guess it. The window is evaluated HERE, server-side, by the very
+  //    same `evaluateRefundWindow` the money path uses, so the console and the route can never
+  //    disagree about what "outside the 5-day window" means. An order that is not in this list is
+  //    simply unknown to the console (`inWindow: null`), and the route stays the authority.
+  const ordersRes = await payload.find({
+    collection: 'orders',
+    sort: '-createdAt',
+    limit: 100,
+    overrideAccess: true,
+    depth: 0,
+  })
+
+  const now = new Date()
+  const formattedOrders: AdminOrderWindowItem[] = ordersRes.docs.map((o: any) => {
+    const windowState = evaluateRefundWindow(o.paidAt, now)
+    return {
+      id: Number(o.id),
+      code: o.code,
+      status: o.status,
+      totalAmount: Number(o.totalAmount || 0),
+      paidAt: o.paidAt ?? null,
+      inWindow: o.status === 'COMPLETED' ? windowState.inWindow : null,
+      windowClosesAt: windowState.windowClosesAt ? windowState.windowClosesAt.toISOString() : null,
+    }
+  })
 
   // KPI Quick Stats
   const requestedWithdrawals = formattedWithdrawals.filter(
@@ -142,6 +175,8 @@ export default async function FinancePage() {
       <FinanceOperations
         initialWithdrawals={formattedWithdrawals}
         initialRefunds={formattedRefunds}
+        initialOrders={formattedOrders}
+        refundWindowDays={REFUND_WINDOW_DAYS}
       />
     </div>
   )

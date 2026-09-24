@@ -3,16 +3,28 @@ import { getPayload } from 'payload'
 import configPromise from '@payload-config'
 import { headers as getHeaders } from 'next/headers'
 import {
+  hasExecutedRefundForOrder,
   parseTicketInvariantError,
   resolveTicketActor,
   ticketErrorName,
   withTicketLock,
+  TICKET_REFUND_NOT_EXECUTED,
   type TicketActor,
 } from '@/collections/Tickets/hooks/enforceTicketInvariants'
 
 const VALID_STATUSES = ['OPEN', 'IN_PROGRESS', 'WAITING_USER', 'RESOLVED', 'CLOSED']
 const VALID_PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT']
 const VALID_RESOLUTIONS = ['EXPLAINED', 'FIX_PROVIDED', 'REFUNDED', 'REJECTED']
+
+/** The resolution that reads as "money moved" (decision 0012 §4). */
+const REFUNDED_RESOLUTION = 'REFUNDED'
+
+const toNumericOrNull = (value: unknown): number | null => {
+  const raw = typeof value === 'object' && value !== null ? (value as { id?: unknown }).id : value
+  if (raw === null || raw === undefined || raw === '') return null
+  const numeric = Number(raw)
+  return Number.isFinite(numeric) ? numeric : null
+}
 
 async function getAuthContext(req: Request) {
   let headers: Headers
@@ -70,6 +82,21 @@ function planTicketUpdate(ticket: any, actor: TicketActor, body: any): TicketUpd
           message: 'Người mua chỉ có thể đánh dấu Đã giải quyết hoặc Đóng khiếu nại.',
         },
       }
+    }
+  }
+
+  // Decision 0012 §1 and §4: `REFUNDED` is the one resolution that reads as "money moved", so only
+  // the party that executes refunds (financeAdmin/admin) may set it — a seller, a moderator or a
+  // buyer attempting it is refused here, exactly as the collection hook refuses it on every other
+  // write path. Whether a refund really exists is decided by that hook, inside the write's own
+  // transaction (it re-checks the locked ticket), so the label can never be stored on a guess.
+  if (resolution === 'REFUNDED' && !actor.isRefundOperator) {
+    return {
+      rejection: {
+        status: 403,
+        error: 'FORBIDDEN',
+        message: 'Chỉ Finance Admin hoặc Admin mới có quyền đặt kết luận "Đã hoàn tiền".',
+      },
     }
   }
 
@@ -268,6 +295,24 @@ export async function PATCH(
         { error: preflight.rejection.error, message: preflight.rejection.message },
         { status: preflight.rejection.status },
       )
+    }
+
+    // Decision 0012 §4: an operator may only claim a refund the order actually received. The
+    // collection hook enforces this inside the write itself (and for every other write path); this
+    // preflight only turns that refusal into a deterministic CONFLICT response for the operator.
+    if (preflight.updateData.resolution === REFUNDED_RESOLUTION) {
+      const orderId = toNumericOrNull(ticket.order)
+      if (!(await hasExecutedRefundForOrder(payload, orderId))) {
+        return NextResponse.json(
+          {
+            error: 'CONFLICT',
+            code: TICKET_REFUND_NOT_EXECUTED,
+            message:
+              'Kết luận "Đã hoàn tiền" chỉ được đặt khi đơn hàng đã có bản ghi hoàn tiền đã thực thi (refund COMPLETED).',
+          },
+          { status: 409 },
+        )
+      }
     }
 
     // Every ticket write shares one serialization point (the ticket row lock): the

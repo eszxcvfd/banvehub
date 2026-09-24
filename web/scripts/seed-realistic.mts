@@ -2227,41 +2227,7 @@ export async function seedRealistic() {
           },
         },
       },
-      layout: [
-        {
-          blockType: 'banner',
-          style: 'info',
-          content: {
-            root: {
-              type: 'root',
-              children: [
-                {
-                  type: 'paragraph',
-                  children: [
-                    {
-                      type: 'text',
-                      detail: 0,
-                      format: 0,
-                      mode: 'normal',
-                      style: '',
-                      text: 'Chào mừng bạn đến với Kiến Tạo Hub — Chợ dữ liệu số bản vẽ & mô hình CAD/BIM.',
-                      version: 1,
-                    },
-                  ],
-                  direction: 'ltr',
-                  format: '',
-                  indent: 0,
-                  version: 1,
-                },
-              ],
-              direction: 'ltr',
-              format: '',
-              indent: 0,
-              version: 1,
-            },
-          },
-        },
-      ],
+      layout: [],
       meta: {
         title: 'Kiến Tạo Hub — Chia Sẻ Bản Vẽ & Mô Hình CAD/BIM',
         description:
@@ -2569,6 +2535,10 @@ export async function seedRealistic() {
         orderId: targetCommPurchase.orderId,
         reason: `Khách hàng yêu cầu hoàn tiền: File bản vẽ không tương thích phiên bản CAD cũ (Refund #${actualRefundRecords.length + 1})`,
         actorId: financeUser.id,
+        // Decision 0012 §7: the seeded dispute is a not-as-described delivery, so the seller bears
+        // the refund (earning reversed, platform fee returned with it). `faultBasis` is a required
+        // input of the money path, so the seed states it like every other caller.
+        faultBasis: 'SELLER',
       })
       actualRefundRecords.push({
         refundId: refundResult.refundId,

@@ -8,6 +8,8 @@ export type SellerAttributionProps = {
   sellerBio?: string | null
   isVerified?: boolean
   className?: string
+  sellerSlug?: string | null
+  authorHref?: string | null
 }
 
 export function SellerAttribution({
@@ -18,6 +20,8 @@ export function SellerAttribution({
   // can point at a record that verifies the seller. Nothing does yet, so the badge is absent.
   isVerified = false,
   className = '',
+  sellerSlug,
+  authorHref,
 }: SellerAttributionProps) {
   // Nothing to attribute without a record: the block renders nothing rather than a fabricated creator.
   if (!sellerName) return null
@@ -32,20 +36,39 @@ export function SellerAttribution({
         .join('')
     : 'KT'
 
+  const authorLink = authorHref || (sellerSlug ? `/authors/${encodeURIComponent(sellerSlug)}` : '/shop')
+  const hasAuthorLink = authorLink !== '/shop'
+
   return (
     <div className={`rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-xs ${className}`}>
       <div className="flex items-start gap-3.5">
         {/* Avatar */}
-        <div className="w-11 h-11 rounded-full bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 flex items-center justify-center font-bold text-base shrink-0 shadow-xs">
-          {initials || 'KT'}
-        </div>
+        {hasAuthorLink ? (
+          <Link href={authorLink} className="shrink-0 group block" aria-label={`Ảnh đại diện tác giả ${sellerName}`}>
+            <div className="w-11 h-11 rounded-full bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 flex items-center justify-center font-bold text-base shadow-xs group-hover:ring-2 ring-[#1677ff] transition-all">
+              {initials || 'KT'}
+            </div>
+          </Link>
+        ) : (
+          <div className="w-11 h-11 rounded-full bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 flex items-center justify-center font-bold text-base shrink-0 shadow-xs">
+            {initials || 'KT'}
+          </div>
+        )}
 
         {/* Info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-bold text-sm text-slate-900 dark:text-white leading-none">
-              {sellerName}
-            </span>
+            {hasAuthorLink ? (
+              <Link href={authorLink} className="hover:text-[#1677ff] transition-colors">
+                <span className="font-bold text-sm text-slate-900 dark:text-white leading-none">
+                  {sellerName}
+                </span>
+              </Link>
+            ) : (
+              <span className="font-bold text-sm text-slate-900 dark:text-white leading-none">
+                {sellerName}
+              </span>
+            )}
             {isVerified && (
               <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-50 dark:bg-blue-950/60 text-[#1677ff] border border-blue-200 dark:border-blue-900">
                 Chuyên gia
@@ -67,10 +90,10 @@ export function SellerAttribution({
 
           <div className="mt-2.5 flex items-center justify-between text-xs">
             <Link
-              href="/shop"
+              href={authorLink}
               className="font-semibold text-[#1677ff] hover:text-[#4096ff] inline-flex items-center gap-1 transition-colors"
             >
-              <span>Xem thêm thông tin tác giả</span>
+              <span>Xem thông tin tác giả</span>
               <span className="sr-only">Tất cả tài nguyên</span>
               <ArrowRightOutlined className="text-[10px]" />
             </Link>

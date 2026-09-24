@@ -27,7 +27,7 @@ export function ProductDescription({
   /** Real count of `download_events` rows with status SUCCESS for this product. */
   downloadCount?: number | null
   /** The seller's own record (`seller_profiles`), so the page shows their real name and bio. */
-  sellerProfile?: { displayName?: string | null; bio?: string | null } | null
+  sellerProfile?: { displayName?: string | null; bio?: string | null; slug?: string | null; id?: number | string | null } | null
 }) {
   const isFree = Boolean(product.isFree)
   const price = product.price ?? 0
@@ -171,6 +171,7 @@ export function ProductDescription({
         <SellerAttribution
           sellerName={String(sellerProfile?.displayName || sellerObj?.name || '')}
           sellerBio={sellerProfile?.bio ? String(sellerProfile.bio) : null}
+          sellerSlug={sellerProfile?.slug || (sellerProfile?.id ? String(sellerProfile.id) : (sellerId ? String(sellerId) : null))}
         />
       )}
 

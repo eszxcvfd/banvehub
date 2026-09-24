@@ -38,6 +38,10 @@ export const TICKET_PRODUCT_NOT_PURCHASED = 'TICKET_PRODUCT_NOT_PURCHASED'
 export const TICKET_USER_CHANGE_FORBIDDEN = 'TICKET_USER_CHANGE_FORBIDDEN'
 /** Another write held the ticket row lock longer than the bounded wait allows. */
 export const TICKET_LOCK_TIMEOUT = 'TICKET_LOCK_TIMEOUT'
+/** Only the refund operator (financeAdmin/admin) may set the refund resolution. */
+export const TICKET_REFUND_OPERATOR_ONLY = 'TICKET_REFUND_OPERATOR_ONLY'
+/** A ticket may only carry the refund resolution when an executed refund exists for its order. */
+export const TICKET_REFUND_NOT_EXECUTED = 'TICKET_REFUND_NOT_EXECUTED'
 
 const INVARIANT_ERROR_CODES = new Set<string>([
   TICKET_PRODUCT_SELECTION_REQUIRED,
@@ -47,6 +51,8 @@ const INVARIANT_ERROR_CODES = new Set<string>([
   TICKET_PRODUCT_NOT_PURCHASED,
   TICKET_USER_CHANGE_FORBIDDEN,
   TICKET_LOCK_TIMEOUT,
+  TICKET_REFUND_OPERATOR_ONLY,
+  TICKET_REFUND_NOT_EXECUTED,
 ])
 
 /**
@@ -60,9 +66,22 @@ const TICKET_LOCK_WAIT_TIMEOUT_MS = 5000
 
 const ELEVATED_ROLES = ['admin', 'moderator', 'financeAdmin'] as const
 
+/**
+ * Roles that may execute a refund (decision 0012 §1: `financeAdmin` or `admin`). Deliberately
+ * NARROWER than the elevated ticket roles: a moderator manages tickets but never moves money, so
+ * a moderator may not claim that money moved.
+ */
+const REFUND_OPERATOR_ROLES = ['admin', 'financeAdmin'] as const
+
 /** Roles that may manage tickets across users (mirrors `src/access/ticketAccess.ts`). */
 export const isElevatedTicketUser = (user: any): boolean =>
   Boolean(user?.roles?.some((role: string) => (ELEVATED_ROLES as readonly string[]).includes(role)))
+
+/** True when the caller is the finance operator that decision 0012 lets execute a refund. */
+export const isRefundOperator = (user: any): boolean =>
+  Boolean(
+    user?.roles?.some((role: string) => (REFUND_OPERATOR_ROLES as readonly string[]).includes(role)),
+  )
 
 type ID = number | string
 
@@ -141,11 +160,13 @@ export const parseTicketInvariantError = (error: unknown): TicketInvariantReject
   const status =
     errorCode === TICKET_PRODUCT_NOT_FOUND
       ? 404
-      : errorCode === TICKET_USER_CHANGE_FORBIDDEN
+      : errorCode === TICKET_USER_CHANGE_FORBIDDEN || errorCode === TICKET_REFUND_OPERATOR_ONLY
         ? 403
         : errorCode === TICKET_LOCK_TIMEOUT
           ? 503
-          : 400
+          : errorCode === TICKET_REFUND_NOT_EXECUTED
+            ? 409
+            : 400
 
   return { errorCode, status, message: text }
 }
@@ -274,6 +295,8 @@ export type TicketActor = {
   isAdmin: boolean
   isAuthor: boolean
   isSeller: boolean
+  /** The finance operator (financeAdmin/admin) — the only party that may claim a refund. */
+  isRefundOperator: boolean
 }
 
 export const resolveTicketActor = (ticket: any, user: any): TicketActor => {
@@ -284,6 +307,7 @@ export const resolveTicketActor = (ticket: any, user: any): TicketActor => {
     isAdmin: isElevatedTicketUser(user),
     isAuthor: Number(authorId) === Number(user?.id),
     isSeller: Number(sellerId) === Number(user?.id),
+    isRefundOperator: isRefundOperator(user),
   }
 }
 
@@ -530,6 +554,119 @@ export async function resolveTicketAttribution({
   return { productId: resolvedProductId, sellerId }
 }
 
+// ---------------------------------------------------------------------------
+// Refund resolution (decision 0012 §4): the label follows the money
+// ---------------------------------------------------------------------------
+
+/** The resolution this guard protects — the one surface that reads as "money moved". */
+export const REFUNDED_RESOLUTION = 'REFUNDED'
+
+/**
+ * True when an executed refund exists for the order (decision 0012 §4). Single definition of
+ * "the money really moved", shared by the collection guard and by the PATCH route's deterministic
+ * preflight so the two can never drift apart.
+ */
+export async function hasExecutedRefundForOrder(
+  payload: Payload,
+  orderId: number | null,
+  req?: unknown,
+): Promise<boolean> {
+  if (orderId === null) return false
+
+  const executedRefunds = await payload.find({
+    collection: 'refunds',
+    where: {
+      and: [{ order: { equals: orderId } }, { status: { equals: 'COMPLETED' } }],
+    },
+    limit: 1,
+    depth: 0,
+    pagination: false,
+    overrideAccess: true,
+    // Inside a locked transaction the lookup must reuse that transaction's session, otherwise it
+    // needs a second pool connection while holding one (pool starvation).
+    req: req as any,
+  })
+
+  return executedRefunds.docs.length > 0
+}
+
+/**
+ * True when the write actually *sets* the refund resolution, rather than merely carrying the
+ * stored value forward. Payload merges the stored document into `data` before `beforeChange`
+ * runs, so "the field is present and REFUNDED" is not the same question as "this write claims a
+ * refund" — on an update the claim only exists when the stored resolution was something else.
+ */
+export const isSettingRefundResolution = (
+  data: any,
+  originalDoc: any,
+  operation: string,
+): boolean => {
+  if (data?.resolution !== REFUNDED_RESOLUTION) return false
+  if (operation !== 'update') return true
+  return originalDoc?.resolution !== REFUNDED_RESOLUTION
+}
+
+/**
+ * Decision 0012 §4 — no surface may show a refund that did not happen.
+ *
+ * A ticket may only carry `resolution = 'REFUNDED'` when an executed refund exists for its order,
+ * and only the party that executes refunds (`financeAdmin`/`admin`) may set it. This is an
+ * INDEPENDENT invariant: it is enforced for every write that reaches the collection — the custom
+ * PATCH route, the collection REST API, the admin panel and direct local-API calls — instead of
+ * being a consequence of the automatic resolution that `processRefund` performs. A caller
+ * therefore cannot smuggle the label in through an unrelated field update or a second route, and
+ * the automatic path itself passes the same check it enforces on everybody else.
+ *
+ * Writes without a requester (`req.user` absent) are the server's own internal operations: the
+ * custom routes re-check field permissions themselves and `processRefund` resolves the ticket
+ * after the refund row exists, so the refund existence is still verified for them.
+ *
+ * A ticket with no order can never satisfy the rule (a refund always belongs to an order), so it
+ * is refused rather than grandfathered in.
+ */
+export async function enforceRefundResolutionInvariant({
+  payload,
+  data,
+  operation,
+  originalDoc,
+  req,
+}: {
+  payload: Payload
+  data: any
+  operation: string
+  originalDoc?: any
+  req?: any
+}): Promise<void> {
+  if (!isSettingRefundResolution(data, originalDoc, operation)) return
+
+  const requester = req?.user
+  if (requester && !isRefundOperator(requester)) {
+    throw new TicketInvariantError(
+      TICKET_REFUND_OPERATOR_ONLY,
+      'Chỉ Finance Admin hoặc Admin mới có quyền đặt kết luận "Đã hoàn tiền".',
+      403,
+    )
+  }
+
+  const orderId = toNumericId(data?.order) ?? toNumericId(originalDoc?.order)
+
+  if (orderId === null) {
+    throw new TicketInvariantError(
+      TICKET_REFUND_NOT_EXECUTED,
+      'Kết luận "Đã hoàn tiền" chỉ được đặt cho khiếu nại gắn với một đơn hàng đã được hoàn tiền.',
+      409,
+    )
+  }
+
+  if (!(await hasExecutedRefundForOrder(payload, orderId, req))) {
+    throw new TicketInvariantError(
+      TICKET_REFUND_NOT_EXECUTED,
+      'Kết luận "Đã hoàn tiền" chỉ được đặt khi đơn hàng đã có bản ghi hoàn tiền đã thực thi (refund COMPLETED).',
+      409,
+    )
+  }
+}
+
 export const beforeValidateTicket: CollectionBeforeValidateHook = async ({
   data,
   operation,
@@ -726,7 +863,12 @@ export const beforeChangeTicket: CollectionBeforeChangeHook = async ({
     }
   }
 
-  // 5. Initialize messages thread on create if messages is empty
+  // 5. Decision 0012 §4: the refund label follows the money. Independent of — and identical for —
+  //    the automatic resolution `processRefund` performs: a ticket only carries "Đã hoàn tiền"
+  //    while an executed refund exists for its order, and only an operator may set it.
+  await enforceRefundResolutionInvariant({ payload, data, operation, originalDoc, req })
+
+  // 6. Initialize messages thread on create if messages is empty
   if (operation === 'create' && (!data.messages || data.messages.length === 0) && data.description) {
     const senderId = typeof data.user === 'object' ? data.user.id : data.user || req.user?.id
     if (senderId) {

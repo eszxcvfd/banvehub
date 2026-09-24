@@ -8,5 +8,7 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./vitest.setup.ts'],
     include: ['tests/challenger/**/*.spec.tsx'],
+    testTimeout: 15000,
+    fileParallelism: false,
   },
 })

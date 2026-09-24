@@ -1,7 +1,10 @@
 'use client'
 
 import React from 'react'
+import { CartDrawer } from './CartDrawer'
 
 export function CartModal() {
-  return null
+  return <CartDrawer />
 }
+
+export { CartDrawer }

@@ -508,11 +508,12 @@ describe('Phase 6: Multi-Actor Revenue Lifecycle & RBAC Matrix (FLOW-U12, FLOW-U
     const sellerBalanceAfterPurchase = await getSellerBalanceFn(payload, seller1.id)
     expect(sellerBalanceAfterPurchase.pendingBalance).toBe(sellerBalanceBefore.pendingBalance + 70000)
 
-    // Finance Admin executes refund
+    // Finance Admin executes refund (seller fault: the delivered CAD file is the wrong version)
     const refundRes = await processRefundFn(payload, {
       orderId: Number(purchase.orderId),
       reason: 'Khách hàng yêu cầu hoàn tiền do file cad không đúng phiên bản',
       actorId: financeAdmin1.id,
+      faultBasis: 'SELLER',
       revokeEntitlement: true,
     })
     cleanup.refunds.push(refundRes.refundId)
@@ -613,6 +614,7 @@ describe('Phase 6: Multi-Actor Revenue Lifecycle & RBAC Matrix (FLOW-U12, FLOW-U
         orderId: 999,
         reason: 'Self refund attempt',
         actorId: buyer1.id,
+        faultBasis: 'SELLER',
       })
     ).rejects.toThrow(/unauthorized|forbidden|finance|admin/i)
 
@@ -622,6 +624,7 @@ describe('Phase 6: Multi-Actor Revenue Lifecycle & RBAC Matrix (FLOW-U12, FLOW-U
         orderId: 999,
         reason: 'Seller refund attempt',
         actorId: seller1.id,
+        faultBasis: 'SELLER',
       })
     ).rejects.toThrow(/unauthorized|forbidden|finance|admin/i)
 
@@ -631,6 +634,7 @@ describe('Phase 6: Multi-Actor Revenue Lifecycle & RBAC Matrix (FLOW-U12, FLOW-U
         orderId: 999,
         reason: 'Moderator refund attempt',
         actorId: moderator1.id,
+        faultBasis: 'SELLER',
       })
     ).rejects.toThrow(/unauthorized|forbidden|finance|admin/i)
   })

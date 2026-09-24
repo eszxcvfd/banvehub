@@ -1,44 +1,104 @@
 'use client'
 
-import { useAuth } from '@/providers/Auth'
+import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
-import React, { Fragment, useEffect, useState } from 'react'
+import { Result, Button, Spin } from 'antd'
+import {
+  ShopOutlined,
+  LoginOutlined,
+  HomeOutlined,
+  CheckCircleOutlined,
+  InfoCircleOutlined,
+} from '@ant-design/icons'
+import { useAuth } from '@/providers/Auth'
 
-export const LogoutPage: React.FC = (props) => {
+export const LogoutPage: React.FC = () => {
   const { logout } = useAuth()
-  const [success, setSuccess] = useState('')
-  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [status, setStatus] = useState<'success' | 'already_logged_out'>('success')
 
   useEffect(() => {
+    let isMounted = true
+
     const performLogout = async () => {
       try {
         await logout()
-        setSuccess('Logged out successfully.')
+        if (isMounted) {
+          setStatus('success')
+          setLoading(false)
+        }
       } catch (_) {
-        setError('You are already logged out.')
+        if (isMounted) {
+          setStatus('already_logged_out')
+          setLoading(false)
+        }
       }
     }
 
     void performLogout()
+
+    return () => {
+      isMounted = false
+    }
   }, [logout])
 
+  if (loading) {
+    return (
+      <div className="py-16 flex flex-col items-center justify-center gap-4">
+        <Spin size="large" />
+        <span className="text-sm text-muted-foreground font-medium">Đang xử lý đăng xuất an toàn...</span>
+      </div>
+    )
+  }
+
   return (
-    <Fragment>
-      {(error || success) && (
-        <div className="prose dark:prose-invert">
-          <h1>{error || success}</h1>
-          <p>
-            What would you like to do next?
-            <Fragment>
-              {' '}
-              <Link href="/search">Click here</Link>
-              {` to shop.`}
-            </Fragment>
-            {` To log back in, `}
-            <Link href="/login">click here</Link>.
-          </p>
-        </div>
-      )}
-    </Fragment>
+    <Result
+      status="info"
+      icon={
+        status === 'success' ? (
+          <CheckCircleOutlined className="!text-[#1677ff]" />
+        ) : (
+          <InfoCircleOutlined className="!text-[#1677ff]" />
+        )
+      }
+      title={
+        status === 'success'
+          ? 'Đã đăng xuất thành công'
+          : 'Bạn chưa đăng nhập hoặc đã đăng xuất'
+      }
+      subTitle={
+        status === 'success'
+          ? 'Tài khoản của bạn đã được đăng xuất an toàn khỏi hệ thống KienTaoHub. Phiên làm việc đã kết thúc.'
+          : 'Hiện không có phiên làm việc nào đang hoạt động trên thiết bị này.'
+      }
+      extra={[
+        <Button
+          type="primary"
+          key="shop"
+          size="large"
+          className="!bg-[#1677ff] font-medium"
+          icon={<ShopOutlined />}
+        >
+          <Link href="/shop">Khám phá bản vẽ</Link>
+        </Button>,
+        <Button
+          key="login"
+          size="large"
+          className="font-medium"
+          icon={<LoginOutlined />}
+        >
+          <Link href="/login">Đăng nhập lại</Link>
+        </Button>,
+        <Button
+          type="text"
+          key="home"
+          size="large"
+          className="font-medium text-muted-foreground hover:text-foreground"
+          icon={<HomeOutlined />}
+        >
+          <Link href="/">Về trang chủ</Link>
+        </Button>,
+      ]}
+    />
   )
 }

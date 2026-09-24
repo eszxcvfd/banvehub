@@ -27,3 +27,208 @@
     }
   }
 }
+
+/* Header Search Pill Design */
+.header-search-pill-wrapper {
+  width: 100%;
+  border: none !important;
+  border-radius: 9999px !important;
+  background-color: #ffffff !important;
+  padding: 3px 4px 3px 14px !important;
+  display: flex !important;
+  align-items: center !important;
+  box-shadow: 0 4px 18px -2px rgba(0, 0, 0, 0.08), 0 2px 6px -1px rgba(0, 0, 0, 0.04) !important;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+:where(.dark) .header-search-pill-wrapper {
+  background-color: #1e293b !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+}
+
+.header-search-pill-wrapper:hover {
+  border: none !important;
+  box-shadow: 0 8px 25px -3px rgba(22, 119, 255, 0.16), 0 4px 10px -2px rgba(0, 0, 0, 0.06) !important;
+  transform: translateY(-1px);
+}
+
+:where(.dark) .header-search-pill-wrapper:hover {
+  box-shadow: 0 8px 25px -3px rgba(22, 119, 255, 0.3), 0 4px 12px rgba(0, 0, 0, 0.4) !important;
+  transform: translateY(-1px);
+}
+
+.header-search-pill-wrapper:focus-within {
+  border: none !important;
+  box-shadow: 0 8px 28px -3px rgba(22, 119, 255, 0.22), 0 0 0 3px rgba(22, 119, 255, 0.12) !important;
+  transform: translateY(-1px);
+}
+
+:where(.dark) .header-search-pill-wrapper:focus-within {
+  box-shadow: 0 8px 28px -3px rgba(22, 119, 255, 0.35), 0 0 0 3px rgba(22, 119, 255, 0.2) !important;
+  transform: translateY(-1px);
+}
+
+/* Ant Design Space.Compact / Input.Search reset inside our pill wrapper */
+.header-search-pill-wrapper .ant-space-compact,
+.header-search-pill-wrapper .ant-input-search,
+.header-search-pill.ant-input-search,
+.header-search-pill.ant-space-compact {
+  width: 100% !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+.header-search-pill-wrapper .ant-input-affix-wrapper,
+.header-search-pill.ant-input-affix-wrapper {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 4px 6px !important;
+  border-radius: 0 !important;
+  flex: 1 1 auto !important;
+}
+
+.header-search-pill-wrapper input.ant-input,
+.header-search-pill input.ant-input {
+  background: transparent !important;
+  background-color: transparent !important;
+  font-size: 14px !important;
+  color: #0f172a !important;
+  font-weight: 500 !important;
+  border: none !important;
+  outline: none !important;
+}
+
+:where(.dark) .header-search-pill-wrapper input.ant-input,
+:where(.dark) .header-search-pill input.ant-input {
+  color: #f8fafc !important;
+}
+
+.header-search-pill-wrapper input.ant-input::placeholder,
+.header-search-pill input.ant-input::placeholder {
+  color: #94a3b8 !important;
+  font-size: 13.5px !important;
+  font-weight: 400 !important;
+}
+
+.header-search-pill-wrapper .ant-input-group-addon {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+/* Action Button: vibrant Tech-Blue (#1677ff) pill button */
+.header-search-pill-wrapper .ant-btn,
+.header-search-pill .ant-btn,
+.header-search-pill-wrapper .ant-input-search-btn,
+.header-search-pill-wrapper .ant-input-search-button {
+  background-color: #1677ff !important;
+  border: none !important;
+  color: #ffffff !important;
+  border-radius: 9999px !important;
+  height: 35px !important;
+  padding: 0 18px !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  box-shadow: 0 2px 5px rgba(22, 119, 255, 0.28) !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  cursor: pointer !important;
+  flex-shrink: 0 !important;
+}
+
+.header-search-pill-wrapper .ant-btn:hover,
+.header-search-pill .ant-btn:hover,
+.header-search-pill-wrapper .ant-input-search-btn:hover,
+.header-search-pill-wrapper .ant-input-search-button:hover {
+  background-color: #4096ff !important;
+  box-shadow: 0 4px 10px rgba(22, 119, 255, 0.38) !important;
+  transform: translateY(-0.5px) !important;
+}
+
+.header-search-pill-wrapper .ant-btn:active,
+.header-search-pill .ant-btn:active,
+.header-search-pill-wrapper .ant-input-search-btn:active,
+.header-search-pill-wrapper .ant-input-search-button:active {
+  background-color: #0958d9 !important;
+  transform: scale(0.97) !important;
+}
+
+.header-search-pill-wrapper .ant-btn .anticon,
+.header-search-pill .ant-btn .anticon {
+  font-size: 13px !important;
+  color: #ffffff !important;
+}
+
+@media (max-width: 640px) {
+  .header-search-pill-wrapper .ant-btn,
+  .header-search-pill .ant-btn {
+    padding: 0 12px !important;
+    height: 32px !important;
+    min-width: 36px !important;
+  }
+}
+
+/* Category Nav Menu */
+.category-nav-menu.ant-menu-horizontal {
+  line-height: 44px;
+}
+
+.category-nav-menu .ant-menu-item-selected,
+.category-nav-menu .ant-menu-submenu-selected {
+  color: #1677ff !important;
+}
+
+.category-nav-menu .ant-menu-item,
+.category-nav-menu .ant-menu-submenu-title {
+  padding: 0 14px !important;
+  color: #334155;
+}
+
+:where(.dark) .category-nav-menu .ant-menu-item,
+:where(.dark) .category-nav-menu .ant-menu-submenu-title {
+  color: #94a3b8;
+}
+
+.category-nav-menu .ant-menu-item a,
+.category-nav-menu .ant-menu-submenu-title a,
+.category-nav-menu a {
+  color: #334155 !important;
+  font-weight: 500;
+}
+
+:where(.dark) .category-nav-menu .ant-menu-item a,
+:where(.dark) .category-nav-menu .ant-menu-submenu-title a,
+:where(.dark) .category-nav-menu a {
+  color: #e2e8f0 !important;
+}
+
+.category-nav-menu .ant-menu-item:hover,
+.category-nav-menu .ant-menu-submenu-title:hover,
+.category-nav-menu .ant-menu-item a:hover,
+.category-nav-menu .ant-menu-submenu-title a:hover,
+.category-nav-menu a:hover {
+  color: #1677ff !important;
+}
+
+/* MegaMenu Popover */
+.megamenu-popover .ant-popover-inner,
+.megamenu-popover .ant-popover-inner-content,
+.megamenu-popover-container {
+  padding: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border-radius: 16px;
+}

@@ -1,15 +1,16 @@
 'use client'
 
 import React, { useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { DownloadCloud, Loader2 } from 'lucide-react'
+import { Button, App } from 'antd'
+import { DownloadOutlined, LoadingOutlined } from '@ant-design/icons'
 
 export type DownloadButtonProps = {
   productId: number | string
   productTitle?: string
   buttonText?: string
   variant?: 'default' | 'outline' | 'secondary' | 'ghost' | 'link'
-  size?: 'default' | 'sm' | 'lg' | 'icon'
+  type?: 'primary' | 'default' | 'dashed' | 'link' | 'text'
+  size?: 'small' | 'middle' | 'large' | 'default' | 'sm' | 'lg' | 'icon'
   className?: string
 }
 
@@ -17,17 +18,35 @@ export function DownloadButton({
   productId,
   productTitle,
   buttonText = 'Tải tệp ngay',
-  variant = 'default',
-  size = 'default',
+  variant,
+  type = 'primary',
+  size = 'middle',
   className = '',
 }: DownloadButtonProps) {
+  const { message } = App.useApp()
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+
+  // Map legacy size props if passed
+  const antdSize =
+    size === 'sm' || size === 'small'
+      ? 'small'
+      : size === 'lg' || size === 'large'
+      ? 'large'
+      : 'middle'
+
+  // Map legacy variant props to antd button type
+  const antdType =
+    variant === 'outline'
+      ? 'default'
+      : variant === 'ghost'
+      ? 'dashed'
+      : variant === 'link'
+      ? 'link'
+      : type
 
   const handleDownload = async () => {
     try {
       setLoading(true)
-      setError(null)
 
       const res = await fetch('/api/v1/downloads/token', {
         method: 'POST',
@@ -47,36 +66,29 @@ export function DownloadButton({
 
       const downloadUrl = data.data?.downloadUrl
       if (downloadUrl) {
-        // Trigger browser file download
+        message.success(`Đang bắt đầu tải xuống: ${productTitle || 'tài nguyên'}`)
         window.location.href = downloadUrl
       } else {
         throw new Error('Link tải không tồn tại.')
       }
     } catch (err: any) {
-      setError(err.message || 'Lỗi khi tải file.')
-      alert(err.message || 'Lỗi khi tải file.')
+      const errorMsg = err.message || 'Lỗi khi tải file.'
+      message.error(errorMsg)
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="inline-flex flex-col items-start gap-1">
-      <Button
-        onClick={handleDownload}
-        disabled={loading}
-        variant={variant}
-        size={size}
-        className={`flex items-center gap-2 cursor-pointer ${className}`}
-      >
-        {loading ? (
-          <Loader2 className="w-4 h-4 animate-spin" />
-        ) : (
-          <DownloadCloud className="w-4 h-4" />
-        )}
-        <span>{loading ? 'Đang tạo link tải...' : buttonText}</span>
-      </Button>
-      {error && <span className="text-xs text-destructive">{error}</span>}
-    </div>
+    <Button
+      type={antdType}
+      size={antdSize}
+      icon={loading ? <LoadingOutlined /> : <DownloadOutlined />}
+      loading={loading}
+      onClick={handleDownload}
+      className={className}
+    >
+      <span>{loading ? 'Đang tạo link tải...' : buttonText}</span>
+    </Button>
   )
 }

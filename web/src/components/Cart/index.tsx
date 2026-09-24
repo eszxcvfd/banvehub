@@ -1,4 +1,3 @@
-import React from 'react'
 import type { Product } from '@/payload-types'
 
 export type CartItem = {

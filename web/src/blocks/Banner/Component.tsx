@@ -9,6 +9,11 @@ export const BannerBlock: React.FC<
     className?: string
   }
 > = ({ className, content, style }) => {
+  const contentString = JSON.stringify(content || {})
+  if (contentString.includes('Chào mừng bạn đến với Kiến Tạo Hub')) {
+    return null
+  }
+
   return (
     <div className={cn('mx-auto my-8 w-full', className)}>
       <div

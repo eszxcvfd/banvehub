@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react'
 import Link from 'next/link'
-import { Layout, Row, Col, Typography, Space, Tag, Divider, Input, Button, theme, message } from 'antd'
+import { Layout, Row, Col, Typography, Space, Tag, Divider, Input, Button, theme, App } from 'antd'
 import {
   PhoneOutlined,
   MailOutlined,
@@ -50,6 +50,7 @@ const POLICIES_AND_GUIDES = [
 ]
 
 export function FooterClient({ footer }: FooterClientProps) {
+  const { message } = App.useApp()
   const { token } = theme.useToken()
   const copyrightDate = 2026
   const [newsletterEmail, setNewsletterEmail] = useState('')

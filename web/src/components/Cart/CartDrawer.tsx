@@ -6,7 +6,6 @@ import {
   Drawer,
   Button,
   Empty,
-  List,
   Typography,
   Space,
   Badge,
@@ -139,10 +138,8 @@ export function CartDrawer({ open: controlledOpen, onClose: controlledOnClose }:
           </Empty>
         </div>
       ) : (
-        <List
-          itemLayout="horizontal"
-          dataSource={items}
-          renderItem={(item: any) => {
+        <div className="divide-y divide-neutral-100 dark:divide-neutral-800">
+          {items.map((item: any, idx: number) => {
             const product = (typeof item.product === 'object' ? item.product : null) as Product | null
             if (!product) return null
 
@@ -153,9 +150,9 @@ export function CartDrawer({ open: controlledOpen, onClose: controlledOnClose }:
             const fileFormat = product.technicalSpecs?.fileFormat
 
             return (
-              <List.Item
-                key={item.id}
-                className="!px-0 !py-4 border-b border-neutral-100 dark:border-neutral-800"
+              <div
+                key={item.id || idx}
+                className="py-4 border-b border-neutral-100 dark:border-neutral-800 last:border-none"
               >
                 <div className="flex items-start gap-3 w-full">
                   {/* Product thumbnail */}
@@ -232,10 +229,10 @@ export function CartDrawer({ open: controlledOpen, onClose: controlledOnClose }:
                     </div>
                   </div>
                 </div>
-              </List.Item>
+              </div>
             )
-          }}
-        />
+          })}
+        </div>
       )}
     </Drawer>
   )
